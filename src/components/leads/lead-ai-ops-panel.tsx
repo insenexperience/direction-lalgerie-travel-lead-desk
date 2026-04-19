@@ -28,7 +28,14 @@ function transcriptEntries(raw: unknown): TranscriptEntry[] {
   return out;
 }
 
-export function LeadAiOpsPanel({ lead }: { lead: SupabaseLeadRow }) {
+export function LeadAiOpsPanel({
+  lead,
+  hideAutopilotToggle,
+}: {
+  lead: SupabaseLeadRow;
+  /** Masquer les boutons stop / reprise IA (contrôle dans la bande cockpit). */
+  hideAutopilotToggle?: boolean;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
@@ -60,18 +67,20 @@ export function LeadAiOpsPanel({ lead }: { lead: SupabaseLeadRow }) {
         l&apos;envoi automatique des messages IA.
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          disabled={pending}
-          onClick={() =>
-            run(() => setLeadManualTakeover(lead.id, !lead.manual_takeover))
-          }
-          className="rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-semibold hover:bg-panel"
-        >
-          {lead.manual_takeover ? "Reprendre le fil IA" : "Reprise manuelle (stop IA)"}
-        </button>
-      </div>
+      {hideAutopilotToggle ? null : (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              run(() => setLeadManualTakeover(lead.id, !lead.manual_takeover))
+            }
+            className="rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-semibold hover:bg-panel"
+          >
+            {lead.manual_takeover ? "Reprendre le fil IA" : "Reprise manuelle (stop IA)"}
+          </button>
+        </div>
+      )}
 
       {pendingQual && lead.ai_qualification_payload ? (
         <div className="mt-6 border-t border-border pt-4">

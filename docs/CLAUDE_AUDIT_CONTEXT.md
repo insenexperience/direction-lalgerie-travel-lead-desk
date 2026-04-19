@@ -19,6 +19,7 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | `docs/RLS_PROD_CHECKLIST.md` | Contrôles RLS pré-production. |
 | `docs/DEPLOY_VERCEL.md` | Vercel, variables, Supabase Auth URLs, `db:push`. |
 | `docs/SQUARESPACE_FORM_INTAKE.md` | Formulaire site → `POST /api/intake`. |
+| `docs/PRD_COCKPIT_LEAD_V4.md` | PRD cockpit fiche lead (bande, pipeline, score, encart Dossier). |
 | `docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md` | **Layout, tokens couleur, typo, panneaux, mobile vs desktop** (aperçu visuel pour maquettes / audits UX). |
 
 **Note** : `IMPLEMENTATION_PENDING_V2.md` peut mélanger tâches **déjà faites** et restantes ; pour l’état DB, se fier aux fichiers dans `supabase/migrations/` plutôt qu’aux blocs SQL dupliqués dans ce doc de suivi.
@@ -33,8 +34,11 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | Layout auth dashboard | `src/app/(dashboard)/layout.tsx` (`force-dynamic`) |
 | Nav sidebar | `src/lib/nav-config.tsx` (pas de `/settings` dans la liste) |
 | Liste + Kanban leads | `src/app/(dashboard)/leads/page.tsx`, `src/components/leads-kanban-board.tsx` (étape = `<select>` sur carte) |
-| Détail lead | `src/app/(dashboard)/leads/[id]/page.tsx` |
-| Workflow opérateur | `src/app/(dashboard)/leads/[id]/workflow/page.tsx` |
+| Détail lead | `src/app/(dashboard)/leads/[id]/page.tsx`, `lead-detail-supabase.tsx`, `LeadCockpitShell` + `lead-cockpit-*.tsx` |
+| Workflow opérateur | `src/app/(dashboard)/leads/[id]/workflow/page.tsx` (même cockpit, sans lien fiche) |
+| Mapping SQL lead | `src/lib/supabase-lead-detail-map.ts` |
+| Score lead (calcul pur) | `src/lib/lead-score.ts` |
+| Référence DA-… | `src/lib/lead-reference.ts` ; migration `20260430120000_lead_cockpit_v4.sql` |
 | Server actions | `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts` ; `src/app/(dashboard)/agencies/actions.ts` |
 | IA (prompts, agent) | `src/lib/ai/` (`agent.ts`, `prompts/*.ts`, `types.ts`) |
 | API publique / sans UI | `src/app/api/intake/route.ts`, `src/app/api/whatsapp/webhook/route.ts` |
@@ -266,7 +270,7 @@ Déploiement : `docs/DEPLOY_VERCEL.md`. Au moins un profil `admin` après RLS v1
 
 ### Fichiers utiles dessin / audit visuel
 
-`src/app/layout.tsx`, `src/app/globals.css`, `src/app/(dashboard)/layout.tsx`, `src/components/sidebar-nav.tsx`, `src/components/dashboard-mobile-nav.tsx`, `src/components/brand-logo-block.tsx`, `src/lib/brand-assets.ts`, `src/app/(dashboard)/leads/leads-page-inner.tsx`, `src/components/leads-kanban-board.tsx`, `src/components/leads/lead-supabase-stage-workspace.tsx`.
+`src/app/layout.tsx`, `src/app/globals.css`, `src/app/(dashboard)/layout.tsx`, `src/components/sidebar-nav.tsx`, `src/components/dashboard-mobile-nav.tsx`, `src/components/brand-logo-block.tsx`, `src/lib/brand-assets.ts`, `src/app/(dashboard)/leads/leads-page-inner.tsx`, `src/components/leads-kanban-board.tsx`, `src/components/leads/lead-cockpit-shell.tsx`, `src/components/leads/lead-supabase-stage-workspace.tsx`.
 
 ---
 

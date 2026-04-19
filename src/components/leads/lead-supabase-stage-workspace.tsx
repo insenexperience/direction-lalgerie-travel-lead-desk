@@ -4,7 +4,6 @@ import { AssignPartnerAgencyForm } from "@/components/leads/assign-partner-agenc
 import { AssignReferentForm } from "@/components/leads/assign-referent-form";
 import { LeadCommercialCrmForm } from "@/components/leads/lead-commercial-crm-form";
 import { CoConstructionPanel } from "@/components/leads/co-construction-panel";
-import { LeadPipelineStepNav } from "@/components/leads/lead-pipeline-step-nav";
 import { LeadQuotesPanel } from "@/components/leads/lead-quotes-panel";
 import type {
   CoConstructionProposalRow,
@@ -244,17 +243,6 @@ export function LeadSupabaseStageWorkspace({
         )}
         </div>
       </section>
-
-      {/* Barre pipeline : fixée en bas d’écran (au-dessus du contenu, décalée sous la sidebar en lg). */}
-      <div
-        className="pointer-events-none fixed bottom-0 left-0 right-0 z-50 flex justify-center px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1 sm:px-5 lg:left-[18rem] lg:right-0 lg:px-8"
-        role="region"
-        aria-label="Navigation du pipeline"
-      >
-        <div className="pointer-events-auto w-full rounded-lg border border-border/45 bg-panel/45 px-3 py-2 shadow-[0_-6px_28px_rgba(15,28,36,0.07)] backdrop-blur-md supports-[backdrop-filter]:bg-panel/35 sm:px-4 sm:py-2">
-          <LeadPipelineStepNav leadId={lead.id} status={status} variant="floating" />
-        </div>
-      </div>
     </>
   );
 }

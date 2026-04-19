@@ -1,14 +1,8 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { LeadAiOpsPanel } from "@/components/leads/lead-ai-ops-panel";
-import { LeadDetailDeleteZone } from "@/components/leads/lead-detail-delete-zone";
+import { LeadCockpitShell } from "@/components/leads/lead-cockpit-shell";
 import { LeadFicheModifier } from "@/components/leads/lead-fiche-modifier";
-import { LeadReadOnlySummary } from "@/components/leads/lead-read-only-summary";
-import { LeadSupabasePipeline } from "@/components/leads/lead-supabase-pipeline";
 import { LeadSupabaseStageWorkspace } from "@/components/leads/lead-supabase-stage-workspace";
 import { LeadWorkflowPanel } from "@/components/leads/lead-workflow-panel";
-import { LeadStatusBadge } from "@/components/lead-status-badge";
-import { TopHeader } from "@/components/top-header";
 import type {
   CoConstructionProposalRow,
   LeadQuoteListItem,
@@ -25,6 +19,8 @@ type AgencyOption = { id: string; label: string };
 type LeadDetailSupabaseProps = {
   lead: SupabaseLeadRow;
   currentUserId: string | null;
+  isAdmin: boolean;
+  qualificationValidatorLabel: string | null;
   workflowEmailBanner: string | null;
   referents: ReferentRow[];
   referentLabel: string | null;
@@ -37,6 +33,8 @@ type LeadDetailSupabaseProps = {
 export function LeadDetailSupabase({
   lead,
   currentUserId,
+  isAdmin,
+  qualificationValidatorLabel,
   workflowEmailBanner,
   referents,
   referentLabel,
@@ -46,27 +44,12 @@ export function LeadDetailSupabase({
   leadQuotes,
 }: LeadDetailSupabaseProps) {
   return (
-    <div className="space-y-5 pb-20 sm:space-y-6 sm:pb-24">
-      <TopHeader
-        title={lead.traveler_name}
-        description={lead.trip_summary}
-        actions={<LeadStatusBadge status={lead.status} />}
-      />
-
-      <Link
-        href="/leads"
-        className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        Retour aux leads
-      </Link>
-
-      <LeadSupabasePipeline
-        leadId={lead.id}
-        status={lead.status}
-        referentId={lead.referent_id}
-      />
-
+    <LeadCockpitShell
+      lead={lead}
+      referentLabel={referentLabel}
+      qualificationValidatorLabel={qualificationValidatorLabel}
+      isAdmin={isAdmin}
+    >
       <LeadWorkflowPanel
         leadId={lead.id}
         currentUserId={currentUserId}
@@ -89,7 +72,7 @@ export function LeadDetailSupabase({
       ) : null}
 
       <div className="space-y-5">
-        <LeadAiOpsPanel lead={lead} />
+        <LeadAiOpsPanel lead={lead} hideAutopilotToggle />
         <LeadSupabaseStageWorkspace
           lead={lead}
           referents={referents}
@@ -99,14 +82,8 @@ export function LeadDetailSupabase({
           coProposals={coProposals}
           leadQuotes={leadQuotes}
         />
-        <LeadReadOnlySummary
-          lead={lead}
-          operatorLabel={referentLabel}
-          partnerAgencyLabel={retainedAgencyLabel}
-        />
         <LeadFicheModifier lead={lead} />
-        <LeadDetailDeleteZone leadId={lead.id} travelerName={lead.traveler_name} />
       </div>
-    </div>
+    </LeadCockpitShell>
   );
 }

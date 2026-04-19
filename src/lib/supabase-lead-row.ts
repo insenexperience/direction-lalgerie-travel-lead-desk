@@ -22,6 +22,7 @@ export type SupabaseLeadRow = {
   source: string;
   priority: "normal" | "high";
   updated_at: string;
+  created_at: string;
   crm_conversion_band: CrmConversionBand;
   crm_follow_up_strategy: CrmFollowUpStrategy;
   intake_channel: string | null;
@@ -39,4 +40,10 @@ export type SupabaseLeadRow = {
   workflow_launched_at: string | null;
   workflow_launched_by: string | null;
   workflow_mode: "ai" | "manual" | null;
+  /** Référence cockpit `DA-YYYY-NNNN` (nullable avant backfill / allocation). */
+  reference: string | null;
+  lead_score: number | null;
+  lead_score_override: number | null;
+  lead_score_computed_at: string | null;
+  referent_assigned_at: string | null;
 };

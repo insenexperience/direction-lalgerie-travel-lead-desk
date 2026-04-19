@@ -23,6 +23,7 @@ Ce dossier regroupe une **documentation structurée** (vue d’ensemble + pointe
 | [DEPLOY_VERCEL.md](../DEPLOY_VERCEL.md) | Vercel + Supabase Auth URLs + `db:push`. |
 | [SQUARESPACE_FORM_INTAKE.md](../SQUARESPACE_FORM_INTAKE.md) | Intake web public → `POST /api/intake`. |
 | [UI_LAYOUT_AND_VISUAL.md](./UI_LAYOUT_AND_VISUAL.md) | **Layout, design tokens, panneaux, mobile** — image mentale de l’app. |
+| [PRD_COCKPIT_LEAD_V4.md](../PRD_COCKPIT_LEAD_V4.md) | Cockpit fiche lead (UI v4) + addendum décisions. |
 
 ## Ordre de lecture recommandé
 

@@ -13,7 +13,10 @@ export function LeadFicheModifier({ lead }: LeadFicheModifierProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <section className="rounded-md border border-border bg-panel p-4 sm:p-6">
+    <section
+      id="lead-fiche-edit"
+      className="scroll-mt-24 rounded-md border border-border bg-panel p-4 sm:p-6"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

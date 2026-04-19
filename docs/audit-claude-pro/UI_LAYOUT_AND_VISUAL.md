@@ -128,11 +128,17 @@ Fichier principal UI : [`src/app/(dashboard)/leads/leads-page-inner.tsx`](../../
 
 ---
 
-## 10. Fiche lead (détail)
+## 10. Fiche lead (détail) — cockpit v4
 
-- **Workspace par étape** : [`src/components/leads/lead-supabase-stage-workspace.tsx`](../../src/components/leads/lead-supabase-stage-workspace.tsx) — titre d’étape en `text-steel` uppercase petit ; **titre principal** `font-display text-xl font-semibold`.
-- **Barre pipeline bas d’écran** (navigation entre étapes) : bande fixe commentée dans le fichier — `rounded-lg border border-border/45`, **`backdrop-blur-md`**, `bg-panel/45` (effet verre dépoli), ombre vers le haut discrète.
-- Autres panneaux dédiés : `lead-ai-ops-panel.tsx`, `lead-quotes-panel.tsx`, `co-construction-panel.tsx`, `lead-workflow-panel.tsx`, `lead-fiche-modifier.tsx` — tous sur le même langage bordure + `bg-panel` / `bg-panel-muted`.
+Assemblage : [`LeadCockpitShell`](../../src/components/leads/lead-cockpit-shell.tsx) dans [`lead-detail-supabase.tsx`](../../src/app/(dashboard)/leads/[id]/lead-detail-supabase.tsx) (idem route [`workflow/page.tsx`](../../src/app/(dashboard)/leads/[id]/workflow/page.tsx) avec `showFicheLink={false}`).
+
+1. **Bande** [`lead-cockpit-strip.tsx`](../../src/components/leads/lead-cockpit-strip.tsx) : `bg-panel`, bordure basse, référence monospace, pastille score (barre `--steel`), pastille IA (couleurs hex PRD `#2d7a5f` / `#c47c20`), bouton Suspendre / Reprendre, lien « Tous les leads ».
+2. **Pipeline horizontal** [`lead-cockpit-pipeline.tsx`](../../src/components/leads/lead-cockpit-pipeline.tsx) : `bg-panel-muted`, scroll horizontal, étapes cliquables (terminées + active) alignées sur `LEAD_PIPELINE`.
+3. **Panneaux existants** : `lead-workflow-panel`, `lead-ai-ops-panel` (toggle IA masqué — contrôle dans la bande), puis **workspace par étape** [`lead-supabase-stage-workspace.tsx`](../../src/components/leads/lead-supabase-stage-workspace.tsx) (sans barre flottante interne ; titre `font-display`).
+4. **Fiche complète** : [`lead-fiche-modifier.tsx`](../../src/components/leads/lead-fiche-modifier.tsx) avec ancre `#lead-fiche-edit` (`scroll-mt-24`).
+5. **Encart Dossier** [`lead-cockpit-dossier.tsx`](../../src/components/leads/lead-cockpit-dossier.tsx) : grille 1 / 2 / 4 colonnes, micro-typo specs PRD.
+6. **Bottom nav** [`lead-cockpit-bottom-nav.tsx`](../../src/components/leads/lead-cockpit-bottom-nav.tsx) : fixe `lg:left-[18rem]`, `backdrop-blur`, pills, drawer « Détails », CTA primaire (pipeline suivant).
+7. **Modale score** [`lead-score-modal.tsx`](../../src/components/leads/lead-score-modal.tsx) : overlay centré / bas sur mobile.
 
 ---
 
@@ -180,6 +186,7 @@ flowchart TB
 | Logo + bandeau | `src/components/brand-logo-block.tsx` |
 | Liste / filtres / table | `src/app/(dashboard)/leads/leads-page-inner.tsx` |
 | Kanban | `src/components/leads-kanban-board.tsx` |
-| Fiche lead / étape / pipeline bas | `src/components/leads/lead-supabase-stage-workspace.tsx` |
+| Fiche lead cockpit | `src/components/leads/lead-cockpit-shell.tsx`, `lead-cockpit-*.tsx`, `lead-detail-supabase.tsx` |
+| Workspace étape (contenu métier) | `src/components/leads/lead-supabase-stage-workspace.tsx` |
 
 Pour un **audit accessibilité** ou **contraste WCAG**, recalculer à partir des hex ci-dessus et des textes `text-white/72` sur gradient.

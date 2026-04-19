@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
 import type { AgencyConsultationStatus, LeadStatus } from "@/lib/mock-leads";
+import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import { LEAD_PIPELINE } from "@/lib/mock-leads";
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
 import { buildLeadInsertFromIntake } from "@/lib/intake-lead-insert";
+import { computeScoreFromWeights } from "@/lib/lead-score";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -66,10 +68,14 @@ export async function assignLeadReferent(
     return { ok: false, error: "Lead introuvable." };
   }
 
-  const { error } = await supabase
-    .from("leads")
-    .update({ referent_id: referentId })
-    .eq("id", leadId);
+  const patch: Record<string, unknown> = { referent_id: referentId };
+  if (referentId !== null) {
+    patch.referent_assigned_at = new Date().toISOString();
+  } else {
+    patch.referent_assigned_at = null;
+  }
+
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
 
   if (error) {
     return { ok: false, error: error.message };
@@ -113,7 +119,10 @@ export async function claimLead(leadId: string): Promise<ClaimLeadResult> {
 
   const { error } = await supabase
     .from("leads")
-    .update({ referent_id: user.id })
+    .update({
+      referent_id: user.id,
+      referent_assigned_at: new Date().toISOString(),
+    })
     .eq("id", leadId)
     .is("referent_id", null);
 
@@ -124,6 +133,7 @@ export async function claimLead(leadId: string): Promise<ClaimLeadResult> {
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
   revalidatePath("/dashboard");
+  revalidatePath(`/leads/${leadId}/workflow`);
   return { ok: true };
 }
 
@@ -426,6 +436,7 @@ export async function updateLeadStatus(
   }
 
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
   return { ok: true };
@@ -544,6 +555,7 @@ export async function moveLeadPipelineStep(
   }
 
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
   return { ok: true };
@@ -562,6 +574,19 @@ export async function deleteLead(leadId: string): Promise<ActionResult> {
     return { ok: false, error: "Non authentifié." };
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.role !== "admin") {
+    return {
+      ok: false,
+      error: "Seuls les administrateurs peuvent supprimer un lead.",
+    };
+  }
+
   const { error } = await supabase.from("leads").delete().eq("id", leadId);
 
   if (error) {
@@ -571,6 +596,149 @@ export async function deleteLead(leadId: string): Promise<ActionResult> {
   revalidatePath("/leads");
   revalidatePath("/metrics");
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
+  return { ok: true };
+}
+
+async function assertLeadAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<ActionResult | null> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profile?.role !== "admin") {
+    return { ok: false, error: "Action réservée aux administrateurs." };
+  }
+  return null;
+}
+
+export async function computeLeadScore(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { data: row, error: fetchError } = await supabase
+    .from("leads")
+    .select(
+      "budget, trip_dates, travelers, status, conversation_transcript, ai_qualification_payload, ai_qualification_confidence, scoring_weights",
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchError || !row) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  const score = computeScoreFromWeights(row as unknown as SupabaseLeadRow);
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      lead_score: score,
+      lead_score_computed_at: new Date().toISOString(),
+    })
+    .eq("id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+export async function recalculateLeadScoreAfterOverrideClear(
+  leadId: string,
+): Promise<ActionResult> {
+  const clear = await overrideLeadScore(leadId, null);
+  if (!clear.ok) return clear;
+  return computeLeadScore(leadId);
+}
+
+export async function overrideLeadScore(
+  leadId: string,
+  value: number | null,
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+  if (value !== null && (!Number.isFinite(value) || value < 0 || value > 100)) {
+    return { ok: false, error: "Score entre 0 et 100." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ lead_score_override: value })
+    .eq("id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+export async function updateLeadScoringWeights(
+  leadId: string,
+  weightsJson: string,
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const denied = await assertLeadAdmin(supabase, user.id);
+  if (denied) return denied;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(weightsJson) as unknown;
+  } catch {
+    return { ok: false, error: "JSON invalide." };
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ scoring_weights: parsed })
+    .eq("id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
   return { ok: true };
 }
 

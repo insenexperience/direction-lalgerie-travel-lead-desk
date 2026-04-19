@@ -159,6 +159,21 @@ export async function setLeadManualTakeover(
     return { ok: false, error: "Non authentifié." };
   }
 
+  const { data: prev, error: prevErr } = await supabase
+    .from("leads")
+    .select("manual_takeover")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (prevErr || !prev) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  const previous = Boolean(prev.manual_takeover);
+  if (previous === value) {
+    return { ok: true };
+  }
+
   const { error } = await supabase
     .from("leads")
     .update({ manual_takeover: value })
@@ -167,8 +182,46 @@ export async function setLeadManualTakeover(
   if (error) {
     return { ok: false, error: error.message };
   }
+
+  await logActivity(
+    supabase,
+    leadId,
+    user.id,
+    "ai_autopilot_toggle",
+    value
+      ? "Reprise manuelle activée (IA suspendue)."
+      : "IA automatique réactivée.",
+  );
+
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
   return { ok: true };
+}
+
+/** Bascule `manual_takeover` (cockpit + panneau IA). */
+export async function toggleAiAutopilot(leadId: string): Promise<AiActionResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Lead invalide." };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { data: row, error } = await supabase
+    .from("leads")
+    .select("manual_takeover")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error || !row) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  return setLeadManualTakeover(leadId, !Boolean(row.manual_takeover));
 }
 
 export async function validateLeadQualification(

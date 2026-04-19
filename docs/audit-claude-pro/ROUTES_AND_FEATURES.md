@@ -18,7 +18,7 @@ Entrées de [`src/lib/nav-config.tsx`](../../src/lib/nav-config.tsx) (`dashboard
 | Chemin | Rôle |
 |--------|------|
 | `/settings` | Réglages — page présente, **non listée** dans `dashboardNavItems`. |
-| `/leads/[id]/workflow` | Parcours opérateur / lancement workflow (schéma v3 it. 1). |
+| `/leads/[id]/workflow` | Lancement workflow manuel (référent) — **même bandeau cockpit** que la fiche (`LeadCockpitShell`), sans lien « Fiche complète ». |
 
 ## Pages App Router (fichiers `page.tsx`)
 
@@ -38,6 +38,10 @@ Entrées de [`src/lib/nav-config.tsx`](../../src/lib/nav-config.tsx) (`dashboard
 
 Le segment `(dashboard)` partage [`layout.tsx`](../../src/app/(dashboard)/layout.tsx) (auth + shell UI).
 
+### Fiche lead — cockpit v4 (PRD)
+
+Sur `/leads/[id]` et `/leads/[id]/workflow`, la colonne contenu utilise [`LeadCockpitShell`](../../src/components/leads/lead-cockpit-shell.tsx) : bande (référence, score, IA, suspendre), pipeline horizontal, zone étape ([`LeadSupabaseStageWorkspace`](../../src/components/leads/lead-supabase-stage-workspace.tsx)), encart Dossier ([`LeadCockpitDossier`](../../src/components/leads/lead-cockpit-dossier.tsx)), bottom nav + drawer ([`LeadCockpitBottomNav`](../../src/components/leads/lead-cockpit-bottom-nav.tsx)). Modale score : [`LeadScoreModal`](../../src/components/leads/lead-score-modal.tsx). Mapping SQL partagé : [`src/lib/supabase-lead-detail-map.ts`](../../src/lib/supabase-lead-detail-map.ts). Migration : `supabase/migrations/20260430120000_lead_cockpit_v4.sql`.
+
 ## API Routes (`route.tsx`)
 
 | Endpoint | Fichier |
@@ -50,10 +54,10 @@ Le segment `(dashboard)` partage [`layout.tsx`](../../src/app/(dashboard)/layout
 
 | Fichier | Domaine |
 |---------|---------|
-| [`src/app/(dashboard)/leads/actions.ts`](../../src/app/(dashboard)/leads/actions.ts) | Leads (CRUD / statut / assignation, etc.) |
+| [`src/app/(dashboard)/leads/actions.ts`](../../src/app/(dashboard)/leads/actions.ts) | Leads (CRUD / statut / assignation, `computeLeadScore`, `overrideLeadScore`, `recalculateLeadScoreAfterOverrideClear`, `updateLeadScoringWeights`, `deleteLead` admin explicite, etc.) |
 | [`src/app/(dashboard)/leads/quote-actions.ts`](../../src/app/(dashboard)/leads/quote-actions.ts) | Devis liés aux leads |
 | [`src/app/(dashboard)/leads/co-construction-actions.ts`](../../src/app/(dashboard)/leads/co-construction-actions.ts) | Co-construction |
-| [`src/app/(dashboard)/leads/ai-actions.ts`](../../src/app/(dashboard)/leads/ai-actions.ts) | Actions serveur liées à l’IA (qualification, propositions, etc.). |
+| [`src/app/(dashboard)/leads/ai-actions.ts`](../../src/app/(dashboard)/leads/ai-actions.ts) | IA (qualification, propositions, `setLeadManualTakeover`, `toggleAiAutopilot`, journal `activities` sur bascule autopilot). |
 | [`src/app/(dashboard)/leads/workflow-actions.ts`](../../src/app/(dashboard)/leads/workflow-actions.ts) | Lancement / étapes workflow opérateur (v3). |
 | [`src/app/(dashboard)/agencies/actions.ts`](../../src/app/(dashboard)/agencies/actions.ts) | Agences partenaires |
 
@@ -61,6 +65,6 @@ Pour le détail des opérations (tables touchées, validations), lire le corps d
 
 ## Fonctionnalités à cartographier lors d’un audit
 
-- **Pipeline lead** : Kanban (changement d’étape par `<select>` sur carte), détail lead, page workflow, qualification / validation IA, consultations agences, co-construction, devis, PDF.
+- **Pipeline lead** : Kanban (changement d’étape par `<select>` sur carte), détail lead (cockpit bande + pipeline horizontal + bottom nav), page workflow (même cockpit), qualification / validation IA, consultations agences, co-construction, devis, PDF.
 - **Métriques** : agrégations côté client ou serveur (à vérifier dans les composants `*-page-inner.tsx` / libs associées).
 - **IA** : prompts et orchestration dans `src/lib/ai/` ; traçabilité erreurs / coûts à auditer si besoin.
