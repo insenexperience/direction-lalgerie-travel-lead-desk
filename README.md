@@ -2,7 +2,7 @@
 
 Application interne Next.js + Supabase (auth, RLS, leads, agences, devis). **Vision produit v2** : [`docs/PRD_TRAVEL_LEAD_DESK_V2.md`](docs/PRD_TRAVEL_LEAD_DESK_V2.md). Détails complémentaires : [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md).
 
-Paquet de contexte pour audit / brainstorming (stack, archi, données, prompts) : **[docs/audit-claude-pro/README.md](docs/audit-claude-pro/README.md)** — fichier unique pour outils sans sous-dossiers Git : **[docs/CLAUDE_AUDIT_CONTEXT.md](docs/CLAUDE_AUDIT_CONTEXT.md)**.
+Paquet de contexte pour audit / brainstorming (stack, archi, **UI / design**, données, prompts) : **[docs/audit-claude-pro/README.md](docs/audit-claude-pro/README.md)** — fichier unique pour outils sans sous-dossiers Git : **[docs/CLAUDE_AUDIT_CONTEXT.md](docs/CLAUDE_AUDIT_CONTEXT.md)** — détail visuel (tokens, layout, panneaux) : **[docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md](docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md)**.
 
 ## Déploiement (GitHub + Vercel)
 

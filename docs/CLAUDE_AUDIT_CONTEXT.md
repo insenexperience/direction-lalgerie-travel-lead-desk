@@ -19,6 +19,7 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | `docs/RLS_PROD_CHECKLIST.md` | Contrôles RLS pré-production. |
 | `docs/DEPLOY_VERCEL.md` | Vercel, variables, Supabase Auth URLs, `db:push`. |
 | `docs/SQUARESPACE_FORM_INTAKE.md` | Formulaire site → `POST /api/intake`. |
+| `docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md` | **Layout, tokens couleur, typo, panneaux, mobile vs desktop** (aperçu visuel pour maquettes / audits UX). |
 
 **Note** : `IMPLEMENTATION_PENDING_V2.md` peut mélanger tâches **déjà faites** et restantes ; pour l’état DB, se fier aux fichiers dans `supabase/migrations/` plutôt qu’aux blocs SQL dupliqués dans ce doc de suivi.
 
@@ -40,13 +41,15 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | PDF devis | `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` |
 | Contexte client leads | `src/context/leads-demo-context.tsx` |
 | Migrations DB | `supabase/migrations/*.sql` |
+| Design system (tokens CSS) | `src/app/globals.css` |
+| UI layout détaillé (même contenu que §7.5 en long) | `docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md` |
 
 ---
 
 ## 1. Introduction (usage Claude)
 
 - Documentation pour auditer ou brainstormer **Direction l’Algérie — Travel Lead Desk** avec un LLM.
-- Ordre logique ci-dessous : stack → architecture → données → produit → routes → ops → prompts.
+- Ordre logique ci-dessous : stack → architecture → **UI / design** (§7.5) → données → produit → routes → ops → prompts.
 - Vision produit v2 : `docs/PRD_TRAVEL_LEAD_DESK_V2.md` ; spec détaillée : `docs/PRODUCT_SPEC.md` ; écart code / schéma : `docs/IMPLEMENTATION_PENDING_V2.md`.
 
 ---
@@ -221,6 +224,52 @@ Déploiement : `docs/DEPLOY_VERCEL.md`. Au moins un profil `admin` après RLS v1
 
 ---
 
+## 7.5 UI, layout et rendu visuel (aperçu pour maquettes mentales)
+
+**Source détaillée** (identique, plus schéma mermaid + checklist fichiers) : `docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md`.
+
+### Direction artistique
+
+- **SaaS clair** : fond `#fafafa`, cartes blanches, bordures `#e6ebef`, texte secondaire gris-bleu.
+- **Accent marque** : `#182b35` (*steel*) — nav active, titres d’étape, focus anneau `ring-steel/25`.
+- **Bandeaux sombres** : gradient `#0f1c24` → `#182b35` pour le **bloc logo** (sidebar + drawer) et le **header mobile** ; texte blanc / blanc 72–78 % opacité pour sous-titres.
+- **Typo** : **Poppins** (corps, UI) ; **Cormorant Garamond** (`font-display`) pour titres éditoriaux sur la fiche lead.
+
+### Tokens (`src/app/globals.css`)
+
+| Token | Hex / rôle |
+|-------|----------------|
+| `--background` | `#fafafa` |
+| `--foreground` | `#0b0c0d` |
+| `--panel` | `#ffffff` (surfaces principales) |
+| `--panel-muted` | `#f4f7fa` (inputs, thead, fonds secondaires) |
+| `--border` | `#e6ebef` |
+| `--steel` | `#182b35` |
+| `--steel-ink` | `#f3f7fa` (texte sur fond steel) |
+| `--muted-foreground` | `#60727c` |
+
+### Coque `lg+` (`src/app/(dashboard)/layout.tsx`)
+
+- Grille `lg:grid-cols-[18rem_minmax(0,1fr)]` (18rem ≈ `w-72` du sidebar).
+- **Sidebar** (`SidebarNav`) : sticky, scroll vertical, `bg-panel`, liens `rounded-none` ; actif = fond + bordure `#182b35`, texte/icône `#f3f7fa` ; inactif = `bg-panel-muted` + hover bordure.
+- **Colonne droite** : header **blanc** `border-neutral-200`, email + déconnexion ; `main` paddings responsive `px-4` → `lg:px-8`.
+- **Mobile** : `DashboardMobileNav` — barre gradient + menu tiroir ; sidebar desktop `hidden` sous `lg`.
+
+### Panneaux métier (vocabulaire Tailwind récurrent)
+
+- Bloc standard : `rounded-md border border-border bg-panel` + padding `p-4 sm:p-6`.
+- Sous-zones atténuées : `bg-panel-muted/30` … `/80`, parfois `border-dashed` pour vide.
+- Fiche lead « étape active » : bordure `border-[#182b35]/25` sur la section workspace (`lead-supabase-stage-workspace.tsx`).
+- **Pipeline bas d’écran** (navigation étapes) : barre arrondie, `backdrop-blur`, `bg-panel/45`, ombre légère vers le haut.
+- **Leads** : toggle liste/Kanban dans `rounded-md border bg-panel-muted p-0.5` ; table dans `section` bordée `bg-panel` ; Kanban colonnes étroites, cartes `shadow-sm`, **`<select>`** d’étape sur chaque carte.
+- **Login** : page centrée sur `bg-neutral-100` (distinct du token page app).
+
+### Fichiers utiles dessin / audit visuel
+
+`src/app/layout.tsx`, `src/app/globals.css`, `src/app/(dashboard)/layout.tsx`, `src/components/sidebar-nav.tsx`, `src/components/dashboard-mobile-nav.tsx`, `src/components/brand-logo-block.tsx`, `src/lib/brand-assets.ts`, `src/app/(dashboard)/leads/leads-page-inner.tsx`, `src/components/leads-kanban-board.tsx`, `src/components/leads/lead-supabase-stage-workspace.tsx`.
+
+---
+
 ## 8. Modèles de prompts (à copier-coller)
 
 ### 8.1 Audit sécurité (RLS + API)
@@ -265,3 +314,13 @@ Contexte : `src/lib/ai/`, champs `ai_*` et `qualification_validation_*` sur `lea
 2. Risques d’injection ou de fuite PII dans les prompts ; journalisation minimale recommandée.
 
 Livrable : liste de garde-fous + tests manuels suggérés.
+
+### 8.7 Cohérence UI & accessibilité (optionnel)
+
+Contexte : section **7.5** + `docs/audit-claude-pro/UI_LAYOUT_AND_VISUAL.md` + `src/app/globals.css`.
+
+1. Contrastes (muted, blanc /72 sur gradient).
+2. Cohérence header blanc (desktop) vs barre sombre (mobile).
+3. Focus / `aria` sur zones interactives (Kanban, pipeline bas).
+
+Livrable : liste courte priorisée.

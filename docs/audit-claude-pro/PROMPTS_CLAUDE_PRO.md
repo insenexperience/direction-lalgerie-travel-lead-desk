@@ -56,3 +56,15 @@ Demande : proposer 5 à 10 améliorations produit **compatibles avec la règle �
 À partir des migrations SQL, suggérer : index manquants, contraintes d’intégrité, idempotence des imports intake (`submission_id`), évolution propre des enums (CRM, workflow devis).
 
 Livrable : backlog technique priorisé.
+
+---
+
+## 6. Cohérence UI & accessibilité (optionnel)
+
+Contexte : [UI_LAYOUT_AND_VISUAL.md](./UI_LAYOUT_AND_VISUAL.md), `src/app/globals.css`.
+
+1. Vérifier cohérence des contrastes (texte sur `bg-panel-muted`, texte blanc semi-transparent sur gradient logo).
+2. Lister les incohérences entre header dashboard blanc vs header mobile sombre (volontaire ou risque utilisateur).
+3. Suggestions d’amélioration accessibilité (focus visible, `aria` sur Kanban / pipeline) sans refonte lourde.
+
+Livrable : liste courte priorisée.

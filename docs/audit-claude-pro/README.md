@@ -22,17 +22,19 @@ Ce dossier regroupe une **documentation structurée** (vue d’ensemble + pointe
 | [RLS_PROD_CHECKLIST.md](../RLS_PROD_CHECKLIST.md) | Contrôles RLS avant prod. |
 | [DEPLOY_VERCEL.md](../DEPLOY_VERCEL.md) | Vercel + Supabase Auth URLs + `db:push`. |
 | [SQUARESPACE_FORM_INTAKE.md](../SQUARESPACE_FORM_INTAKE.md) | Intake web public → `POST /api/intake`. |
+| [UI_LAYOUT_AND_VISUAL.md](./UI_LAYOUT_AND_VISUAL.md) | **Layout, design tokens, panneaux, mobile** — image mentale de l’app. |
 
 ## Ordre de lecture recommandé
 
 0. [PRD_TRAVEL_LEAD_DESK_V2.md](../PRD_TRAVEL_LEAD_DESK_V2.md) — vision produit v2 (IA, WhatsApp, supervisor-in-the-loop).
 1. [STACK.md](./STACK.md) — versions et dépendances.
 2. [ARCHITECTURE.md](./ARCHITECTURE.md) — auth, App Router, flux données, IA côté serveur.
-3. [DATA_SUPABASE.md](./DATA_SUPABASE.md) — modèle Postgres / migrations (ordre complet).
-4. [PRODUCT_RULES_SUMMARY.md](./PRODUCT_RULES_SUMMARY.md) — règles métier (résumé).
-5. [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md) — écrans, API, server actions.
-6. [OPS_ENV.md](./OPS_ENV.md) — env, déploiement.
-7. [PROMPTS_CLAUDE_PRO.md](./PROMPTS_CLAUDE_PRO.md) — modèles de prompts réutilisables.
+3. [UI_LAYOUT_AND_VISUAL.md](./UI_LAYOUT_AND_VISUAL.md) — coque dashboard, couleurs, typo, patterns de panneaux, fichiers UI clés.
+4. [DATA_SUPABASE.md](./DATA_SUPABASE.md) — modèle Postgres / migrations (ordre complet).
+5. [PRODUCT_RULES_SUMMARY.md](./PRODUCT_RULES_SUMMARY.md) — règles métier (résumé).
+6. [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md) — écrans, API, server actions.
+7. [OPS_ENV.md](./OPS_ENV.md) — env, déploiement.
+8. [PROMPTS_CLAUDE_PRO.md](./PROMPTS_CLAUDE_PRO.md) — modèles de prompts réutilisables.
 
 ## Comment l’utiliser dans Claude Pro
 

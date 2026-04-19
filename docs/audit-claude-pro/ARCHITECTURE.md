@@ -55,3 +55,7 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 - **Données leads** : agences et leads passent par Supabase (pages server + actions) ; le contexte leads sert aux filtres / mutations optimistes côté client.
 - **IA** : tout appel modèle doit rester **serveur** (server actions ou routes API) ; ne jamais exposer `OPENAI_API_KEY` en `NEXT_PUBLIC_*`.
 - **Intake / WhatsApp** : utilisent `SUPABASE_SERVICE_ROLE_KEY` — surface d’attaque hors session utilisateur ; valider CORS, secrets, et idempotence (`submission_id`).
+
+## Rendu visuel et layout
+
+Référence dédiée (tokens CSS, sidebar, mobile, panneaux métier) : [UI_LAYOUT_AND_VISUAL.md](./UI_LAYOUT_AND_VISUAL.md).
