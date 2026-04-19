@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "serve": "next build --webpack && next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:link": "npx supabase@latest link",
+    "db:push": "npx supabase@latest db push"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
