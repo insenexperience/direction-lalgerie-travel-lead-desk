@@ -6,6 +6,7 @@ import {
   corsHeaders,
   intakeStr,
   resolveCors,
+  resolveFullNameFromIntakeBody,
   verifyIntakeSharedSecret,
 } from "@/lib/intake-lead-insert";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const fullName = intakeStr(body.full_name);
+  const fullName = resolveFullNameFromIntakeBody(body);
   const email = intakeStr(body.email);
   const submissionId = intakeStr(body.submission_id);
 

@@ -15,6 +15,7 @@ Variables d’environnement : copier `.env.example` vers `.env.local` ; sur Verc
 - **Route** : `POST /api/intake` — [`src/app/api/intake/route.ts`](src/app/api/intake/route.ts) (JSON, idempotence par `submission_id`, client **service_role**).
 - **CORS** : en prod, définir `ALLOWED_ORIGIN` sur l’URL du site (ex. `https://www.direction-lalgerie.com`).
 - **Optionnel** : `INTAKE_SHARED_SECRET` + en-tête `Authorization: Bearer …` ou `X-Intake-Secret`.
+- **Formulaire Squarespace** (alerte validation alors que tout est rempli) : [docs/SQUARESPACE_FORM_INTAKE.md](docs/SQUARESPACE_FORM_INTAKE.md).
 
 ---
 

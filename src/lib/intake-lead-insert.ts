@@ -7,6 +7,19 @@ export function intakeStr(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+/**
+ * Nom affiché / voyageur : `full_name` si présent, sinon « prénom + nom »
+ * (`first`/`last` sur le formulaire site, aligné avec le modal dashboard).
+ */
+export function resolveFullNameFromIntakeBody(body: Record<string, unknown>): string {
+  const single = intakeStr(body.full_name);
+  if (single) return single;
+  const first = intakeStr(body.first) || intakeStr(body.prenom) || intakeStr(body.given_name);
+  const last =
+    intakeStr(body.last) || intakeStr(body.nom) || intakeStr(body.family_name) || intakeStr(body.surname);
+  return [first, last].filter(Boolean).join(" ").trim();
+}
+
 /** Normalise le body JSON (champs optionnels → chaînes, dates flex, etc.). */
 export function buildIntakeRecordFromBody(body: Record<string, unknown>): Record<string, unknown> {
   const flexPeriod = intakeStr(body.flex_period);
@@ -17,7 +30,7 @@ export function buildIntakeRecordFromBody(body: Record<string, unknown>): Record
   const notesLong = intakeStr(body.notes_longues);
 
   return {
-    full_name: intakeStr(body.full_name),
+    full_name: resolveFullNameFromIntakeBody(body),
     email: intakeStr(body.email),
     phone: intakeStr(body.phone),
     follow_prefs: intakeStr(body.follow_prefs),
