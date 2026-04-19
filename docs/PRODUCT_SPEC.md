@@ -86,6 +86,9 @@ Toujours :
   * Auth
   * RLS
 
+Schéma SQL versionné : `supabase/migrations/` (appliquer sur le projet Supabase : SQL Editor ou CLI `supabase db push`).  
+Variables d’environnement : voir `.env.example` → copie locale `.env.local` avec `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+
 ## Dev
 
 * Cursor
@@ -126,7 +129,19 @@ Toujours :
 
 * login
 * gestion session
-* rôles (admin, operator, agency)
+* rôles applicatifs (voir ci-dessous)
+
+### Rôles (vue métier)
+
+* **Référent lead** (nom produit recommandé ; synonyme acceptable : *opérateur lead desk*) : personne Direction l’Algérie qui pilote un dossier de la qualification jusqu’au devis voyageur. Accès base agences, lancement de consultations, comparaison des réponses, production du devis DA.
+* **Admin** (ou rôle équivalent) : paramétrage, visibilité élargie, gestion utilisateurs — périmètre exact à cadrer avec les besoins internes.
+* **Agence** (si un jour accès outil limité côté partenaire) : hors scope initial si tout reste interne ; à trancher plus tard.
+
+Les **deux référents lead** opérationnels au lancement (ex. Houari, Mehdi) partagent **le même processus métier** et les **mêmes écrans** ; seule l’**assignation du dossier** les distingue (voir §7.14).
+
+### Autorisations (à détailler en itération ultérieure)
+
+Le produit prévoit **deux niveaux d’autorisation distincts** (matrice droits / périmètres : lecture seule vs action, vue « mes leads » vs « tous les leads », administration, etc.). **Le détail exact (noms des rôles techniques, RLS, policies) sera formalisé dans une passe dédiée** ; cette spec en pose déjà les fondations métier (référent vs reste).
 
 ---
 
@@ -151,7 +166,7 @@ Toujours :
 
 * vue complète d’un lead
 * qualification
-* assignation
+* assignation **référent lead** (tour à tour ou manuelle) et suivi des **consultations agences**
 * timeline
 
 ---
@@ -185,23 +200,24 @@ Toujours :
 
 ## 7.8 Agency Consultations
 
-* sollicitation agence
-* suivi réponse
-* notes internes
+* sollicitation d’**une ou plusieurs** agences sur un même lead (mise en concurrence interne)
+* suivi par agence : envoyé, relance, refus, proposition reçue
+* notes internes (jamais visibles voyageur)
+* le référent choisit la **meilleure offre** au regard du besoin (prix, couverture, délais, conditions) — vocabulaire métier : sélection de l’**agence retenue** (à ne pas confondre avec le « référent » côté DA)
 
 ---
 
 ## 7.9 Quotes
 
-* devis
-* versions
-* statut
-* version voyageur
+* **devis agence** : propositions issues des consultations (données **internes** DA)
+* **devis Direction l’Algérie** : document **reformulé / consolidé** pour le voyageur, après arbitrage sur les offres agences
+* versions, statuts (brouillon → prêt → envoyé, etc.)
+* **version voyageur** : seule couche exposée au client final
 
 ⚠️ IMPORTANT :
 
-* agency_notes = interne
-* traveler_version = visible client
+* agency_notes / chiffrage brut agence = interne
+* traveler_version = visible client ; toujours portée par la DA
 
 ---
 
@@ -235,31 +251,45 @@ Toujours :
 
 ---
 
+## 7.14 Référents lead et répartition des dossiers
+
+* Un lead a **un référent lead assigné** à un instant T (responsable du traitement côté DA).
+* **Répartition tour à tour** entre les référents opérationnels (ex. Houari, Mehdi) : à l’entrée du lead dans le flux concerné (ex. création ou règle métier définie), assignation selon une logique **round-robin** pour équilibrer la charge.
+* Les **exceptions** (réassignation manuelle, absence, escalade) sont possibles ; elles doivent rester **traçables** (timeline / activités).
+* Chaque référent **s’appuie sur la base agences** pour cibler les partenaires et lancer les consultations ; pas de parcours différent entre référents, seulement des **droits d’accès** homogènes pour ce rôle (hors matrice admin détaillée plus tard).
+
+---
+
 # 8. Modèle de données (résumé)
 
 Tables principales :
 
-* leads
+* leads (champs typiques : **référent assigné**, statut pipeline, liens vers consultations / devis)
 * lead_snapshots
 * agencies
-* users
-* quotes
+* users (profil + **rôle** ; lien auth Supabase)
+* quotes (discriminer si besoin : **origine agence** vs **devis DA voyageur** — modèle exact en schéma SQL lors de l’implémentation)
 * activities
 * tasks
-* consultations
+* consultations (une ligne par couple lead × agence sollicitée, avec statut de suivi)
+
+Données de configuration possibles pour le round-robin : compteur global ou file d’assignation — **à figer au moment du schéma Supabase**.
 
 ---
 
 # 9. Workflow métier
 
-## Lead
+## Lead (vue référent + agences)
 
+* **Entrée du lead** → assignation **référent** (tour à tour entre les opérateurs concernés)
 * Nouveau
 * Qualification
 * Affinage
-* Assignation agence
-* Co-construction
-* Devis
+* **Consultations** : sollicitation d’**une ou plusieurs** agences depuis la base partenaires
+* Réception des propositions / devis agence (interne)
+* **Arbitrage** : choix de la **meilleure offre** (agence retenue)
+* **Devis Direction l’Algérie** pour le voyageur (reformulation / packaging DA)
+* Co-construction (le cas échéant)
 * Négociation
 * Gagné / Perdu
 
@@ -271,6 +301,8 @@ Tables principales :
 * Envoyé
 * Accepté / Refusé
 
+*(Les statuts peuvent distinguer une chaîne « devis agence » interne et un « devis DA voyageur » si le produit le exige.)*
+
 ---
 
 # 10. Règles métier critiques
@@ -280,6 +312,8 @@ Tables principales :
 * DA reformule toujours avant envoi
 * le besoin évolue dans le temps
 * tout doit être traçable
+* **référents lead** : même processus pour tous les opérateurs du rôle ; charge équilibrée par **round-robin** sauf réassignation explicite
+* **deux niveaux d’autorisation** à détailler ultérieurement (voir §7.1) — implémentation Auth / RLS en conséquence
 
 ---
 
@@ -288,12 +322,12 @@ Tables principales :
 ## Étape 1
 
 * setup projet
-* auth
+* auth (y compris socle des **deux niveaux d’autorisation** — détail des policies en itération dédiée)
 * layout
 
 ## Étape 2
 
-* leads (table + UI)
+* leads (table + UI) + **assignation référent** (round-robin) dès que l’auth utilisateur est disponible
 
 ## Étape 3
 

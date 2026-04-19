@@ -1,4 +1,14 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Direction l’Algérie — Travel Lead Desk
+
+Application interne Next.js + Supabase (auth, RLS, leads, agences, devis). Spécification produit : `docs/PRODUCT_SPEC.md`.
+
+## Déploiement (GitHub + Vercel)
+
+Procédure détaillée : **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** (dépôt GitHub, variables Vercel, redirections Supabase, domaine).
+
+Variables d’environnement : copier `.env.example` vers `.env.local` en local ; sur Vercel, définir les mêmes clés `NEXT_PUBLIC_*` (voir fichier d’exemple).
+
+---
 
 ## Getting Started
 
@@ -31,6 +41,4 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Voir **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)**. Documentation générique Next.js : [Deploying](https://nextjs.org/docs/app/building-your-application/deploying).
