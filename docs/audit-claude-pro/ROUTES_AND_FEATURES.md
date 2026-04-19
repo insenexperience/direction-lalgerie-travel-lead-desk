@@ -12,7 +12,7 @@ Définie dans [`src/lib/nav-config.tsx`](../../src/lib/nav-config.tsx) :
 | `/agencies` | Agences |
 | `/quotes` | Devis |
 | `/users` | Équipe |
-| `/settings` | Réglages |
+| `/settings` | Réglages *(retiré de la sidebar ; route encore présente)* |
 
 ## Pages App Router (fichiers `page.tsx`)
 
@@ -35,6 +35,8 @@ Le segment `(dashboard)` partage [`layout.tsx`](../../src/app/(dashboard)/layout
 
 | Endpoint | Fichier |
 |----------|---------|
+| `POST` / `OPTIONS` (intake formulaire site, CORS) | [`src/app/api/intake/route.ts`](../../src/app/api/intake/route.ts) |
+| `GET` (challenge) / `POST` (webhook) WhatsApp | [`src/app/api/whatsapp/webhook/route.ts`](../../src/app/api/whatsapp/webhook/route.ts) |
 | `GET` (PDF devis) | [`src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx`](../../src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx) |
 
 ## Server Actions (`"use server"`)

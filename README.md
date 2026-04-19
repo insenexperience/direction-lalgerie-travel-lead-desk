@@ -8,39 +8,25 @@ Paquet de contexte pour audit / brainstorming (stack, archi, données, prompts) 
 
 Procédure détaillée : **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** (dépôt GitHub, variables Vercel, redirections Supabase, domaine).
 
-Variables d’environnement : copier `.env.example` vers `.env.local` en local ; sur Vercel, définir les mêmes clés `NEXT_PUBLIC_*` (voir fichier d’exemple).
+Variables d’environnement : copier `.env.example` vers `.env.local` ; sur Vercel, reprendre les clés listées dans `.env.example` (dont `SUPABASE_SERVICE_ROLE_KEY`, `ALLOWED_ORIGIN`, optionnel `INTAKE_SHARED_SECRET` pour l’intake public).
+
+### API publique — intake formulaire (Squarespace)
+
+- **Route** : `POST /api/intake` — [`src/app/api/intake/route.ts`](src/app/api/intake/route.ts) (JSON, idempotence par `submission_id`, client **service_role**).
+- **CORS** : en prod, définir `ALLOWED_ORIGIN` sur l’URL du site (ex. `https://www.direction-lalgerie.com`).
+- **Optionnel** : `INTAKE_SHARED_SECRET` + en-tête `Authorization: Bearer …` ou `X-Intake-Secret`.
 
 ---
 
-## Getting Started
-
-First, run the development server:
+## Développement local
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ouvrir [http://localhost:3000](http://localhost:3000) (redirection login ou dashboard selon la session).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Déploiement
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-Voir **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)**. Documentation générique Next.js : [Deploying](https://nextjs.org/docs/app/building-your-application/deploying).
+Voir **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** et la doc Next.js [Deploying](https://nextjs.org/docs/app/building-your-application/deploying).

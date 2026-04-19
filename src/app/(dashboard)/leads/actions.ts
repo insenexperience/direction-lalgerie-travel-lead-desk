@@ -7,6 +7,7 @@ import type { AgencyConsultationStatus, LeadStatus } from "@/lib/mock-leads";
 import { LEAD_PIPELINE } from "@/lib/mock-leads";
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
 import { triggerQualificationConversation } from "@/app/(dashboard)/leads/ai-actions";
+import { buildLeadInsertFromIntake } from "@/lib/intake-lead-insert";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -667,86 +668,21 @@ export async function createLeadFromIntake(
     submitted_at: new Date().toISOString(),
   };
 
-  const mode = String(intake.dates_mode ?? "");
-  let tripDates = "";
-  if (mode.toLowerCase().includes("flex")) {
-    tripDates =
-      [intake.flex_month, intake.flex_duration]
-        .map((x) => (x != null ? String(x).trim() : ""))
-        .filter(Boolean)
-        .join(" · ") || "Période flexible";
-  } else if (intake.date_start || intake.date_end) {
-    tripDates = `${intake.date_start || "—"} → ${intake.date_end || "—"}`;
-  } else {
-    tripDates = "—";
-  }
-
-  const cur = String(intake.currency || "EUR");
-  const ideal = intake.budget_ideal ? String(intake.budget_ideal) : "";
-  const max = intake.budget_max ? String(intake.budget_max) : "";
-  const budgetLine =
-    ideal || max
-      ? `${ideal ? `${ideal} ${cur}` : "?"} → ${max ? `${max} ${cur}` : "?"} / pers.`
-      : "";
-
-  const travelersLine = [
-    intake.group_type,
-    intake.travellers_count
-      ? `${intake.travellers_count} voyageur(s)`
-      : "",
-  ]
-    .map((x) => (typeof x === "string" ? x.trim() : ""))
-    .filter(Boolean)
-    .join(" · ");
-
-  const qualification = [
-    intake.planning_stage && `Plan : ${intake.planning_stage}`,
-    intake.hebergements && `Hébergements : ${intake.hebergements}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const internalBits = [
-    intake.follow_prefs && `Préférences suivi : ${intake.follow_prefs}`,
-    intake.notes_longues,
-    intake.page_origin && `Page d'origine : ${intake.page_origin}`,
-    `submission_id : ${intake.submission_id}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
   const priority = fdStr(formData, "priority") === "high" ? "high" : "normal";
 
-  const { error } = await supabase.from("leads").insert({
-    traveler_name: travelerName,
-    email,
-    phone: String(intake.phone ?? ""),
-    intake_channel: "web_form" as const,
-    status: "new",
-    source: (intake.page_origin as string) || "Formulaire site DA",
-    trip_summary:
-      (intake.planning_stage as string) ||
-      `Demande web — ${travelerName}`,
-    travel_style: (intake.vision as string) || "—",
-    travelers: travelersLine || "—",
-    budget: budgetLine || "—",
-    trip_dates: tripDates,
-    qualification_summary: qualification || "—",
-    internal_notes: internalBits || "—",
-    quote_status: "Nouveau",
-    starred: false,
+  const row = buildLeadInsertFromIntake(intake, {
+    sourceFallback: "Formulaire site DA",
     priority,
-    intake_payload: intake,
-    submission_id: String(intake.submission_id),
-    page_origin: (intake.page_origin as string) || null,
-    referent_id: null,
   });
+
+  const { error } = await supabase.from("leads").insert(row);
 
   if (error) {
     return { ok: false, error: error.message };
   }
 
   revalidatePath("/leads");
+  revalidatePath("/dashboard");
   revalidatePath("/metrics");
   return { ok: true };
 }
