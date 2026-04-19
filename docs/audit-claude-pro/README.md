@@ -4,6 +4,8 @@
 
 Ce dossier regroupe une **documentation courte et structurée** pour faire auditer ou brainstormer l’application **Direction l’Algérie — Travel Lead Desk** avec Claude Pro (ou tout autre LLM), **sans coller de secrets** dans le chat.
 
+**Connecteur Git « liste plate » (sans sous-dossiers)** : le même contenu est aussi dans un **seul fichier** à la racine de `docs/` → [`docs/CLAUDE_AUDIT_CONTEXT.md`](../CLAUDE_AUDIT_CONTEXT.md). Coche ce fichier dans Claude à la place de ce dossier. Quand tu modifies le bundle, mets à jour **ce README + les fichiers ici + `CLAUDE_AUDIT_CONTEXT.md`** pour rester cohérent.
+
 ## Avertissements
 
 - **Ne jamais** coller le contenu de `.env.local`, de clés Supabase `service_role`, ni d’URL/credentials de prod dans une conversation.
