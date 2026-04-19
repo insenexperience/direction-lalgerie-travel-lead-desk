@@ -51,6 +51,10 @@ const LEAD_SELECT_V2 = [
   "qualification_validated_by",
   "qualification_validation_status",
   "manual_takeover",
+  "submission_id",
+  "workflow_launched_at",
+  "workflow_launched_by",
+  "workflow_mode",
 ].join(", ");
 
 /** Schéma avant migration `20260428100000_travel_lead_desk_v2.sql` (pas de colonnes IA / WhatsApp dédiées). */
@@ -118,6 +122,10 @@ function mapRowToSupabaseLeadRow(
   if (!schemaV2) {
     const hasSubmission =
       row.submission_id != null && String(row.submission_id).trim() !== "";
+    const sid =
+      row.submission_id != null && String(row.submission_id).trim() !== ""
+        ? String(row.submission_id).trim()
+        : null;
     return {
       ...base,
       intake_channel: hasSubmission ? "web_form" : "manual",
@@ -131,6 +139,10 @@ function mapRowToSupabaseLeadRow(
       qualification_validated_by: null,
       qualification_validation_status: "pending",
       manual_takeover: false,
+      submission_id: sid,
+      workflow_launched_at: null,
+      workflow_launched_by: null,
+      workflow_mode: null,
     };
   }
 
@@ -160,6 +172,20 @@ function mapRowToSupabaseLeadRow(
       row.qualification_validation_status ?? "pending",
     ),
     manual_takeover: Boolean(row.manual_takeover),
+    submission_id:
+      row.submission_id != null && String(row.submission_id).trim() !== ""
+        ? String(row.submission_id).trim()
+        : null,
+    workflow_launched_at: row.workflow_launched_at
+      ? String(row.workflow_launched_at)
+      : null,
+    workflow_launched_by: row.workflow_launched_by
+      ? String(row.workflow_launched_by)
+      : null,
+    workflow_mode:
+      row.workflow_mode === "ai" || row.workflow_mode === "manual"
+        ? row.workflow_mode
+        : null,
   };
 }
 
@@ -273,9 +299,14 @@ export default async function LeadDetailPage({ params }: PageProps) {
       ? quoteRows.map((r) => mapQuoteRowFromDb(r as unknown as Record<string, unknown>))
       : [];
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <LeadDetailSupabase
       lead={lead}
+      currentUserId={user?.id ?? null}
       referents={referents}
       referentLabel={referentLabel}
       agencies={agencies}

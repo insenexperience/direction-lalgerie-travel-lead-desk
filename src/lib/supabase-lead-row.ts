@@ -35,4 +35,8 @@ export type SupabaseLeadRow = {
   qualification_validated_by: string | null;
   qualification_validation_status: string;
   manual_takeover: boolean;
+  submission_id: string | null;
+  workflow_launched_at: string | null;
+  workflow_launched_by: string | null;
+  workflow_mode: "ai" | "manual" | null;
 };

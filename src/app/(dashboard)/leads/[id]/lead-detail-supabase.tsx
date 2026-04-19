@@ -6,6 +6,7 @@ import { LeadFicheModifier } from "@/components/leads/lead-fiche-modifier";
 import { LeadReadOnlySummary } from "@/components/leads/lead-read-only-summary";
 import { LeadSupabasePipeline } from "@/components/leads/lead-supabase-pipeline";
 import { LeadSupabaseStageWorkspace } from "@/components/leads/lead-supabase-stage-workspace";
+import { LeadWorkflowPanel } from "@/components/leads/lead-workflow-panel";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { TopHeader } from "@/components/top-header";
 import type {
@@ -23,6 +24,7 @@ type AgencyOption = { id: string; label: string };
 
 type LeadDetailSupabaseProps = {
   lead: SupabaseLeadRow;
+  currentUserId: string | null;
   referents: ReferentRow[];
   referentLabel: string | null;
   agencies: AgencyOption[];
@@ -33,6 +35,7 @@ type LeadDetailSupabaseProps = {
 
 export function LeadDetailSupabase({
   lead,
+  currentUserId,
   referents,
   referentLabel,
   agencies,
@@ -60,6 +63,15 @@ export function LeadDetailSupabase({
         leadId={lead.id}
         status={lead.status}
         referentId={lead.referent_id}
+      />
+
+      <LeadWorkflowPanel
+        leadId={lead.id}
+        currentUserId={currentUserId}
+        referentId={lead.referent_id}
+        status={lead.status}
+        workflowLaunchedAt={lead.workflow_launched_at}
+        workflowMode={lead.workflow_mode}
       />
 
       {!lead.referent_id ? (

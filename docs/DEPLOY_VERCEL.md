@@ -38,6 +38,7 @@ Si le dépôt existe déjà : `git remote -v` puis `git push`.
 
    - `20260428100000_travel_lead_desk_v2.sql` (colonnes `leads` / `agencies` / `lead_circuit_proposals` / `quotes`, index, suppression CRM / `lead_snapshots`)
    - `20260428120000_quote_pdfs_bucket.sql` (bucket Storage `quote_pdfs` pour l’envoi devis WhatsApp)
+   - `20260429100000_lead_workflow_v3_iter1.sql` (colonnes workflow PRD v3 sur `public.leads`)
 
    Réf. produit : [`PRD_TRAVEL_LEAD_DESK_V2.md`](./PRD_TRAVEL_LEAD_DESK_V2.md).
 2. **Authentication → URL configuration** (à mettre à jour après la première URL Vercel) :
@@ -63,6 +64,7 @@ Si le dépôt existe déjà : `git remote -v` puis `git push`.
    - **v2 (serveur uniquement, ne jamais préfixer `NEXT_PUBLIC_`)** : `OPENAI_API_KEY`, `OPENAI_MODEL`, clés WhatsApp (`WHATSAPP_API_TOKEN` ou `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` pour la signature `X-Hub-Signature-256`), et `SUPABASE_SERVICE_ROLE_KEY` pour webhooks publics, stockage devis (`quote_pdfs`), route **`/api/intake`** (formulaire Squarespace) et autres opérations serveur. La `service_role` ne doit pas être exposée au navigateur.
    - **`ALLOWED_ORIGIN`** : origine(s) CORS pour `POST /api/intake` en prod (ex. `https://www.directionlalgerie.com`). Tu peux lister **plusieurs** origines séparées par une virgule si le site est servi avec et sans `www`. En dev, l’API répond avec `Access-Control-Allow-Origin: *`.
    - **`INTAKE_SHARED_SECRET`** (optionnel) : si défini sur Vercel, le `POST` depuis Squarespace doit envoyer `Authorization: Bearer <secret>` ou `X-Intake-Secret: <secret>` (à configurer dans le code embarqué Squarespace / proxy).
+   - **Workflow voyageur (PRD v3)** : `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `NEXT_PUBLIC_DA_CONTACT_EMAIL`, `NEXT_PUBLIC_WHATSAPP_DA_NUMBER` (indicatif pays + numéro, chiffres uniquement pour le lien WhatsApp).
    - Validation / champs du formulaire vitrine : **[docs/SQUARESPACE_FORM_INTAKE.md](SQUARESPACE_FORM_INTAKE.md)** (ex. alerte « prénom, nom et email » alors que les champs sont remplis).
 
 6. Déployer : **Deploy**. Les **Preview** reçoivent une URL `https://<projet>-<hash>.vercel.app` : ajoute-la (ou le motif `https://*.vercel.app/**`) dans les Redirect URLs Supabase.

@@ -30,6 +30,7 @@ async function logActivity(
   });
 }
 
+/** Premier message WhatsApp de qualification — à n’appeler qu’après lancement du workflow (PRD v3), pas à l’assignation. */
 export async function triggerQualificationConversation(leadId: string): Promise<void> {
   if (!isUuid(leadId)) return;
 

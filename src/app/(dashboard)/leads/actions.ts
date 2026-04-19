@@ -6,7 +6,6 @@ import { isUuid } from "@/lib/is-uuid";
 import type { AgencyConsultationStatus, LeadStatus } from "@/lib/mock-leads";
 import { LEAD_PIPELINE } from "@/lib/mock-leads";
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
-import { triggerQualificationConversation } from "@/app/(dashboard)/leads/ai-actions";
 import { buildLeadInsertFromIntake } from "@/lib/intake-lead-insert";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 
@@ -59,15 +58,13 @@ export async function assignLeadReferent(
 
   const { data: prevRow, error: prevErr } = await supabase
     .from("leads")
-    .select("referent_id")
+    .select("id")
     .eq("id", leadId)
     .maybeSingle();
 
   if (prevErr || !prevRow) {
     return { ok: false, error: "Lead introuvable." };
   }
-
-  const prevReferent = prevRow.referent_id as string | null;
 
   const { error } = await supabase
     .from("leads")
@@ -76,12 +73,6 @@ export async function assignLeadReferent(
 
   if (error) {
     return { ok: false, error: error.message };
-  }
-
-  const assignedNow =
-    prevReferent === null && referentId !== null && referentId !== "";
-  if (assignedNow) {
-    await triggerQualificationConversation(leadId);
   }
 
   revalidatePath(`/leads/${leadId}`);
@@ -129,8 +120,6 @@ export async function claimLead(leadId: string): Promise<ClaimLeadResult> {
   if (error) {
     return { ok: false, error: error.message };
   }
-
-  await triggerQualificationConversation(leadId);
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
