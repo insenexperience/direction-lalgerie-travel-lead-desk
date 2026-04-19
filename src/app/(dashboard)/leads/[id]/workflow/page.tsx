@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getWorkflowEmailDeliveryHints } from "@/lib/email/workflow-email-config";
 import { isUuid } from "@/lib/is-uuid";
 import { TopHeader } from "@/components/top-header";
 import { LeadManualWorkflowForm } from "./lead-manual-workflow-form";
@@ -62,6 +63,7 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
 
   const title = String(row.traveler_name ?? "Lead");
   const summary = String(row.trip_summary ?? "").trim() || "—";
+  const emailHints = getWorkflowEmailDeliveryHints();
 
   return (
     <div className="mx-auto max-w-xl space-y-6 pb-16">
@@ -79,6 +81,14 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
       />
 
       <div className="rounded-md border border-border bg-panel p-5 sm:p-6">
+        {emailHints.bannerMessage ? (
+          <p
+            className="mb-5 rounded-md border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-sm text-amber-950/90 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100/90"
+            role="note"
+          >
+            {emailHints.bannerMessage}
+          </p>
+        ) : null}
         <p className="text-sm text-foreground/85">
           Résumé : <strong className="text-foreground">{title}</strong>
         </p>
@@ -101,7 +111,7 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
         </dl>
 
         <div className="mt-8 border-t border-border pt-8">
-          <LeadManualWorkflowForm leadId={id} />
+          <LeadManualWorkflowForm leadId={id} resendReady={emailHints.resendReady} />
         </div>
       </div>
     </div>

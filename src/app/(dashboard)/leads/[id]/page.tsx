@@ -6,6 +6,7 @@ import {
   mapQuoteRowFromDb,
 } from "@/lib/co-construction-proposal";
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
+import { getWorkflowEmailDeliveryHints } from "@/lib/email/workflow-email-config";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 import { referentDisplayLabel } from "@/lib/referent-display";
 import { isPostgresUndefinedColumnError } from "@/lib/supabase-schema-fallback";
@@ -303,10 +304,13 @@ export default async function LeadDetailPage({ params }: PageProps) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const workflowHints = getWorkflowEmailDeliveryHints();
+
   return (
     <LeadDetailSupabase
       lead={lead}
       currentUserId={user?.id ?? null}
+      workflowEmailBanner={workflowHints.bannerMessage}
       referents={referents}
       referentLabel={referentLabel}
       agencies={agencies}

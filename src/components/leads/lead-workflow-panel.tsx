@@ -13,6 +13,8 @@ type LeadWorkflowPanelProps = {
   status: LeadStatus;
   workflowLaunchedAt: string | null;
   workflowMode: "ai" | "manual" | null;
+  /** Bannière opérateur quand Resend / CTA ne sont pas encore branchés (null = rien à afficher). */
+  workflowEmailBanner: string | null;
 };
 
 export function LeadWorkflowPanel({
@@ -22,6 +24,7 @@ export function LeadWorkflowPanel({
   status,
   workflowLaunchedAt,
   workflowMode,
+  workflowEmailBanner,
 }: LeadWorkflowPanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -72,6 +75,14 @@ export function LeadWorkflowPanel({
         Premier contact structuré avec le voyageur (email). Choisissez le mode IA (WhatsApp + email
         pour co-construction) ou le mode manuel.
       </p>
+      {workflowEmailBanner ? (
+        <p
+          className="mt-3 rounded-md border border-amber-200/80 bg-amber-50/90 px-3 py-2.5 text-sm text-amber-950/90 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100/90"
+          role="note"
+        >
+          {workflowEmailBanner}
+        </p>
+      ) : null}
       {error ? (
         <p className="mt-3 text-sm text-destructive" role="alert">
           {error}

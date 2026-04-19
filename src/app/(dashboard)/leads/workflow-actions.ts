@@ -3,14 +3,21 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import type { ActionResult } from "@/app/(dashboard)/leads/actions";
 import { sendTransactionalHtmlEmail } from "@/lib/email/resend-client";
+import {
+  isResendOutboundConfigured,
+  isAiWelcomeEmailCtAsConfigured,
+} from "@/lib/email/workflow-email-config";
 import {
   buildWorkflowReplyMailto,
   buildWorkflowWelcomeEmailAiHtml,
   buildWorkflowWelcomeEmailSimpleHtml,
   normalizeWhatsAppE164,
 } from "@/lib/email/workflow-welcome";
+
+export type WorkflowLaunchResult =
+  | { ok: true; travelerEmailSent: boolean }
+  | { ok: false; error: string };
 
 type LeadWorkflowRow = {
   id: string;
@@ -95,7 +102,7 @@ async function fetchLeadForWorkflow(
 function assertCanLaunch(
   row: LeadWorkflowRow,
   userId: string,
-): ActionResult | null {
+): WorkflowLaunchResult | null {
   if (row.referent_id !== userId) {
     return {
       ok: false,
@@ -119,7 +126,7 @@ function assertCanLaunch(
 
 const WORKFLOW_SUBJECT = "Direction l'Algérie — confirmation de votre projet";
 
-export async function launchWorkflowAi(leadId: string): Promise<ActionResult> {
+export async function launchWorkflowAi(leadId: string): Promise<WorkflowLaunchResult> {
   if (!isUuid(leadId)) {
     return { ok: false, error: "Identifiant de lead invalide." };
   }
@@ -138,40 +145,49 @@ export async function launchWorkflowAi(leadId: string): Promise<ActionResult> {
   const block = assertCanLaunch(fetched.row, user.id);
   if (block) return block;
 
-  const waRaw = process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER?.trim() ?? "";
-  const waDigits = normalizeWhatsAppE164(waRaw);
-  if (!waDigits) {
-    return {
-      ok: false,
-      error:
-        "NEXT_PUBLIC_WHATSAPP_DA_NUMBER doit être défini (numéro WhatsApp DA, chiffres avec indicatif pays).",
-    };
-  }
+  let travelerEmailSent = false;
+  let activityDetail = "";
 
-  const contact =
-    process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL?.trim() ||
-    process.env.RESEND_FROM_EMAIL?.trim();
-  if (!contact || !contact.includes("@")) {
-    return {
-      ok: false,
-      error:
-        "NEXT_PUBLIC_DA_CONTACT_EMAIL (ou RESEND_FROM_EMAIL) doit être une adresse email valide pour le lien « Poursuivre par email ».",
-    };
-  }
+  if (isResendOutboundConfigured()) {
+    let html: string;
+    if (isAiWelcomeEmailCtAsConfigured()) {
+      const waRaw = process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER?.trim() ?? "";
+      const waDigits = normalizeWhatsAppE164(waRaw);
+      const contact =
+        process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL?.trim() ||
+        process.env.RESEND_FROM_EMAIL?.trim() ||
+        "";
+      if (!waDigits || !contact.includes("@")) {
+        return {
+          ok: false,
+          error: "Configuration email incohérente (CTA). Rechargez la page ou vérifiez les variables d’environnement.",
+        };
+      }
+      const ref = fetched.row.submission_id ?? fetched.row.id;
+      const waText = `Bonjour, je souhaite co-construire mon voyage ref:${ref}`;
+      const whatsappHref = `https://wa.me/${waDigits}?text=${encodeURIComponent(waText)}`;
+      const mailtoHref = buildWorkflowReplyMailto(ref, contact);
+      html = buildWorkflowWelcomeEmailAiHtml(fetched.row, { whatsappHref, mailtoHref });
+      activityDetail =
+        "Workflow lancé (mode IA) — email de bienvenue avec CTA WhatsApp et email envoyé au voyageur.";
+    } else {
+      html = buildWorkflowWelcomeEmailSimpleHtml(fetched.row);
+      activityDetail =
+        "Workflow lancé (mode IA) — email simplifié envoyé (CTA WhatsApp / mailto incomplets côté configuration).";
+    }
 
-  const ref = fetched.row.submission_id ?? fetched.row.id;
-  const waText = `Bonjour, je souhaite co-construire mon voyage ref:${ref}`;
-  const whatsappHref = `https://wa.me/${waDigits}?text=${encodeURIComponent(waText)}`;
-  const mailtoHref = buildWorkflowReplyMailto(ref, contact);
-
-  const html = buildWorkflowWelcomeEmailAiHtml(fetched.row, { whatsappHref, mailtoHref });
-  const sent = await sendTransactionalHtmlEmail({
-    to: fetched.row.email,
-    subject: WORKFLOW_SUBJECT,
-    html,
-  });
-  if (!sent.ok) {
-    return sent;
+    const sent = await sendTransactionalHtmlEmail({
+      to: fetched.row.email,
+      subject: WORKFLOW_SUBJECT,
+      html,
+    });
+    if (!sent.ok) {
+      return { ok: false, error: sent.error };
+    }
+    travelerEmailSent = true;
+  } else {
+    activityDetail =
+      "Workflow lancé (mode IA) — aucun email envoyé (Resend non configuré : RESEND_API_KEY / RESEND_FROM_EMAIL).";
   }
 
   const now = new Date().toISOString();
@@ -189,25 +205,19 @@ export async function launchWorkflowAi(leadId: string): Promise<ActionResult> {
     return { ok: false, error: upErr.message };
   }
 
-  await logWorkflowActivity(
-    supabase,
-    leadId,
-    user.id,
-    "workflow_launch_ai",
-    "Workflow lancé (mode IA) — email de bienvenue avec CTA WhatsApp et email envoyé au voyageur.",
-  );
+  await logWorkflowActivity(supabase, leadId, user.id, "workflow_launch_ai", activityDetail);
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, travelerEmailSent };
 }
 
 export async function launchWorkflowManual(
   leadId: string,
   sendWelcomeEmail: boolean,
-): Promise<ActionResult> {
+): Promise<WorkflowLaunchResult> {
   if (!isUuid(leadId)) {
     return { ok: false, error: "Identifiant de lead invalide." };
   }
@@ -226,16 +236,29 @@ export async function launchWorkflowManual(
   const block = assertCanLaunch(fetched.row, user.id);
   if (block) return block;
 
+  let travelerEmailSent = false;
+  let activityDetail: string;
+
   if (sendWelcomeEmail) {
-    const html = buildWorkflowWelcomeEmailSimpleHtml(fetched.row);
-    const sent = await sendTransactionalHtmlEmail({
-      to: fetched.row.email,
-      subject: WORKFLOW_SUBJECT,
-      html,
-    });
-    if (!sent.ok) {
-      return sent;
+    if (isResendOutboundConfigured()) {
+      const html = buildWorkflowWelcomeEmailSimpleHtml(fetched.row);
+      const sent = await sendTransactionalHtmlEmail({
+        to: fetched.row.email,
+        subject: WORKFLOW_SUBJECT,
+        html,
+      });
+      if (!sent.ok) {
+        return { ok: false, error: sent.error };
+      }
+      travelerEmailSent = true;
+      activityDetail =
+        "Workflow lancé (mode manuel) — email de bienvenue simple envoyé au voyageur.";
+    } else {
+      activityDetail =
+        "Workflow lancé (mode manuel) — email de bienvenue non envoyé (Resend non configuré alors que la case était cochée).";
     }
+  } else {
+    activityDetail = "Workflow lancé (mode manuel) — sans email de bienvenue.";
   }
 
   const now = new Date().toISOString();
@@ -253,15 +276,11 @@ export async function launchWorkflowManual(
     return { ok: false, error: upErr.message };
   }
 
-  const detail = sendWelcomeEmail
-    ? "Workflow lancé (mode manuel) — email de bienvenue simple envoyé au voyageur."
-    : "Workflow lancé (mode manuel) — sans email de bienvenue.";
-
-  await logWorkflowActivity(supabase, leadId, user.id, "workflow_launch_manual", detail);
+  await logWorkflowActivity(supabase, leadId, user.id, "workflow_launch_manual", activityDetail);
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, travelerEmailSent };
 }

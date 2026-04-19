@@ -6,9 +6,10 @@ import { launchWorkflowManual } from "@/app/(dashboard)/leads/workflow-actions";
 
 type LeadManualWorkflowFormProps = {
   leadId: string;
+  resendReady: boolean;
 };
 
-export function LeadManualWorkflowForm({ leadId }: LeadManualWorkflowFormProps) {
+export function LeadManualWorkflowForm({ leadId, resendReady }: LeadManualWorkflowFormProps) {
   const router = useRouter();
   const [sendWelcome, setSendWelcome] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -43,6 +44,14 @@ export function LeadManualWorkflowForm({ leadId }: LeadManualWorkflowFormProps) 
           au voyageur (même contenu que le mode IA, sans les boutons WhatsApp / email).
         </span>
       </label>
+
+      {!resendReady ? (
+        <p className="text-sm text-muted-foreground">
+          Tant que Resend n&apos;est pas configuré sur l&apos;hébergeur, cocher cette case n&apos;enverra
+          pas d&apos;email ; le workflow sera tout de même enregistré (voir trace dans les activités du
+          dossier).
+        </p>
+      ) : null}
 
       {error ? (
         <p className="text-sm text-destructive" role="alert">

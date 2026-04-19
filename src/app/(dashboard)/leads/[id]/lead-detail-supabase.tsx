@@ -25,6 +25,7 @@ type AgencyOption = { id: string; label: string };
 type LeadDetailSupabaseProps = {
   lead: SupabaseLeadRow;
   currentUserId: string | null;
+  workflowEmailBanner: string | null;
   referents: ReferentRow[];
   referentLabel: string | null;
   agencies: AgencyOption[];
@@ -36,6 +37,7 @@ type LeadDetailSupabaseProps = {
 export function LeadDetailSupabase({
   lead,
   currentUserId,
+  workflowEmailBanner,
   referents,
   referentLabel,
   agencies,
@@ -72,6 +74,7 @@ export function LeadDetailSupabase({
         status={lead.status}
         workflowLaunchedAt={lead.workflow_launched_at}
         workflowMode={lead.workflow_mode}
+        workflowEmailBanner={workflowEmailBanner}
       />
 
       {!lead.referent_id ? (
