@@ -2,6 +2,8 @@
 
 Application interne Next.js + Supabase (auth, RLS, leads, agences, devis). Spécification produit : `docs/PRODUCT_SPEC.md`.
 
+Paquet de contexte pour audit / brainstorming (stack, archi, données, prompts) : **[docs/audit-claude-pro/README.md](docs/audit-claude-pro/README.md)**.
+
 ## Déploiement (GitHub + Vercel)
 
 Procédure détaillée : **[docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md)** (dépôt GitHub, variables Vercel, redirections Supabase, domaine).
