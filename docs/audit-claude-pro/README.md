@@ -1,8 +1,8 @@
 # Paquet d’audit — Claude Pro
 
-**Dernière mise à jour du bundle : 19 avril 2026** (snapshot du dépôt à cette date).
+**Dernière mise à jour du bundle : 20 avril 2026** (aligné sur le dépôt courant : migrations, `package.json`, routes).
 
-Ce dossier regroupe une **documentation courte et structurée** pour faire auditer ou brainstormer l’application **Direction l’Algérie — Travel Lead Desk** avec Claude Pro (ou tout autre LLM), **sans coller de secrets** dans le chat.
+Ce dossier regroupe une **documentation structurée** (vue d’ensemble + pointeurs vers le code) pour faire auditer ou brainstormer l’application **Direction l’Algérie — Travel Lead Desk** avec Claude Pro (ou tout autre LLM), **sans coller de secrets** dans le chat.
 
 **Connecteur Git « liste plate » (sans sous-dossiers)** : le même contenu est aussi dans un **seul fichier** à la racine de `docs/` → [`docs/CLAUDE_AUDIT_CONTEXT.md`](../CLAUDE_AUDIT_CONTEXT.md). Coche ce fichier dans Claude à la place de ce dossier. Quand tu modifies le bundle, mets à jour **ce README + les fichiers ici + `CLAUDE_AUDIT_CONTEXT.md`** pour rester cohérent.
 
@@ -11,12 +11,24 @@ Ce dossier regroupe une **documentation courte et structurée** pour faire audit
 - **Ne jamais** coller le contenu de `.env.local`, de clés Supabase `service_role`, ni d’URL/credentials de prod dans une conversation.
 - Les **fichiers sources** et **migrations SQL** restent la source de vérité ; ce bundle résume et pointe vers eux.
 
+## Index rapide (hors bundle)
+
+| Document | Usage pour un LLM |
+|----------|-------------------|
+| [CLAUDE_AUDIT_CONTEXT.md](../CLAUDE_AUDIT_CONTEXT.md) | **Fichier unique** (même info que ce dossier) si l’outil Git ne descend pas dans les sous-dossiers. |
+| [PRD_TRAVEL_LEAD_DESK_V2.md](../PRD_TRAVEL_LEAD_DESK_V2.md) | Vision v2 : IA, WhatsApp, supervisor-in-the-loop. |
+| [PRODUCT_SPEC.md](../PRODUCT_SPEC.md) | Spec UX / règles détaillées. |
+| [IMPLEMENTATION_PENDING_V2.md](../IMPLEMENTATION_PENDING_V2.md) | Écarts planifiés code ↔ schéma (à lire avant d’auditer « l’état réel »). |
+| [RLS_PROD_CHECKLIST.md](../RLS_PROD_CHECKLIST.md) | Contrôles RLS avant prod. |
+| [DEPLOY_VERCEL.md](../DEPLOY_VERCEL.md) | Vercel + Supabase Auth URLs + `db:push`. |
+| [SQUARESPACE_FORM_INTAKE.md](../SQUARESPACE_FORM_INTAKE.md) | Intake web public → `POST /api/intake`. |
+
 ## Ordre de lecture recommandé
 
 0. [PRD_TRAVEL_LEAD_DESK_V2.md](../PRD_TRAVEL_LEAD_DESK_V2.md) — vision produit v2 (IA, WhatsApp, supervisor-in-the-loop).
 1. [STACK.md](./STACK.md) — versions et dépendances.
-2. [ARCHITECTURE.md](./ARCHITECTURE.md) — auth, App Router, flux données.
-3. [DATA_SUPABASE.md](./DATA_SUPABASE.md) — modèle Postgres / migrations.
+2. [ARCHITECTURE.md](./ARCHITECTURE.md) — auth, App Router, flux données, IA côté serveur.
+3. [DATA_SUPABASE.md](./DATA_SUPABASE.md) — modèle Postgres / migrations (ordre complet).
 4. [PRODUCT_RULES_SUMMARY.md](./PRODUCT_RULES_SUMMARY.md) — règles métier (résumé).
 5. [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md) — écrans, API, server actions.
 6. [OPS_ENV.md](./OPS_ENV.md) — env, déploiement.

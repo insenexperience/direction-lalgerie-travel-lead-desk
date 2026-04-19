@@ -1,16 +1,51 @@
 # Contexte audit & stack — Travel Lead Desk (fichier plat)
 
-**Mise à jour : 19 avril 2026**
+**Mise à jour : 20 avril 2026**
 
-Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document** à la racine de `docs/`, pour les outils (ex. connecteur Git Claude) qui **ne listent pas les sous-dossiers**. Même contenu que le dossier découpé : en cas de modification, mettre à jour **ce fichier et** les fichiers dans `docs/audit-claude-pro/`.
+Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document** à la racine de `docs/`, pour les outils (ex. connecteur Git Claude) qui **ne listent pas les sous-dossiers**. Même intention que le dossier découpé : en cas de modification, mettre à jour **ce fichier et** les fichiers dans `docs/audit-claude-pro/`.
 
-**Ne jamais** coller de secrets (`.env.local`, `service_role`, etc.). La vérité SQL reste dans `supabase/migrations/`.
+**Ne jamais** coller de secrets (`.env.local`, `service_role`, jetons WhatsApp, etc.). La vérité SQL reste dans `supabase/migrations/`.
+
+---
+
+## 0. Index documentation (hors secrets)
+
+| Fichier | Contenu |
+|---------|---------|
+| `docs/audit-claude-pro/README.md` | Mode d’emploi du bundle + ordre de lecture. |
+| `docs/PRD_TRAVEL_LEAD_DESK_V2.md` | Vision produit v2 (IA, WhatsApp, superviseur). |
+| `docs/PRODUCT_SPEC.md` | Spec UX / règles détaillées. |
+| `docs/IMPLEMENTATION_PENDING_V2.md` | Écarts plan / code (lire avant audit « état réel »). |
+| `docs/RLS_PROD_CHECKLIST.md` | Contrôles RLS pré-production. |
+| `docs/DEPLOY_VERCEL.md` | Vercel, variables, Supabase Auth URLs, `db:push`. |
+| `docs/SQUARESPACE_FORM_INTAKE.md` | Formulaire site → `POST /api/intake`. |
+
+**Note** : `IMPLEMENTATION_PENDING_V2.md` peut mélanger tâches **déjà faites** et restantes ; pour l’état DB, se fier aux fichiers dans `supabase/migrations/` plutôt qu’aux blocs SQL dupliqués dans ce doc de suivi.
+
+---
+
+## 0.1 Carte « où est quoi » (chemins repo)
+
+| Sujet | Chemin(s) |
+|-------|-----------|
+| Middleware session | `middleware.ts`, `src/lib/supabase/middleware.ts` |
+| Layout auth dashboard | `src/app/(dashboard)/layout.tsx` (`force-dynamic`) |
+| Nav sidebar | `src/lib/nav-config.tsx` (pas de `/settings` dans la liste) |
+| Liste + Kanban leads | `src/app/(dashboard)/leads/page.tsx`, `src/components/leads-kanban-board.tsx` (étape = `<select>` sur carte) |
+| Détail lead | `src/app/(dashboard)/leads/[id]/page.tsx` |
+| Workflow opérateur | `src/app/(dashboard)/leads/[id]/workflow/page.tsx` |
+| Server actions | `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts` ; `src/app/(dashboard)/agencies/actions.ts` |
+| IA (prompts, agent) | `src/lib/ai/` (`agent.ts`, `prompts/*.ts`, `types.ts`) |
+| API publique / sans UI | `src/app/api/intake/route.ts`, `src/app/api/whatsapp/webhook/route.ts` |
+| PDF devis | `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` |
+| Contexte client leads | `src/context/leads-demo-context.tsx` |
+| Migrations DB | `supabase/migrations/*.sql` |
 
 ---
 
 ## 1. Introduction (usage Claude)
 
-- Documentation courte pour auditer ou brainstormer **Direction l’Algérie — Travel Lead Desk** avec un LLM.
+- Documentation pour auditer ou brainstormer **Direction l’Algérie — Travel Lead Desk** avec un LLM.
 - Ordre logique ci-dessous : stack → architecture → données → produit → routes → ops → prompts.
 - Vision produit v2 : `docs/PRD_TRAVEL_LEAD_DESK_V2.md` ; spec détaillée : `docs/PRODUCT_SPEC.md` ; écart code / schéma : `docs/IMPLEMENTATION_PENDING_V2.md`.
 
@@ -18,7 +53,7 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 
 ## 2. Stack technique (snapshot)
 
-Aligné sur `package.json` (19 avril 2026).
+Aligné sur `package.json` (20 avril 2026).
 
 ### Runtime applicatif
 
@@ -40,9 +75,12 @@ Aligné sur `package.json` (19 avril 2026).
 
 ### Bibliothèques notables
 
-- `@dnd-kit/core`, `@dnd-kit/utilities` — drag & drop (Kanban leads).
+- `openai` — appels modèle côté serveur (qualification, scoring, comparaison ; voir `src/lib/ai/`).
+- `resend` — emails transactionnels (désactivé si clés absentes).
 - `@react-pdf/renderer` — PDF devis.
 - `lucide-react` — icônes.
+
+**Kanban** : pas de `@dnd-kit` dans le manifest ; colonnes + changement d’étape via `<select>` sur chaque carte (`leads-kanban-board.tsx`).
 
 ### Scripts npm
 
@@ -90,20 +128,26 @@ flowchart LR
 
 Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le middleware ne rafraîchit pas correctement la session.
 
+### Intégrations sensibles (hors session navigateur)
+
+- **`POST /api/intake`** : CORS (`ALLOWED_ORIGIN`), secret optionnel, souvent `SUPABASE_SERVICE_ROLE_KEY` pour insérer des leads.
+- **Webhook WhatsApp** : challenge GET, POST signé optionnel (`WHATSAPP_APP_SECRET`), tokens dans l’environnement serveur.
+- **OpenAI** : uniquement serveur ; jamais de clé en `NEXT_PUBLIC_*`.
+
 ### Structure `src/`
 
 | Zone | Rôle |
 |------|------|
 | `src/app/` | Routes, layouts, server actions |
 | `src/components/` | UI |
-| `src/context/` | Context React (ex. `LeadsDemoProvider` — état liste / Kanban) |
-| `src/lib/` | Mappers, PDF, filtres, CRM |
+| `src/context/` | Context React (`LeadsDemoProvider`, etc.) |
+| `src/lib/` | Mappers, PDF, filtres, CRM, `ai/` |
 
 ### Points d’audit
 
-- Sécurité réelle : **RLS** (pas seulement le layout).
-- PDF : `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` — accès et fuites.
-- Liste leads / Kanban : données Supabase via `LeadsDemoProvider` + server refresh ; pas de contexte agences mock séparé.
+- Sécurité réelle : **RLS** (pas seulement le layout) ; voir aussi `docs/RLS_PROD_CHECKLIST.md`.
+- PDF + Storage : route PDF ; bucket privé `quote_pdfs` (migration) — vérifier policies `storage.objects` en prod si le bucket est utilisé.
+- Server actions `ai-actions.ts` / `workflow-actions.ts` : mêmes exigences d’autorisation que le reste (ne pas se fier à l’UI).
 
 ---
 
@@ -113,13 +157,15 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 
 ### Schéma initial (`20260418120000_initial_core.sql`)
 
-**Enums (extraits)** : `app_role` (`admin`, `lead_referent`), `lead_status` (pipeline ; `refinement` fusionné plus tard), types agence / consultation / `quote_kind`.
+**Enums (extraits)** : `app_role` (`admin`, `lead_referent`), `lead_status` (voir liste ci-dessous), types agence / consultation / `quote_kind`.
 
-**Tables** : `profiles`, `agencies`, `leads`, `consultations`, `quotes`, `activities` (la table `lead_snapshots` a été retirée — migration v2).
+**`lead_status` à la création** : `new`, `qualification`, `refinement`, `agency_assignment`, `co_construction`, `quote`, `negotiation`, `won`, `lost`. La migration `20260427120000_qualification_merge_crm.sql` fusionne **`refinement` → `qualification`** (valeur enum et données).
+
+**Tables** : `profiles`, `agencies`, `leads`, `consultations`, `quotes`, `activities`. La table `lead_snapshots` a existé dans le core initial puis est **supprimée** par `20260428100000_travel_lead_desk_v2.sql`.
 
 **RLS** : migration initiale avec politiques permissives pour `authenticated` ; migrations suivantes resserrent (pool, admin vs référent).
 
-### Migrations ultérieures (ordre)
+### Migrations ultérieures (ordre des fichiers)
 
 | Fichier | Intention |
 |---------|-----------|
@@ -130,12 +176,16 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 | `20260423140000_rls_admin_vs_referent_v1.sql` | RLS v1 admin / référent + helpers SQL. |
 | `20260423150000_profiles_email_display.sql` | `email` sur `profiles`, trigger profil. |
 | `20260427120000_qualification_merge_crm.sql` | `refinement` → `qualification` ; champs CRM sur `leads`. |
+| `20260428100000_travel_lead_desk_v2.sql` | Colonnes v2 : canaux intake / WhatsApp, transcript, payload IA qualification, validation superviseur, enrichissement propositions & agences & quotes, index ; **drop** `lead_snapshots`. |
+| `20260428120000_quote_pdfs_bucket.sql` | Bucket Storage `quote_pdfs` (privé, PDF, limite taille). |
+| `20260429100000_lead_workflow_v3_iter1.sql` | `workflow_launched_at`, `workflow_launched_by`, `workflow_mode` (`ai` \| `manual`). |
 
 ### Pistes d’audit SQL
 
 - Cohérence policies pool SELECT vs restrictions référent sur `leads`.
 - Policies sur `quotes`, `consultations`, `lead_circuit_proposals`.
 - Triggers `handle_new_user` (dernière version dans migrations).
+- Storage : le fichier bucket seul ne définit pas les policies — vérifier en prod.
 
 ---
 
@@ -151,23 +201,23 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 
 ## 6. Routes, navigation, mutations
 
-**Nav** (`src/lib/nav-config.tsx`) : `/dashboard`, `/metrics`, `/leads`, `/agencies`, `/quotes`, `/users`, `/settings`.
+**Nav** (`src/lib/nav-config.tsx`) : `/dashboard`, `/metrics`, `/leads`, `/agencies`, `/quotes`, `/users`. **`/settings` absent de la sidebar** ; la route `/settings` existe encore.
 
-**Pages** : `/`, `/login`, routes `(dashboard)/…` pour chaque section ; détail `/leads/[id]`.
+**Pages** : `/`, `/login`, `(dashboard)/…` ; détail `/leads/[id]` ; workflow `/leads/[id]/workflow`.
 
-**API** : `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx`.
+**API** : `src/app/api/intake/route.ts`, `src/app/api/whatsapp/webhook/route.ts`, `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx`.
 
-**Server actions** : `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `src/app/(dashboard)/agencies/actions.ts`.
+**Server actions** : `leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts`, `agencies/actions.ts`.
 
 ---
 
 ## 7. Opérations et environnement
 
-Variables : `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (voir `.env.example`).
+Variables documentées : voir **`.env.example`** (liste complète : Supabase, Resend, OpenAI, WhatsApp, intake CORS/secret).
 
 Ne pas commiter `.env.local` ni `service_role`.
 
-Déploiement : `docs/DEPLOY_VERCEL.md` (Vercel prod + preview, redirect URLs Supabase, `db:push`). Au moins un profil `admin` après RLS v1 (voir migration `20260423140000`).
+Déploiement : `docs/DEPLOY_VERCEL.md`. Au moins un profil `admin` après RLS v1 (voir migration `20260423140000`).
 
 ---
 
@@ -178,8 +228,9 @@ Déploiement : `docs/DEPLOY_VERCEL.md` (Vercel prod + preview, redirect URLs Sup
 Tu es un auditeur sécurité sur une app Next.js 16 + Supabase. Contexte : sections 2–4 de ce document + `supabase/migrations/`.
 
 1. Lister les policies RLS par table ; conflits / sur-permissions (pool SELECT vs référent).
-2. Vérifier que les server actions ne reposent pas uniquement sur l’UI.
+2. Vérifier que les server actions (y compris `ai-actions.ts`, `workflow-actions.ts`) ne reposent pas uniquement sur l’UI.
 3. Analyser la route PDF devis : contrôle d’accès, fuites, IDs.
+4. Analyser `api/intake` et `api/whatsapp/webhook` : CORS, secrets, idempotence, réponses.
 
 Livrable : tableau risques + recommandations + ordre de patch.
 
@@ -190,6 +241,8 @@ Contexte : `force-dynamic` sur layout dashboard, middleware large.
 1. Pages/layouts partiellement cacheables sans casser la session.
 2. Stratégie simple pour réduire le coût par requête sur Vercel.
 
+Livrable : hypothèses + changements ciblés.
+
 ### 8.3 Brainstorm fonctionnalités
 
 Règles section 5 + `docs/PRODUCT_SPEC.md`. Périmètre section 6.
@@ -198,8 +251,17 @@ Proposer 5–10 améliorations compatibles « voyageur ne parle pas à l’agenc
 
 ### 8.4 Checklist pré-production
 
-À partir de section 7 et `docs/DEPLOY_VERCEL.md` : env Vercel, redirect URLs, migrations, admin, login preview, PDF, sauvegardes si applicable.
+À partir de section 7, `docs/DEPLOY_VERCEL.md` et `docs/RLS_PROD_CHECKLIST.md` : env Vercel, redirect URLs, migrations, admin, login preview, PDF, intake, WhatsApp, sauvegardes si applicable.
 
 ### 8.5 Revue data model
 
-À partir des migrations : index, contraintes, idempotence `submission_id`, évolution enums CRM / workflow devis. Backlog priorisé.
+À partir des migrations : index, contraintes, idempotence `submission_id`, évolution enums CRM / workflow devis, colonnes v2/v3 sur `leads`, bucket `quote_pdfs`. Backlog priorisé.
+
+### 8.6 Audit flux IA (superviseur)
+
+Contexte : `src/lib/ai/`, champs `ai_*` et `qualification_validation_*` sur `leads` / propositions, `docs/PRD_TRAVEL_LEAD_DESK_V2.md`.
+
+1. Où l’opérateur peut-il valider / overrider sans casser la traçabilité ?
+2. Risques d’injection ou de fuite PII dans les prompts ; journalisation minimale recommandée.
+
+Livrable : liste de garde-fous + tests manuels suggérés.

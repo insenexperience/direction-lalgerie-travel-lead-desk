@@ -41,12 +41,17 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 | Zone | Rôle indicatif |
 |------|----------------|
 | [`src/app/`](../../src/app/) | Routes App Router, layouts, server actions par domaine. |
+| [`src/app/api/intake/route.ts`](../../src/app/api/intake/route.ts) | Intake public (CORS + optionnellement secret) → création lead côté serveur (`service_role`). |
+| [`src/app/api/whatsapp/webhook/route.ts`](../../src/app/api/whatsapp/webhook/route.ts) | Webhook Meta (challenge + événements). |
 | [`src/components/`](../../src/components/) | UI réutilisable (sidebar, formulaires lead, modales, etc.). |
-| [`src/context/`](../../src/context/) | React context (ex. `LeadsDemoProvider` pour état client liste / Kanban). |
+| [`src/context/`](../../src/context/) | React context (ex. `LeadsDemoProvider` pour état client liste / Kanban + refresh serveur). |
 | [`src/lib/`](../../src/lib/) | Mappers Supabase, PDF, filtres file leads, champs CRM, utilitaires. |
+| [`src/lib/ai/`](../../src/lib/ai/) | Prompts, parsing JSON, agent OpenAI (`agent.ts`, `prompts/qualification.ts`, `agency-scoring.ts`, `proposal-comparison.ts`). |
 
 ## Points d’attention pour un audit
 
-- **Auth** : contrôle d’accès UI surtout via layout dashboard ; la **sécurité réelle** repose sur **RLS** Supabase (voir [DATA_SUPABASE.md](./DATA_SUPABASE.md)).
-- **PDF** : route API dédiée (voir [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md)) — vérifier autorisations et fuite de données côté PDF.
-- **Données leads** : agences et leads passent par Supabase (pages server + actions) ; le contexte leads sert surtout aux filtres / mutations optimistes côté client.
+- **Auth** : contrôle d’accès UI surtout via layout dashboard ; la **sécurité réelle** repose sur **RLS** Supabase (voir [DATA_SUPABASE.md](./DATA_SUPABASE.md) et [RLS_PROD_CHECKLIST.md](../RLS_PROD_CHECKLIST.md)).
+- **PDF** : route API dédiée (voir [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md)) — vérifier autorisations et fuite de données côté PDF ; stockage optionnel bucket `quote_pdfs` (migrations).
+- **Données leads** : agences et leads passent par Supabase (pages server + actions) ; le contexte leads sert aux filtres / mutations optimistes côté client.
+- **IA** : tout appel modèle doit rester **serveur** (server actions ou routes API) ; ne jamais exposer `OPENAI_API_KEY` en `NEXT_PUBLIC_*`.
+- **Intake / WhatsApp** : utilisent `SUPABASE_SERVICE_ROLE_KEY` — surface d’attaque hors session utilisateur ; valider CORS, secrets, et idempotence (`submission_id`).

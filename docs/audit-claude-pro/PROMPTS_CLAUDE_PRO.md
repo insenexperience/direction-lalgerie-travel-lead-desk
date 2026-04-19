@@ -8,13 +8,15 @@ Copier-coller et adapter les sections entre `---`. Joindre ou résumer le dossie
 
 Tu es un auditeur sécurité sur une app Next.js 16 + Supabase.
 
-Contexte : [STACK.md](./STACK.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [DATA_SUPABASE.md](./DATA_SUPABASE.md), migrations dans `supabase/migrations/`.
+Contexte : [STACK.md](./STACK.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [DATA_SUPABASE.md](./DATA_SUPABASE.md), [OPS_ENV.md](./OPS_ENV.md), migrations dans `supabase/migrations/`, bucket `quote_pdfs` si utilisé en prod.
 
 Tâches :
 
 1. Lister les policies RLS actives par table et détecter conflits ou sur-permissions (ex. pool SELECT vs restrictions référent).
 2. Vérifier que chaque server action dans `src/app/(dashboard)/*/actions.ts` ne s’appuie pas uniquement sur l’UI pour la sécurité.
 3. Analyser la route `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` : contrôle d’accès, fuite de données, IDs exposés.
+4. Passer en revue `src/app/api/intake/route.ts` et `src/app/api/whatsapp/webhook/route.ts` : CORS, secrets, idempotence, signature Meta, absence de fuite de `service_role` dans les réponses.
+5. Passer en revue les server actions `ai-actions.ts` et `workflow-actions.ts` : même barème que les autres actions (ne pas se fier à l’UI).
 
 Livrable : tableau risques (gravité / proba), recommandations concrètes, ordre de patch suggéré.
 

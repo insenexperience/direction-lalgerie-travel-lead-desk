@@ -1,6 +1,6 @@
 # Stack technique (snapshot)
 
-Aligné sur [`package.json`](../../package.json) au moment du bundle (19 avril 2026).
+Aligné sur [`package.json`](../../package.json) (vérifié : 20 avril 2026).
 
 ## Runtime applicatif
 
@@ -22,9 +22,12 @@ Aligné sur [`package.json`](../../package.json) au moment du bundle (19 avril 2
 
 ## Bibliothèques notables
 
-- `@dnd-kit/core`, `@dnd-kit/utilities` — drag & drop (ex. Kanban leads).
+- `openai` — appels modèle côté serveur (qualification, comparaison de propositions, scoring agences ; voir `src/lib/ai/`).
+- `resend` — emails transactionnels (workflow voyageur ; désactivé si clé absente).
 - `@react-pdf/renderer` — génération PDF (devis).
 - `lucide-react` — icônes.
+
+**Kanban leads** : colonnes + `<select>` par carte pour changer l’étape (`src/components/leads-kanban-board.tsx`) — pas de dépendance `@dnd-kit` dans le manifest actuel.
 
 ## Scripts npm utiles
 
