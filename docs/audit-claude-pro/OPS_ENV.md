@@ -9,7 +9,7 @@ Définies pour l’app dans [`.env.example`](../../.env.example) :
 | `NEXT_PUBLIC_SUPABASE_URL` | URL du projet Supabase |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clé **anon** publique (safe côté navigateur avec RLS) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Serveur uniquement : webhooks, `/api/intake`, stockage devis, etc. |
-| `ALLOWED_ORIGIN` | Prod : origine CORS pour `POST /api/intake` (site Squarespace). |
+| `ALLOWED_ORIGIN` | Prod : origine(s) CORS pour `POST /api/intake` ; plusieurs valeurs séparées par une virgule (ex. avec et sans `www`). |
 | `INTAKE_SHARED_SECRET` | Optionnel : authentifie le `POST /api/intake` (Bearer ou `X-Intake-Secret`). |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | IA (qualification, shortlist, comparaison). |
 | `WHATSAPP_*` | Cloud API + webhook Meta (voir `.env.example`). |

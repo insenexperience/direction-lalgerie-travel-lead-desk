@@ -157,21 +157,32 @@ export function corsHeaders(allowOrigin: string): HeadersInit {
   };
 }
 
+function parseAllowedOrigins(): string[] {
+  const raw = process.env.ALLOWED_ORIGIN?.trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export function resolveCors(request: Request): { allowOrigin: string; forbidden: boolean } {
   const isProd = process.env.NODE_ENV === "production";
-  const allowed = process.env.ALLOWED_ORIGIN?.trim();
+  const allowedList = parseAllowedOrigins();
   const reqOrigin = request.headers.get("origin");
 
   if (!isProd) {
     return { allowOrigin: "*", forbidden: false };
   }
-  if (!allowed) {
+  if (!allowedList.length) {
     return { allowOrigin: "*", forbidden: false };
   }
-  if (reqOrigin && reqOrigin !== allowed) {
-    return { allowOrigin: allowed, forbidden: true };
+  const primary = allowedList[0];
+  if (reqOrigin && !allowedList.includes(reqOrigin)) {
+    return { allowOrigin: primary, forbidden: true };
   }
-  return { allowOrigin: allowed, forbidden: false };
+  const allowOrigin = reqOrigin && allowedList.includes(reqOrigin) ? reqOrigin : primary;
+  return { allowOrigin, forbidden: false };
 }
 
 /** Si `INTAKE_SHARED_SECRET` est défini, impose le même secret (Bearer ou header dédié). */

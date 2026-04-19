@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import {
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   if (!verifyIntakeSharedSecret(request)) {
-    console.error("[api/intake] invalid or missing INTAKE_SHARED_SECRET");
+    console.error("[api/intake] 401 — INTAKE_SHARED_SECRET est défini mais en-tête Authorization / X-Intake-Secret absent ou incorrect");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: jsonHeaders });
   }
 
@@ -49,11 +50,13 @@ export async function POST(request: Request) {
 
   const fullName = resolveFullNameFromIntakeBody(body);
   const email = intakeStr(body.email);
-  const submissionId = intakeStr(body.submission_id);
 
-  if (!fullName || !email || !submissionId) {
+  if (!fullName || !email) {
     return NextResponse.json(
-      { error: "Missing required fields" },
+      {
+        error: "Missing required fields",
+        hint: "Envoyer email et nom (full_name ou first + last).",
+      },
       { status: 422, headers: jsonHeaders },
     );
   }
@@ -66,26 +69,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "DB error" }, { status: 500, headers: jsonHeaders });
   }
 
+  const clientSubmissionId = intakeStr(body.submission_id);
+  const submissionId = clientSubmissionId || randomUUID();
+  const bodyForIntake: IntakeJson = { ...body, submission_id: submissionId };
+
   try {
-    const { data: existing, error: findErr } = await supabase
-      .from("leads")
-      .select("id")
-      .eq("submission_id", submissionId)
-      .maybeSingle();
+    if (clientSubmissionId) {
+      const { data: existing, error: findErr } = await supabase
+        .from("leads")
+        .select("id")
+        .eq("submission_id", clientSubmissionId)
+        .maybeSingle();
 
-    if (findErr) {
-      console.error("[api/intake] idempotency select", findErr);
-      return NextResponse.json({ error: "DB error" }, { status: 500, headers: jsonHeaders });
+      if (findErr) {
+        console.error("[api/intake] idempotency select", findErr);
+        return NextResponse.json({ error: "DB error" }, { status: 500, headers: jsonHeaders });
+      }
+
+      if (existing?.id) {
+        return NextResponse.json(
+          { status: "already_received", id: String(existing.id) },
+          { status: 200, headers: jsonHeaders },
+        );
+      }
     }
 
-    if (existing?.id) {
-      return NextResponse.json(
-        { status: "already_received", id: String(existing.id) },
-        { status: 200, headers: jsonHeaders },
-      );
-    }
-
-    const intake = buildIntakeRecordFromBody(body);
+    const intake = buildIntakeRecordFromBody(bodyForIntake);
     const row = buildLeadInsertFromIntake(intake);
 
     const { data: created, error: insErr } = await supabase
@@ -95,9 +104,11 @@ export async function POST(request: Request) {
       .single();
 
     if (insErr || !created?.id) {
-      console.error("[api/intake] insert", insErr);
+      console.error("[api/intake] insert", insErr?.message ?? insErr, insErr);
       return NextResponse.json({ error: "DB error" }, { status: 500, headers: jsonHeaders });
     }
+
+    console.info("[api/intake] created lead", String(created.id), "submission_id", submissionId);
 
     revalidatePath("/leads");
     revalidatePath("/dashboard");
