@@ -70,6 +70,31 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
             className={inputClass}
           />
         </label>
+        <label>
+          <span className={labelClass}>WhatsApp (E.164 recommandé)</span>
+          <input
+            name="whatsapp_phone_number"
+            defaultValue={lead.whatsapp_phone_number ?? ""}
+            disabled={pending}
+            className={inputClass}
+            placeholder="+213…"
+          />
+        </label>
+        <label>
+          <span className={labelClass}>Canal d&apos;entrée</span>
+          <select
+            name="intake_channel"
+            defaultValue={lead.intake_channel ?? ""}
+            disabled={pending}
+            className={inputClass}
+          >
+            <option value="">— inchangé —</option>
+            <option value="manual">Manuel</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="web_form">Formulaire web</option>
+            <option value="email">Email</option>
+          </select>
+        </label>
         <label className="sm:col-span-2">
           <span className={labelClass}>Résumé du projet</span>
           <textarea

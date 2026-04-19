@@ -1,30 +1,11 @@
-import { renderToBuffer } from "@react-pdf/renderer";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import { QuoteDevisPdfDocument } from "@/lib/pdf/quote-devis-pdf";
-import type { QuoteItemLine } from "@/lib/quote-items-build";
-import {
-  coerceQuoteWorkflowStatus,
-  quoteWorkflowStatusLabelFr,
-} from "@/lib/quote-workflow";
+import { buildQuoteDevisPdfBuffer } from "@/lib/pdf/build-quote-devis-buffer";
 
 export const runtime = "nodejs";
 
 type RouteParams = { params: Promise<{ leadId: string; quoteId: string }> };
-
-function parseItems(raw: unknown): QuoteItemLine[] {
-  if (!raw || !Array.isArray(raw)) return [];
-  const out: QuoteItemLine[] = [];
-  for (const row of raw) {
-    if (!row || typeof row !== "object") continue;
-    const o = row as Record<string, unknown>;
-    const label = typeof o.label === "string" ? o.label : "";
-    const detail = typeof o.detail === "string" ? o.detail : "";
-    if (label || detail) out.push({ label: label || "—", detail: detail || "—" });
-  }
-  return out;
-}
 
 export async function GET(_req: Request, { params }: RouteParams) {
   const { leadId, quoteId } = await params;
@@ -40,6 +21,16 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   if (!user) {
     return NextResponse.json({ error: "Non authentifié." }, { status: 401 });
+  }
+
+  const { data: leadAccess, error: accessErr } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (accessErr || !leadAccess) {
+    return NextResponse.json({ error: "Lead introuvable." }, { status: 404 });
   }
 
   const { data: quote, error: qErr } = await supabase
@@ -63,36 +54,20 @@ export async function GET(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Lead introuvable." }, { status: 404 });
   }
 
-  const wf = coerceQuoteWorkflowStatus(quote.workflow_status);
-  const items = parseItems(quote.items);
-
-  const created = new Date(String(quote.created_at ?? "")).toLocaleString("fr-FR", {
-    dateStyle: "long",
-    timeStyle: "short",
+  const buffer = await buildQuoteDevisPdfBuffer({
+    quote: {
+      id: String(quote.id),
+      items: quote.items,
+      workflow_status: quote.workflow_status,
+      created_at: quote.created_at,
+    },
+    lead: {
+      traveler_name: String(lead.traveler_name ?? ""),
+      email: String(lead.email ?? ""),
+      phone: String(lead.phone ?? ""),
+      trip_summary: String(lead.trip_summary ?? ""),
+    },
   });
-
-  const buffer = await renderToBuffer(
-    <QuoteDevisPdfDocument
-      data={{
-        quoteId: String(quote.id),
-        createdAt: created,
-        travelerName: String(lead.traveler_name ?? ""),
-        travelerEmail: String(lead.email ?? ""),
-        travelerPhone: String(lead.phone ?? ""),
-        tripSummary: String(lead.trip_summary ?? ""),
-        workflowLabel: quoteWorkflowStatusLabelFr[wf],
-        items: items.length
-          ? items
-          : [
-              {
-                label: "Contenu",
-                detail:
-                  "— (aucune ligne structurée — complétez le devis ou régénérez depuis la proposition)",
-              },
-            ],
-      }}
-    />,
-  );
 
   const safeName = `devis-${quoteId.slice(0, 8)}.pdf`;
 

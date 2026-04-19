@@ -1,9 +1,10 @@
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { DashboardInbox } from "./dashboard-inbox";
 import { DashboardPageInner, type DashboardKpis } from "./dashboard-page-inner";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 30;
 
 async function loadKpis(): Promise<DashboardKpis> {
   await connection();
@@ -45,5 +46,10 @@ async function loadKpis(): Promise<DashboardKpis> {
 
 export default async function DashboardPage() {
   const kpis = await loadKpis();
-  return <DashboardPageInner kpis={kpis} />;
+  return (
+    <div className="space-y-10">
+      <DashboardInbox />
+      <DashboardPageInner kpis={kpis} />
+    </div>
+  );
 }

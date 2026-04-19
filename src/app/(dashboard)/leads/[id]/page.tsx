@@ -5,72 +5,92 @@ import {
   mapProposalRowFromDb,
   mapQuoteRowFromDb,
 } from "@/lib/co-construction-proposal";
-import {
-  parseCrmCommercialPriority,
-  parseCrmConversionBand,
-  parseCrmFeasibilityBand,
-  parseCrmFollowUpStrategy,
-  parseCrmPrimaryObjection,
-} from "@/lib/crm-fields";
+import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 import { referentDisplayLabel } from "@/lib/referent-display";
-import { LeadDetailView } from "./lead-detail-view";
-import { LeadDetailSupabase, type SupabaseLeadRow } from "./lead-detail-supabase";
+import { isPostgresUndefinedColumnError } from "@/lib/supabase-schema-fallback";
+import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
+import { LeadDetailSupabase } from "./lead-detail-supabase";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 30;
 
 type PageProps = {
   params: Promise<{ id: string }>;
 };
 
-export default async function LeadDetailPage({ params }: PageProps) {
-  const { id } = await params;
+const LEAD_SELECT_V2 = [
+  "id",
+  "referent_id",
+  "retained_agency_id",
+  "traveler_name",
+  "email",
+  "phone",
+  "status",
+  "trip_summary",
+  "travel_style",
+  "travelers",
+  "budget",
+  "trip_dates",
+  "qualification_summary",
+  "internal_notes",
+  "quote_status",
+  "source",
+  "priority",
+  "updated_at",
+  "crm_conversion_band",
+  "crm_follow_up_strategy",
+  "intake_channel",
+  "whatsapp_phone_number",
+  "whatsapp_thread_id",
+  "conversation_transcript",
+  "ai_qualification_payload",
+  "ai_qualification_confidence",
+  "scoring_weights",
+  "qualification_validated_at",
+  "qualification_validated_by",
+  "qualification_validation_status",
+  "manual_takeover",
+].join(", ");
 
-  if (!isUuid(id)) {
-    return <LeadDetailView />;
-  }
+/** Schéma avant migration `20260428100000_travel_lead_desk_v2.sql` (pas de colonnes IA / WhatsApp dédiées). */
+const LEAD_SELECT_LEGACY = [
+  "id",
+  "referent_id",
+  "retained_agency_id",
+  "traveler_name",
+  "email",
+  "phone",
+  "status",
+  "trip_summary",
+  "travel_style",
+  "travelers",
+  "budget",
+  "trip_dates",
+  "qualification_summary",
+  "internal_notes",
+  "quote_status",
+  "source",
+  "priority",
+  "updated_at",
+  "crm_conversion_band",
+  "crm_follow_up_strategy",
+  "submission_id",
+].join(", ");
 
-  const supabase = await createClient();
-  const { data: leadRow, error: leadError } = await supabase
-    .from("leads")
-    .select(
-      [
-        "id",
-        "referent_id",
-        "retained_agency_id",
-        "traveler_name",
-        "email",
-        "phone",
-        "status",
-        "trip_summary",
-        "travel_style",
-        "travelers",
-        "budget",
-        "trip_dates",
-        "qualification_summary",
-        "internal_notes",
-        "quote_status",
-        "source",
-        "priority",
-        "updated_at",
-        "crm_commercial_priority",
-        "crm_conversion_band",
-        "crm_feasibility_band",
-        "crm_follow_up_strategy",
-        "crm_primary_objection",
-      ].join(", "),
-    )
-    .eq("id", id)
-    .maybeSingle();
+const QUOTE_SELECT_V2 =
+  "id, kind, status, workflow_status, items, summary, created_at, sent_at, sent_via, pdf_storage_path";
 
-  if (leadError || !leadRow) {
-    notFound();
-  }
+const QUOTE_SELECT_LEGACY =
+  "id, kind, status, workflow_status, items, summary, created_at";
 
-  const row = leadRow as unknown as Record<string, unknown>;
+function mapRowToSupabaseLeadRow(
+  row: Record<string, unknown>,
+  schemaV2: boolean,
+): SupabaseLeadRow {
+  const priority: "high" | "normal" = row.priority === "high" ? "high" : "normal";
 
-  const lead: SupabaseLeadRow = {
+  const base = {
     id: String(row.id),
     referent_id: row.referent_id ? String(row.referent_id) : null,
     retained_agency_id: row.retained_agency_id ? String(row.retained_agency_id) : null,
@@ -87,20 +107,102 @@ export default async function LeadDetailPage({ params }: PageProps) {
     internal_notes: String(row.internal_notes ?? ""),
     quote_status: String(row.quote_status ?? ""),
     source: String(row.source ?? ""),
-    priority: row.priority === "high" ? "high" : "normal",
+    priority,
     updated_at: String(row.updated_at ?? ""),
-    crm_commercial_priority:
-      parseCrmCommercialPriority(String(row.crm_commercial_priority ?? "")) ??
-      "medium",
     crm_conversion_band:
       parseCrmConversionBand(String(row.crm_conversion_band ?? "")) ?? "medium",
-    crm_feasibility_band:
-      parseCrmFeasibilityBand(String(row.crm_feasibility_band ?? "")) ?? "possible",
     crm_follow_up_strategy:
       parseCrmFollowUpStrategy(String(row.crm_follow_up_strategy ?? "")) ?? "none",
-    crm_primary_objection:
-      parseCrmPrimaryObjection(String(row.crm_primary_objection ?? "")) ?? "none",
   };
+
+  if (!schemaV2) {
+    const hasSubmission =
+      row.submission_id != null && String(row.submission_id).trim() !== "";
+    return {
+      ...base,
+      intake_channel: hasSubmission ? "web_form" : "manual",
+      whatsapp_phone_number: null,
+      whatsapp_thread_id: null,
+      conversation_transcript: [],
+      ai_qualification_payload: null,
+      ai_qualification_confidence: null,
+      scoring_weights: null,
+      qualification_validated_at: null,
+      qualification_validated_by: null,
+      qualification_validation_status: "pending",
+      manual_takeover: false,
+    };
+  }
+
+  return {
+    ...base,
+    intake_channel: row.intake_channel != null ? String(row.intake_channel) : null,
+    whatsapp_phone_number: row.whatsapp_phone_number != null
+      ? String(row.whatsapp_phone_number)
+      : null,
+    whatsapp_thread_id:
+      row.whatsapp_thread_id != null ? String(row.whatsapp_thread_id) : null,
+    conversation_transcript: row.conversation_transcript ?? [],
+    ai_qualification_payload: row.ai_qualification_payload ?? null,
+    ai_qualification_confidence:
+      row.ai_qualification_confidence != null &&
+      Number.isFinite(Number(row.ai_qualification_confidence))
+        ? Number(row.ai_qualification_confidence)
+        : null,
+    scoring_weights: row.scoring_weights ?? null,
+    qualification_validated_at: row.qualification_validated_at
+      ? String(row.qualification_validated_at)
+      : null,
+    qualification_validated_by: row.qualification_validated_by
+      ? String(row.qualification_validated_by)
+      : null,
+    qualification_validation_status: String(
+      row.qualification_validation_status ?? "pending",
+    ),
+    manual_takeover: Boolean(row.manual_takeover),
+  };
+}
+
+export default async function LeadDetailPage({ params }: PageProps) {
+  const { id } = await params;
+
+  if (!isUuid(id)) {
+    notFound();
+  }
+
+  const supabase = await createClient();
+
+  let schemaV2 = true;
+  let leadRes = await supabase
+    .from("leads")
+    .select(LEAD_SELECT_V2)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (leadRes.error && isPostgresUndefinedColumnError(leadRes.error)) {
+    schemaV2 = false;
+    leadRes = await supabase
+      .from("leads")
+      .select(LEAD_SELECT_LEGACY)
+      .eq("id", id)
+      .maybeSingle();
+  }
+
+  const { data: leadRow, error: leadError } = leadRes;
+
+  if (leadError) {
+    throw new Error(
+      `Chargement du lead impossible (${leadError.code ?? "?"}) : ${leadError.message}. ` +
+        "Vérifiez les migrations Supabase (`npm run db:push` ou SQL Editor — voir docs/DEPLOY_VERCEL.md §2).",
+    );
+  }
+
+  if (!leadRow) {
+    notFound();
+  }
+
+  const row = leadRow as unknown as Record<string, unknown>;
+  const lead = mapRowToSupabaseLeadRow(row, schemaV2);
 
   const { data: referentRows } = await supabase
     .from("profiles")
@@ -147,11 +249,24 @@ export default async function LeadDetailPage({ params }: PageProps) {
         )
       : [];
 
-  const { data: quoteRows, error: quotesError } = await supabase
+  const quotesPrimary = await supabase
     .from("quotes")
-    .select("id, kind, status, workflow_status, items, summary, created_at")
+    .select(schemaV2 ? QUOTE_SELECT_V2 : QUOTE_SELECT_LEGACY)
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
+
+  const quotesFinal =
+    quotesPrimary.error &&
+    schemaV2 &&
+    isPostgresUndefinedColumnError(quotesPrimary.error)
+      ? await supabase
+          .from("quotes")
+          .select(QUOTE_SELECT_LEGACY)
+          .eq("lead_id", id)
+          .order("created_at", { ascending: false })
+      : quotesPrimary;
+
+  const { data: quoteRows, error: quotesError } = quotesFinal;
 
   const leadQuotes =
     !quotesError && quoteRows

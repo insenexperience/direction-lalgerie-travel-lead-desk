@@ -13,6 +13,7 @@ Ce dossier regroupe une **documentation courte et structurée** pour faire audit
 
 ## Ordre de lecture recommandé
 
+0. [PRD_TRAVEL_LEAD_DESK_V2.md](../PRD_TRAVEL_LEAD_DESK_V2.md) — vision produit v2 (IA, WhatsApp, supervisor-in-the-loop).
 1. [STACK.md](./STACK.md) — versions et dépendances.
 2. [ARCHITECTURE.md](./ARCHITECTURE.md) — auth, App Router, flux données.
 3. [DATA_SUPABASE.md](./DATA_SUPABASE.md) — modèle Postgres / migrations.
@@ -25,7 +26,7 @@ Ce dossier regroupe une **documentation courte et structurée** pour faire audit
 
 - **Option A** : ouvrir ce dépôt dans l’IDE et attacher le dossier `docs/audit-claude-pro/` (ou le repo entier) si ton outil le permet, puis poser des questions ciblées.
 - **Option B** : copier-coller les fichiers `.md` de ce dossier **dans l’ordre ci-dessus** (sans `.env`).
-- Pour aller plus loin : demander à l’auditeur de lire en parallèle [docs/PRODUCT_SPEC.md](../PRODUCT_SPEC.md) (spec produit complète) et les fichiers cités dans chaque section.
+- Pour aller plus loin : [docs/PRODUCT_SPEC.md](../PRODUCT_SPEC.md) (détail UX / règles) + PRD v2 ci-dessus ; [`IMPLEMENTATION_PENDING_V2.md`](../IMPLEMENTATION_PENDING_V2.md) si le code n’a pas encore rattrapé le schéma v2.
 
 ## Maintenance
 

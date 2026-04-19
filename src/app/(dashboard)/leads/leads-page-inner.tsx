@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   filterLeadsByQueue,
   parseLeadsQueueFilter,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/leads-queue-filter";
 import { useMemo, useState } from "react";
 import {
+  Hand,
   Kanban,
   LayoutList,
   Plus,
@@ -18,6 +19,7 @@ import {
   Trash2,
   Waypoints,
 } from "lucide-react";
+import { claimLead } from "@/app/(dashboard)/leads/actions";
 import { isUuid } from "@/lib/is-uuid";
 import { PageEmpty } from "@/components/page-empty";
 import { LeadIntakeModal } from "@/components/leads/lead-intake-modal";
@@ -40,7 +42,18 @@ function leadsHref(opts: {
   return q ? `/leads?${q}` : "/leads";
 }
 
+function consultationBadge(lead: {
+  agencyLinks?: { status: string }[];
+}): string | null {
+  const links = lead.agencyLinks ?? [];
+  const total = links.length;
+  if (!total) return null;
+  const resp = links.filter((l) => l.status === "quote_received").length;
+  return `${total} ag. · ${resp} rép.`;
+}
+
 export function LeadsPageInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const currentStatus = searchParams.get("status") ?? "all";
   const view = searchParams.get("view") === "kanban" ? "kanban" : "list";
@@ -171,6 +184,11 @@ export function LeadsPageInner() {
               { value: "all" as const, label: "Tous les leads" },
               { value: "unassigned" as const, label: "À assigner (sans référent)" },
               { value: "mine" as const, label: "Mes dossiers" },
+              {
+                value: "pending_validation" as const,
+                label: "Validation qualification",
+              },
+              { value: "whatsapp" as const, label: "Canal WhatsApp" },
             ] as const
           ).map(({ value, label }) => {
             const active = queue === value;
@@ -267,7 +285,8 @@ export function LeadsPageInner() {
                     <th className="px-4 py-3 font-semibold sm:px-6">Budget</th>
                     <th className="px-4 py-3 font-semibold sm:px-6">Étape</th>
                     <th className="px-4 py-3 font-semibold sm:px-6">Agence</th>
-                    <th className="w-14 px-2 py-3 text-right font-semibold sm:px-3">Gestion</th>
+                    <th className="px-4 py-3 font-semibold sm:px-6">Consultations</th>
+                    <th className="w-28 px-2 py-3 text-right font-semibold sm:px-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -345,27 +364,52 @@ export function LeadsPageInner() {
                           {lead.assignedAgency}
                         </Link>
                       </td>
+                      <td className="px-4 py-4 align-top text-xs text-muted-foreground sm:px-6">
+                        {consultationBadge(lead) ?? "—"}
+                      </td>
                       <td className="px-2 py-4 align-top text-right sm:px-3">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const label = lead.travelerName || lead.email || "ce lead";
-                            if (
-                              !window.confirm(
-                                `Supprimer définitivement « ${label} » ?${isUuid(lead.id) ? " Données Supabase incluses." : ""}`,
-                              )
-                            ) {
-                              return;
-                            }
-                            void deleteLead(lead.id);
-                          }}
-                          className="inline-flex rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-700"
-                          aria-label="Supprimer le lead"
-                        >
-                          <Trash2 className="size-4" aria-hidden />
-                        </button>
+                        <div className="flex justify-end gap-1">
+                          {isUuid(lead.id) && !lead.referentId ? (
+                            <button
+                              type="button"
+                              title="Prendre ce lead"
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const r = await claimLead(lead.id);
+                                if (!r.ok) {
+                                  window.alert(r.error);
+                                  return;
+                                }
+                                router.refresh();
+                              }}
+                              className="inline-flex rounded-md p-2 text-muted-foreground transition-colors hover:bg-emerald-50 hover:text-emerald-800"
+                              aria-label="Prendre ce lead"
+                            >
+                              <Hand className="size-4" aria-hidden />
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const label = lead.travelerName || lead.email || "ce lead";
+                              if (
+                                !window.confirm(
+                                  `Supprimer définitivement « ${label} » ?${isUuid(lead.id) ? " Données Supabase incluses." : ""}`,
+                                )
+                              ) {
+                                return;
+                              }
+                              void deleteLead(lead.id);
+                            }}
+                            className="inline-flex rounded-md p-2 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-700"
+                            aria-label="Supprimer le lead"
+                          >
+                            <Trash2 className="size-4" aria-hidden />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

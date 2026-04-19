@@ -2,9 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Download } from "lucide-react";
-import { updateQuoteWorkflowStatus } from "@/app/(dashboard)/leads/quote-actions";
+import { Download, MessageCircle } from "lucide-react";
+import {
+  sendQuoteDevisViaWhatsApp,
+  updateQuoteWorkflowStatus,
+} from "@/app/(dashboard)/leads/quote-actions";
 import type { LeadQuoteListItem } from "@/lib/co-construction-proposal";
+import { formatFrDateTimeShort } from "@/lib/format-fr-date-time";
 import {
   isTerminalQuoteWorkflow,
   quoteWorkflowStatusLabelFr,
@@ -51,6 +55,18 @@ export function LeadQuotesPanel({ leadId, quotes }: LeadQuotesPanelProps) {
     });
   }
 
+  function sendViaWhatsApp(quoteId: string) {
+    setError(null);
+    startTransition(async () => {
+      const res = await sendQuoteDevisViaWhatsApp(leadId, quoteId);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   return (
     <div className="space-y-4">
       {error ? (
@@ -72,22 +88,38 @@ export function LeadQuotesPanel({ leadId, quotes }: LeadQuotesPanelProps) {
                 <div>
                   <p className="font-mono text-[11px] text-muted-foreground">{q.id.slice(0, 8)}…</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {new Date(q.created_at).toLocaleString("fr-FR", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
+                    {formatFrDateTimeShort(q.created_at)}
                   </p>
                 </div>
-                <a
-                  href={pdfHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-md border border-[#182b35] bg-panel px-3 py-2 text-sm font-semibold text-[#182b35] transition-colors hover:bg-panel-muted"
-                >
-                  <Download className="size-4" aria-hidden />
-                  Télécharger PDF
-                </a>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={pdfHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-md border border-[#182b35] bg-panel px-3 py-2 text-sm font-semibold text-[#182b35] transition-colors hover:bg-panel-muted"
+                  >
+                    <Download className="size-4" aria-hidden />
+                    Télécharger PDF
+                  </a>
+                  {!terminal ? (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => sendViaWhatsApp(q.id)}
+                      className="inline-flex items-center gap-2 rounded-md border border-emerald-800 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                    >
+                      <MessageCircle className="size-4" aria-hidden />
+                      Envoyer PDF (WhatsApp)
+                    </button>
+                  ) : null}
+                </div>
               </div>
+              {q.sent_at ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Dernier envoi : {formatFrDateTimeShort(q.sent_at)}
+                  {q.sent_via ? ` · ${q.sent_via}` : ""}
+                </p>
+              ) : null}
 
               <p className="mt-3 text-sm">
                 <span className="text-muted-foreground">Suivi :</span>{" "}

@@ -1,4 +1,4 @@
-import type { LeadStatus, LeadTimelineItem, MockLead } from "@/lib/mock-leads";
+import type { LeadTimelineItem, MockLead } from "@/lib/mock-leads";
 
 const today = () =>
   new Intl.DateTimeFormat("fr-FR", {

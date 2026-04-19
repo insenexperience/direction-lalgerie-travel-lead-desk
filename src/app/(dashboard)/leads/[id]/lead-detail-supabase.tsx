@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { LeadAiOpsPanel } from "@/components/leads/lead-ai-ops-panel";
 import { LeadDetailDeleteZone } from "@/components/leads/lead-detail-delete-zone";
 import { LeadFicheModifier } from "@/components/leads/lead-fiche-modifier";
 import { LeadReadOnlySummary } from "@/components/leads/lead-read-only-summary";
@@ -73,6 +74,7 @@ export function LeadDetailSupabase({
       ) : null}
 
       <div className="space-y-5">
+        <LeadAiOpsPanel lead={lead} />
         <LeadSupabaseStageWorkspace
           lead={lead}
           referents={referents}

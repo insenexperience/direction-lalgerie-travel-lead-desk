@@ -3,13 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { updateLeadCommercialCrm } from "@/app/(dashboard)/leads/actions";
-import {
-  CRM_COMMERCIAL_PRIORITY_OPTIONS,
-  CRM_CONVERSION_OPTIONS,
-  CRM_FEASIBILITY_OPTIONS,
-  CRM_FOLLOW_UP_OPTIONS,
-  CRM_OBJECTION_OPTIONS,
-} from "@/lib/crm-fields";
+import { CRM_CONVERSION_OPTIONS, CRM_FOLLOW_UP_OPTIONS } from "@/lib/crm-fields";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 
 function selectField(
@@ -62,25 +56,11 @@ export function LeadCommercialCrmForm({ lead }: { lead: SupabaseLeadRow }) {
     <form action={handleSubmit} className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         {selectField(
-          "crm-priority",
-          "crm_commercial_priority",
-          "Priorité commerciale",
-          CRM_COMMERCIAL_PRIORITY_OPTIONS,
-          lead.crm_commercial_priority,
-        )}
-        {selectField(
           "crm-conversion",
           "crm_conversion_band",
           "Probabilité de conversion",
           CRM_CONVERSION_OPTIONS,
           lead.crm_conversion_band,
-        )}
-        {selectField(
-          "crm-feasibility",
-          "crm_feasibility_band",
-          "Faisabilité",
-          CRM_FEASIBILITY_OPTIONS,
-          lead.crm_feasibility_band,
         )}
         {selectField(
           "crm-followup",
@@ -89,15 +69,6 @@ export function LeadCommercialCrmForm({ lead }: { lead: SupabaseLeadRow }) {
           CRM_FOLLOW_UP_OPTIONS,
           lead.crm_follow_up_strategy,
         )}
-        <div className="sm:col-span-2">
-          {selectField(
-            "crm-objection",
-            "crm_primary_objection",
-            "Objection principale (bonus)",
-            CRM_OBJECTION_OPTIONS,
-            lead.crm_primary_objection,
-          )}
-        </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button
@@ -107,9 +78,7 @@ export function LeadCommercialCrmForm({ lead }: { lead: SupabaseLeadRow }) {
         >
           {pending ? "Enregistrement…" : "Enregistrer la grille CRM"}
         </button>
-        <p className="text-xs text-muted-foreground">
-          Cible ~2 min : 5 listes + objection optionnelle.
-        </p>
+        <p className="text-xs text-muted-foreground">Cible ~1 min : conversion + relance.</p>
       </div>
       {message ? (
         <p

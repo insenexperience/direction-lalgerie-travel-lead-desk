@@ -43,17 +43,17 @@ export function AssignReferentForm({
     router.refresh();
     setMessage(
       variant === "travel_desk"
-        ? "Opérateur travel desk enregistré."
-        : "Référent mis à jour.",
+        ? "Opérateur assigné enregistré."
+        : "Opérateur assigné mis à jour.",
     );
   }
 
   const fieldLabel =
-    variant === "travel_desk" ? "Opérateur travel desk" : "Référent lead";
+    variant === "travel_desk" ? "Opérateur assigné" : "Opérateur assigné";
   const submitLabel =
     variant === "travel_desk"
       ? "Allouer l’opérateur"
-      : "Enregistrer le référent";
+      : "Enregistrer l’opérateur";
 
   return (
     <form action={handleSubmit} className="space-y-3">

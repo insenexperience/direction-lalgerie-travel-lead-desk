@@ -2,6 +2,8 @@
 
 ## Product & Build Specification (Cursor Ready)
 
+**Mise à jour v2 (avril 2026)** : la vision cible (orchestration IA, WhatsApp, schéma données, critères de succès) est décrite dans **[PRD_TRAVEL_LEAD_DESK_V2.md](./PRD_TRAVEL_LEAD_DESK_V2.md)**. Ce document reste la spec détaillée UX / règles métier et glossaire ; en cas de divergence, le PRD v2 prime pour la roadmap produit.
+
 ---
 
 # 1. Vision produit

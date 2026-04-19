@@ -21,6 +21,13 @@ export type CoConstructionProposalRow = {
   converted_quote_id: string | null;
   created_at: string;
   updated_at: string;
+  ai_suggested?: boolean;
+  ai_match_score?: number | null;
+  ai_match_rationale?: string | null;
+  ai_recommended?: boolean;
+  ai_proposal_score?: number | null;
+  ai_proposal_rationale?: string | null;
+  agency_proposal_received_at?: string | null;
 };
 
 export const coConstructionProposalStatusLabelFr: Record<
@@ -40,6 +47,9 @@ export type LeadQuoteListItem = {
   summary: string | null;
   created_at: string;
   items: QuoteItemLine[];
+  sent_at: string | null;
+  sent_via: string | null;
+  pdf_storage_path: string | null;
 };
 
 export function mapProposalRowFromDb(
@@ -48,6 +58,9 @@ export function mapProposalRowFromDb(
   const st = String(r.status ?? "awaiting_agency");
   const status: CoConstructionProposalStatus =
     st === "submitted" || st === "approved" ? st : "awaiting_agency";
+
+  const aiMatch = r.ai_match_score;
+  const aiProp = r.ai_proposal_score;
 
   return {
     id: String(r.id),
@@ -67,6 +80,19 @@ export function mapProposalRowFromDb(
     converted_quote_id: r.converted_quote_id ? String(r.converted_quote_id) : null,
     created_at: String(r.created_at ?? ""),
     updated_at: String(r.updated_at ?? ""),
+    ai_suggested: Boolean(r.ai_suggested),
+    ai_match_score:
+      aiMatch != null && Number.isFinite(Number(aiMatch)) ? Number(aiMatch) : null,
+    ai_match_rationale:
+      r.ai_match_rationale != null ? String(r.ai_match_rationale) : null,
+    ai_recommended: Boolean(r.ai_recommended),
+    ai_proposal_score:
+      aiProp != null && Number.isFinite(Number(aiProp)) ? Number(aiProp) : null,
+    ai_proposal_rationale:
+      r.ai_proposal_rationale != null ? String(r.ai_proposal_rationale) : null,
+    agency_proposal_received_at: r.agency_proposal_received_at
+      ? String(r.agency_proposal_received_at)
+      : null,
   };
 }
 
@@ -92,5 +118,8 @@ export function mapQuoteRowFromDb(r: Record<string, unknown>): LeadQuoteListItem
     summary: r.summary != null ? String(r.summary) : null,
     created_at: String(r.created_at ?? ""),
     items: parseQuoteItems(r.items),
+    sent_at: r.sent_at != null ? String(r.sent_at) : null,
+    sent_via: r.sent_via != null ? String(r.sent_via) : null,
+    pdf_storage_path: r.pdf_storage_path != null ? String(r.pdf_storage_path) : null,
   };
 }

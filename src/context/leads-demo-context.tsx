@@ -11,8 +11,12 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  createConsultationForLead,
   deleteLead as deleteLeadFromServer,
+  setLeadRetainedAgency,
   toggleLeadStarred,
+  updateConsultationQuoteForLead,
+  updateConsultationStatusForLead,
   updateLeadStatus,
 } from "@/app/(dashboard)/leads/actions";
 import { timelineEntry } from "@/lib/demo-lead-factory";
@@ -41,13 +45,6 @@ function normalizeLeads(list: MockLead[]): MockLead[] {
   return list.map(normalizeLead);
 }
 
-function leadsFingerprint(list: MockLead[]): string {
-  if (!list.length) return "__empty__";
-  return list
-    .map((l) => `${l.id}:${l.status}:${l.referentId ?? ""}:${l.starred}`)
-    .join("|");
-}
-
 type LeadsDemoContextValue = {
   leads: MockLead[];
   filteredLeads: MockLead[];
@@ -62,22 +59,22 @@ type LeadsDemoContextValue = {
   addLeadAgencyConsultation: (
     leadId: string,
     input: { agencyId: string; agencyName: string },
-  ) => void;
+  ) => void | Promise<void>;
   setLeadAgencyLinkStatus: (
     leadId: string,
     linkId: string,
     status: AgencyConsultationStatus,
-  ) => void;
+  ) => void | Promise<void>;
   setLeadAgencyLinkQuote: (
     leadId: string,
     linkId: string,
     quoteSummary: string,
-  ) => void;
+  ) => void | Promise<void>;
   setRetainedAgencyForLead: (
     leadId: string,
     retainedAgencyId: string | null,
     retainedDisplayName: string | null,
-  ) => void;
+  ) => void | Promise<void>;
   /** Supprime un lead (Supabase si UUID, sinon démo locale). */
   deleteLead: (leadId: string) => Promise<void>;
 };
@@ -98,15 +95,6 @@ export function LeadsDemoProvider({
   const router = useRouter();
   const [leads, setLeads] = useState(() => normalizeLeads(initialLeads));
   const [search, setSearch] = useState("");
-
-  const initialFingerprint = useMemo(
-    () => leadsFingerprint(initialLeads),
-    [initialLeads],
-  );
-
-  useEffect(() => {
-    setLeads(normalizeLeads(initialLeads));
-  }, [initialFingerprint]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +206,17 @@ export function LeadsDemoProvider({
   }, [router]);
 
   const addLeadAgencyConsultation = useCallback(
-    (leadId: string, input: { agencyId: string; agencyName: string }) => {
+    async (leadId: string, input: { agencyId: string; agencyName: string }) => {
+      if (isUuid(leadId)) {
+        const result = await createConsultationForLead(leadId, input.agencyId);
+        if (!result.ok) {
+          window.alert(result.error);
+          return;
+        }
+        refreshLeads();
+        router.refresh();
+        return;
+      }
       setLeads((prev) =>
         prev.map((l) => {
           if (l.id !== leadId) return l;
@@ -245,11 +243,21 @@ export function LeadsDemoProvider({
         }),
       );
     },
-    [],
+    [refreshLeads, router],
   );
 
   const setLeadAgencyLinkStatus = useCallback(
-    (leadId: string, linkId: string, status: AgencyConsultationStatus) => {
+    async (leadId: string, linkId: string, status: AgencyConsultationStatus) => {
+      if (isUuid(leadId) && isUuid(linkId)) {
+        const result = await updateConsultationStatusForLead(linkId, leadId, status);
+        if (!result.ok) {
+          window.alert(result.error);
+          return;
+        }
+        refreshLeads();
+        router.refresh();
+        return;
+      }
       setLeads((prev) =>
         prev.map((l) => {
           if (l.id !== leadId) return l;
@@ -273,12 +281,26 @@ export function LeadsDemoProvider({
         }),
       );
     },
-    [],
+    [refreshLeads, router],
   );
 
   const setLeadAgencyLinkQuote = useCallback(
-    (leadId: string, linkId: string, quoteSummary: string) => {
+    async (leadId: string, linkId: string, quoteSummary: string) => {
       const trimmed = quoteSummary.trim();
+      if (isUuid(leadId) && isUuid(linkId)) {
+        const result = await updateConsultationQuoteForLead(
+          linkId,
+          leadId,
+          trimmed,
+        );
+        if (!result.ok) {
+          window.alert(result.error);
+          return;
+        }
+        refreshLeads();
+        router.refresh();
+        return;
+      }
       setLeads((prev) =>
         prev.map((l) => {
           if (l.id !== leadId) return l;
@@ -310,7 +332,7 @@ export function LeadsDemoProvider({
         }),
       );
     },
-    [],
+    [refreshLeads, router],
   );
 
   const deleteLead = useCallback(
@@ -331,11 +353,21 @@ export function LeadsDemoProvider({
   );
 
   const setRetainedAgencyForLead = useCallback(
-    (
+    async (
       leadId: string,
       retainedAgencyId: string | null,
       retainedDisplayName: string | null,
     ) => {
+      if (isUuid(leadId)) {
+        const result = await setLeadRetainedAgency(leadId, retainedAgencyId);
+        if (!result.ok) {
+          window.alert(result.error);
+          return;
+        }
+        refreshLeads();
+        router.refresh();
+        return;
+      }
       setLeads((prev) =>
         prev.map((l) => {
           if (l.id !== leadId) return l;
@@ -368,7 +400,7 @@ export function LeadsDemoProvider({
         }),
       );
     },
-    [],
+    [refreshLeads, router],
   );
 
   const value = useMemo(

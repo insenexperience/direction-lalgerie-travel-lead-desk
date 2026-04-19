@@ -1,4 +1,4 @@
-import type { LeadStatus, MockLead } from "@/lib/mock-leads";
+import type { LeadAgencyLink, LeadStatus, MockLead } from "@/lib/mock-leads";
 import { coerceLeadStatus } from "@/lib/lead-status-coerce";
 
 function coerceStatus(value: unknown): LeadStatus {
@@ -28,12 +28,15 @@ function buildDatesLine(row: Record<string, unknown>): string {
   return "—";
 }
 
-export function mapDbLeadRowToMock(row: Record<string, unknown>): MockLead {
+export function mapDbLeadRowToMock(
+  row: Record<string, unknown>,
+  agencyLinks: LeadAgencyLink[] = [],
+): MockLead {
   const referentId = row.referent_id ? String(row.referent_id) : null;
   const retained = row.retained_agency_id ? String(row.retained_agency_id) : null;
 
   let assignedAgency = referentId
-    ? "Referent assigne"
+    ? "Operateur assigne"
     : "A assigner (operateur)";
   if (retained) {
     assignedAgency = "Agence retenue (voir fiche)";
@@ -60,18 +63,27 @@ export function mapDbLeadRowToMock(row: Record<string, unknown>): MockLead {
     timeline: [],
     starred: Boolean(row.starred),
     priority: row.priority === "high" ? "high" : "normal",
-    agencyLinks: [],
+    agencyLinks,
     retainedAgencyId: retained,
+    intakeChannel: row.intake_channel != null ? String(row.intake_channel) : null,
+    qualificationPending:
+      String(row.qualification_validation_status ?? "pending") === "pending",
   };
 }
 
-export function mapDbLeadRowsToMocks(rows: unknown[] | null): MockLead[] {
+export function mapDbLeadRowsToMocks(
+  rows: unknown[] | null,
+  consultationsByLeadId?: Map<string, LeadAgencyLink[]>,
+): MockLead[] {
   if (!rows?.length) return [];
   const out: MockLead[] = [];
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
     try {
-      out.push(mapDbLeadRowToMock(r as Record<string, unknown>));
+      const row = r as Record<string, unknown>;
+      const id = String(row.id);
+      const links = consultationsByLeadId?.get(id) ?? [];
+      out.push(mapDbLeadRowToMock(row, links));
     } catch {
       /* ligne ignorée si schéma inattendu */
     }

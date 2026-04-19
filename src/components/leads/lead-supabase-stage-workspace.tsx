@@ -40,7 +40,7 @@ function stageIntro(status: LeadStatus): { title: string; body: string } {
     qualification: {
       title: "Qualification & affinage du besoin",
       body:
-        "Infos voyageur souvent incomplètes à l’entrée : un échange (e-mail ou appel) permet de compléter le même formulaire que sur le site (menu « Modifier la fiche »). En parallèle, remplissez la grille CRM express ci-dessous pour le pilotage interne (priorité, conversion, faisabilité, relance, objection optionnelle) — cible ~2 minutes.",
+        "Infos voyageur souvent incomplètes à l’entrée : un échange (e-mail, appel ou WhatsApp) permet d’enrichir la fiche (menu « Modifier la fiche »). La conversation IA apparaît dans le bloc « Conversation voyageur & IA ». Grille CRM express ci-dessous (conversion + relance) — cible ~1 minute.",
     },
     agency_assignment: {
       title: "Assignation — agence partenaire",
@@ -108,8 +108,8 @@ export function LeadSupabaseStageWorkspace({
               Menu — Grille CRM express
             </h3>
             <p className="mt-2 text-sm text-foreground/85">
-              Priorité commerciale, probabilité de conversion, faisabilité, stratégie de relance, et
-              objection principale (bonus) — utile pour closer sans alourdir la fiche voyageur.
+              Probabilité de conversion et stratégie de relance — utile pour closer sans alourdir la
+              fiche voyageur.
             </p>
             <div className="mt-4 rounded-md border border-border bg-panel-muted/30 p-4 sm:p-5">
               <LeadCommercialCrmForm lead={lead} />

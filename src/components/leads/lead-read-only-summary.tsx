@@ -1,10 +1,4 @@
-import {
-  labelCrmCommercialPriority,
-  labelCrmConversion,
-  labelCrmFeasibility,
-  labelCrmFollowUp,
-  labelCrmObjection,
-} from "@/lib/crm-fields";
+import { labelCrmConversion, labelCrmFollowUp } from "@/lib/crm-fields";
 import { leadStatusLabelFr } from "@/lib/mock-leads";
 import type { LeadStatus } from "@/lib/mock-leads";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
@@ -40,12 +34,14 @@ export function LeadReadOnlySummary({
         <span className="font-semibold text-foreground">{leadStatusLabelFr[st]}</span>
       </p>
       <dl className="mt-4 grid gap-4 sm:grid-cols-2">
-        {row("Opérateur travel desk", operatorLabel ?? "—")}
+        {row("Opérateur assigné", operatorLabel ?? "—")}
         {row("Agence partenaire", partnerAgencyLabel ?? "—")}
         {row("Voyageur", lead.traveler_name)}
         {row("Email", lead.email)}
         {row("Téléphone", lead.phone)}
         {row("Source", lead.source)}
+        {row("Canal d’entrée", lead.intake_channel ?? "—")}
+        {row("WhatsApp (déd.)", lead.whatsapp_phone_number ?? "—")}
         {row("Priorité", lead.priority === "high" ? "Haute" : "Normale")}
         <div className="sm:col-span-2">{row("Projet", lead.trip_summary)}</div>
         <div className="sm:col-span-2">
@@ -58,14 +54,11 @@ export function LeadReadOnlySummary({
         </div>
         <div className="sm:col-span-2 border-t border-border/60 pt-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            CRM express
+            Pilotage CRM (express)
           </p>
           <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-            {row("Priorité commerciale", labelCrmCommercialPriority(lead.crm_commercial_priority))}
             {row("Conversion", labelCrmConversion(lead.crm_conversion_band))}
-            {row("Faisabilité", labelCrmFeasibility(lead.crm_feasibility_band))}
             {row("Relance", labelCrmFollowUp(lead.crm_follow_up_strategy))}
-            {row("Objection principale", labelCrmObjection(lead.crm_primary_objection))}
           </dl>
         </div>
         <div className="sm:col-span-2">{row("Notes internes", lead.internal_notes)}</div>

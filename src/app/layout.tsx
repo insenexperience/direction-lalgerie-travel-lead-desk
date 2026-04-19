@@ -28,9 +28,14 @@ export default function RootLayout({
   return (
     <html
       lang="fr"
+      suppressHydrationWarning
       className={`${poppins.variable} ${cormorant.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-background font-sans text-foreground">
+      {/* suppressHydrationWarning : extensions (ex. cz-shortcut-listen sur body) modifient le DOM avant React. */}
+      <body
+        suppressHydrationWarning
+        className="min-h-full bg-background font-sans text-foreground"
+      >
         {children}
       </body>
     </html>

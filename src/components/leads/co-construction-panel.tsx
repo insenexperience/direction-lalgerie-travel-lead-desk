@@ -12,6 +12,7 @@ import {
 } from "@/app/(dashboard)/leads/co-construction-actions";
 import type { CoConstructionProposalRow } from "@/lib/co-construction-proposal";
 import { coConstructionProposalStatusLabelFr } from "@/lib/co-construction-proposal";
+import { formatFrDateTimeShort } from "@/lib/format-fr-date-time";
 
 type CoConstructionPanelProps = {
   leadId: string;
@@ -94,12 +95,29 @@ export function CoConstructionPanel({
                 <div>
                   <p className="font-semibold text-foreground">{p.title}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Version {p.version} —{" "}
-                    {new Date(p.created_at).toLocaleString("fr-FR", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
+                    Version {p.version} — {formatFrDateTimeShort(p.created_at)}
                   </p>
+                  {p.ai_match_score != null || p.ai_proposal_score != null ? (
+                    <p className="mt-2 text-xs text-foreground/90">
+                      {p.ai_match_score != null ? (
+                        <span className="mr-3">
+                          Match IA : {(p.ai_match_score * 100).toFixed(0)}%
+                          {p.ai_recommended ? " · recommandée" : ""}
+                        </span>
+                      ) : null}
+                      {p.ai_proposal_score != null ? (
+                        <span>
+                          Proposition IA : {(p.ai_proposal_score * 100).toFixed(0)}%
+                          {p.ai_recommended ? " · recommandée" : ""}
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {p.ai_match_rationale || p.ai_proposal_rationale ? (
+                    <p className="mt-1 text-xs italic text-muted-foreground">
+                      {p.ai_proposal_rationale ?? p.ai_match_rationale}
+                    </p>
+                  ) : null}
                 </div>
                 <span className="rounded-none border border-border bg-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/90">
                   {coConstructionProposalStatusLabelFr[p.status]}

@@ -12,7 +12,7 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 
 - Documentation courte pour auditer ou brainstormer **Direction l’Algérie — Travel Lead Desk** avec un LLM.
 - Ordre logique ci-dessous : stack → architecture → données → produit → routes → ops → prompts.
-- Spec produit complète : `docs/PRODUCT_SPEC.md`.
+- Vision produit v2 : `docs/PRD_TRAVEL_LEAD_DESK_V2.md` ; spec détaillée : `docs/PRODUCT_SPEC.md` ; écart code / schéma : `docs/IMPLEMENTATION_PENDING_V2.md`.
 
 ---
 
@@ -96,14 +96,14 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 |------|------|
 | `src/app/` | Routes, layouts, server actions |
 | `src/components/` | UI |
-| `src/context/` | Context React (ex. agences démo) |
+| `src/context/` | Context React (ex. `LeadsDemoProvider` — état liste / Kanban) |
 | `src/lib/` | Mappers, PDF, filtres, CRM |
 
 ### Points d’audit
 
 - Sécurité réelle : **RLS** (pas seulement le layout).
 - PDF : `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` — accès et fuites.
-- `src/context/agencies-demo-context.tsx` : chemins mock vs Supabase.
+- Liste leads / Kanban : données Supabase via `LeadsDemoProvider` + server refresh ; pas de contexte agences mock séparé.
 
 ---
 
@@ -115,7 +115,7 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 
 **Enums (extraits)** : `app_role` (`admin`, `lead_referent`), `lead_status` (pipeline ; `refinement` fusionné plus tard), types agence / consultation / `quote_kind`.
 
-**Tables** : `profiles`, `agencies`, `leads`, `consultations`, `quotes`, `activities`, `lead_snapshots`.
+**Tables** : `profiles`, `agencies`, `leads`, `consultations`, `quotes`, `activities` (la table `lead_snapshots` a été retirée — migration v2).
 
 **RLS** : migration initiale avec politiques permissives pour `authenticated` ; migrations suivantes resserrent (pool, admin vs référent).
 

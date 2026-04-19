@@ -3,15 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import type { LeadStatus } from "@/lib/mock-leads";
+import type { AgencyConsultationStatus, LeadStatus } from "@/lib/mock-leads";
 import { LEAD_PIPELINE } from "@/lib/mock-leads";
-import {
-  parseCrmCommercialPriority,
-  parseCrmConversionBand,
-  parseCrmFeasibilityBand,
-  parseCrmFollowUpStrategy,
-  parseCrmPrimaryObjection,
-} from "@/lib/crm-fields";
+import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
+import { triggerQualificationConversation } from "@/app/(dashboard)/leads/ai-actions";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -61,6 +56,18 @@ export async function assignLeadReferent(
     }
   }
 
+  const { data: prevRow, error: prevErr } = await supabase
+    .from("leads")
+    .select("referent_id")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (prevErr || !prevRow) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  const prevReferent = prevRow.referent_id as string | null;
+
   const { error } = await supabase
     .from("leads")
     .update({ referent_id: referentId })
@@ -70,8 +77,63 @@ export async function assignLeadReferent(
     return { ok: false, error: error.message };
   }
 
+  const assignedNow =
+    prevReferent === null && referentId !== null && referentId !== "";
+  if (assignedNow) {
+    await triggerQualificationConversation(leadId);
+  }
+
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+export type ClaimLeadResult = ActionResult;
+
+export async function claimLead(leadId: string): Promise<ClaimLeadResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { data: prevRow, error: prevErr } = await supabase
+    .from("leads")
+    .select("referent_id")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (prevErr || !prevRow) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  if (prevRow.referent_id !== null) {
+    return { ok: false, error: "Ce lead est déjà assigné." };
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ referent_id: user.id })
+    .eq("id", leadId)
+    .is("referent_id", null);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  await triggerQualificationConversation(leadId);
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
@@ -127,6 +189,49 @@ export async function assignLeadPartnerAgency(
   return { ok: true };
 }
 
+export async function setLeadRetainedAgency(
+  leadId: string,
+  agencyId: string | null,
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+  if (agencyId !== null && !isUuid(agencyId)) {
+    return { ok: false, error: "Agence invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  if (agencyId !== null) {
+    const { data: agency, error: agencyError } = await supabase
+      .from("agencies")
+      .select("id")
+      .eq("id", agencyId)
+      .maybeSingle();
+    if (agencyError || !agency) {
+      return { ok: false, error: "Cette agence n'existe pas." };
+    }
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ retained_agency_id: agencyId })
+    .eq("id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
 export async function updateLeadDetails(
   leadId: string,
   formData: FormData,
@@ -151,7 +256,18 @@ export async function updateLeadDetails(
   const priorityRaw = fdStr(formData, "priority");
   const priority = priorityRaw === "high" ? "high" : "normal";
 
-  const patch = {
+  const intakeRaw = fdStr(formData, "intake_channel");
+  const intakeChannel =
+    intakeRaw === "manual" ||
+    intakeRaw === "whatsapp" ||
+    intakeRaw === "web_form" ||
+    intakeRaw === "email"
+      ? intakeRaw
+      : null;
+
+  const wa = fdStr(formData, "whatsapp_phone_number");
+
+  const patch: Record<string, unknown> = {
     traveler_name: travelerName,
     email: fdStr(formData, "email"),
     phone: fdStr(formData, "phone"),
@@ -165,7 +281,11 @@ export async function updateLeadDetails(
     quote_status: fdStr(formData, "quote_status"),
     source: fdStr(formData, "source"),
     priority,
+    whatsapp_phone_number: wa.length ? wa : null,
   };
+  if (intakeChannel) {
+    patch.intake_channel = intakeChannel;
+  }
 
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
 
@@ -195,24 +315,18 @@ export async function updateLeadCommercialCrm(
     return { ok: false, error: "Non authentifié." };
   }
 
-  const p = parseCrmCommercialPriority(fdStr(formData, "crm_commercial_priority"));
   const c = parseCrmConversionBand(fdStr(formData, "crm_conversion_band"));
-  const f = parseCrmFeasibilityBand(fdStr(formData, "crm_feasibility_band"));
   const r = parseCrmFollowUpStrategy(fdStr(formData, "crm_follow_up_strategy"));
-  const o = parseCrmPrimaryObjection(fdStr(formData, "crm_primary_objection"));
 
-  if (!p || !c || !f || !r || !o) {
+  if (!c || !r) {
     return { ok: false, error: "Valeurs CRM invalides." };
   }
 
   const { error } = await supabase
     .from("leads")
     .update({
-      crm_commercial_priority: p,
       crm_conversion_band: c,
-      crm_feasibility_band: f,
       crm_follow_up_strategy: r,
-      crm_primary_objection: o,
     })
     .eq("id", leadId);
 
@@ -607,6 +721,7 @@ export async function createLeadFromIntake(
     traveler_name: travelerName,
     email,
     phone: String(intake.phone ?? ""),
+    intake_channel: "web_form" as const,
     status: "new",
     source: (intake.page_origin as string) || "Formulaire site DA",
     trip_summary:
@@ -633,5 +748,101 @@ export async function createLeadFromIntake(
 
   revalidatePath("/leads");
   revalidatePath("/metrics");
+  return { ok: true };
+}
+
+export async function createConsultationForLead(
+  leadId: string,
+  agencyId: string,
+): Promise<ActionResult> {
+  if (!isUuid(leadId) || !isUuid(agencyId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { error } = await supabase.from("consultations").insert({
+    lead_id: leadId,
+    agency_id: agencyId,
+    status: "invited",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { ok: false, error: "Cette agence est déjà associée à ce dossier." };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+export async function updateConsultationStatusForLead(
+  consultationId: string,
+  leadId: string,
+  status: AgencyConsultationStatus,
+): Promise<ActionResult> {
+  if (!isUuid(consultationId) || !isUuid(leadId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { error } = await supabase
+    .from("consultations")
+    .update({ status })
+    .eq("id", consultationId)
+    .eq("lead_id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+export async function updateConsultationQuoteForLead(
+  consultationId: string,
+  leadId: string,
+  quoteSummary: string,
+): Promise<ActionResult> {
+  if (!isUuid(consultationId) || !isUuid(leadId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { error } = await supabase
+    .from("consultations")
+    .update({
+      quote_summary: quoteSummary.trim(),
+      status: "quote_received",
+    })
+    .eq("id", consultationId)
+    .eq("lead_id", leadId);
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
   return { ok: true };
 }

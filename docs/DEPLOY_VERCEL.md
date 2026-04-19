@@ -24,7 +24,22 @@ Si le dépôt existe déjà : `git remote -v` puis `git push`.
 
 ## 2. Base Supabase (avant prod)
 
-1. Appliquer toutes les migrations sur le **même** projet que les clés API : `supabase db push` ou copier-coller les fichiers `supabase/migrations/*.sql` dans l’éditeur SQL (ordre chronologique des fichiers).
+1. Appliquer **toutes** les migrations sur le **même** projet que les clés `NEXT_PUBLIC_SUPABASE_*` (sinon erreur type `column leads.intake_channel does not exist` au chargement d’une fiche lead).
+
+   **Option A — CLI** (recommandé si le projet est lié) :
+
+   ```bash
+   npx supabase@latest login
+   npx supabase@latest link --project-ref <ton-project-ref>
+   npm run db:push
+   ```
+
+   **Option B — SQL Editor** (dashboard Supabase → **SQL** → **New query**) : exécuter le contenu des fichiers du dossier `supabase/migrations/` **dans l’ordre des préfixes de date** (du plus ancien au plus récent). Pour corriger rapidement une base « ancienne » déjà en prod, les fichiers **v2** indispensables côté app actuelle sont au minimum :
+
+   - `20260428100000_travel_lead_desk_v2.sql` (colonnes `leads` / `agencies` / `lead_circuit_proposals` / `quotes`, index, suppression CRM / `lead_snapshots`)
+   - `20260428120000_quote_pdfs_bucket.sql` (bucket Storage `quote_pdfs` pour l’envoi devis WhatsApp)
+
+   Réf. produit : [`PRD_TRAVEL_LEAD_DESK_V2.md`](./PRD_TRAVEL_LEAD_DESK_V2.md).
 2. **Authentication → URL configuration** (à mettre à jour après la première URL Vercel) :
    - **Site URL** : `https://<ton-domaine-prod>` (ou l’URL Vercel temporaire le temps des tests).
    - **Redirect URLs** : inclure au minimum  
@@ -44,7 +59,8 @@ Si le dépôt existe déjà : `git remote -v` puis `git push`.
 5. **Environment Variables** (Production **et** Preview) :
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`  
-   Reprendre les valeurs du dashboard Supabase → Settings → API (clé **anon** uniquement ; ne pas mettre `service_role` dans Vercel).
+   Reprendre les valeurs du dashboard Supabase → Settings → API (clé **anon** uniquement pour les variables `NEXT_PUBLIC_*`).
+   - **v2 (serveur uniquement, ne jamais préfixer `NEXT_PUBLIC_`)** : `OPENAI_API_KEY`, `OPENAI_MODEL`, clés WhatsApp (`WHATSAPP_API_TOKEN` ou `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` pour la signature `X-Hub-Signature-256`), et `SUPABASE_SERVICE_ROLE_KEY` pour webhooks publics, stockage devis (`quote_pdfs`) et autres opérations serveur. La `service_role` ne doit pas être exposée au navigateur.
 
 6. Déployer : **Deploy**. Les **Preview** reçoivent une URL `https://<projet>-<hash>.vercel.app` : ajoute-la (ou le motif `https://*.vercel.app/**`) dans les Redirect URLs Supabase.
 

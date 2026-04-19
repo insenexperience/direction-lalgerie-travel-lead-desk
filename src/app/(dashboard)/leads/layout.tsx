@@ -5,7 +5,7 @@ import type { MockLead } from "@/lib/mock-leads";
 
 /** Sans ceci, Next peut mettre en cache le layout sans cookies → 0 lead côté RLS. */
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 30;
 
 function leadsProviderKey(leads: MockLead[]) {
   if (!leads.length) return "empty";

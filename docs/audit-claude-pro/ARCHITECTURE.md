@@ -42,11 +42,11 @@ Si `NEXT_PUBLIC_SUPABASE_URL` ou `NEXT_PUBLIC_SUPABASE_ANON_KEY` manquent, le mi
 |------|----------------|
 | [`src/app/`](../../src/app/) | Routes App Router, layouts, server actions par domaine. |
 | [`src/components/`](../../src/components/) | UI réutilisable (sidebar, formulaires lead, modales, etc.). |
-| [`src/context/`](../../src/context/) | React context (ex. démo / état UI agences). |
+| [`src/context/`](../../src/context/) | React context (ex. `LeadsDemoProvider` pour état client liste / Kanban). |
 | [`src/lib/`](../../src/lib/) | Mappers Supabase, PDF, filtres file leads, champs CRM, utilitaires. |
 
 ## Points d’attention pour un audit
 
 - **Auth** : contrôle d’accès UI surtout via layout dashboard ; la **sécurité réelle** repose sur **RLS** Supabase (voir [DATA_SUPABASE.md](./DATA_SUPABASE.md)).
 - **PDF** : route API dédiée (voir [ROUTES_AND_FEATURES.md](./ROUTES_AND_FEATURES.md)) — vérifier autorisations et fuite de données côté PDF.
-- **Contexte démo** : [`src/context/agencies-demo-context.tsx`](../../src/context/agencies-demo-context.tsx) enveloppe le dashboard — comprendre s’il reste du chemin « mock » vs données Supabase selon les écrans.
+- **Données leads** : agences et leads passent par Supabase (pages server + actions) ; le contexte leads sert surtout aux filtres / mutations optimistes côté client.

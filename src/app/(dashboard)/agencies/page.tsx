@@ -3,7 +3,7 @@ import { mapAgencyRowToPartner } from "@/lib/agency-db-mapper";
 import { AgenciesPageInner } from "./agencies-page-inner";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 30;
 
 export default async function AgenciesPage() {
   const supabase = await createClient();

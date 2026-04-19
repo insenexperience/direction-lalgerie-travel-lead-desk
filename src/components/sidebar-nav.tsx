@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandLogoBlock } from "@/components/brand-logo-block";
+import { GlobalSearch } from "@/components/global-search";
 import { dashboardNavItems } from "@/lib/nav-config";
 
 export function SidebarNav() {
@@ -13,6 +14,9 @@ export function SidebarNav() {
       <BrandLogoBlock variant="sidebar" />
 
       <div className="flex flex-1 flex-col px-5 py-6">
+        <div className="mb-4 hidden lg:block">
+          <GlobalSearch />
+        </div>
         <nav className="flex flex-col gap-2">
           {dashboardNavItems.map((item) => {
             const isActive = currentPath === item.href;

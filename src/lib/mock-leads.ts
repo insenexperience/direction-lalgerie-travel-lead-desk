@@ -69,6 +69,10 @@ export type MockLead = {
   retainedAgencyId?: string | null;
   /** Referent (public.profiles.id); null = not assigned yet */
   referentId?: string | null;
+  /** Canal d'entrée (Supabase) */
+  intakeChannel?: string | null;
+  /** Synthèse IA en attente validation opérateur */
+  qualificationPending?: boolean;
 };
 
 export const LEAD_PIPELINE: LeadStatus[] = [

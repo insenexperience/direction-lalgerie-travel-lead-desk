@@ -4,7 +4,6 @@ import {
   Building2,
   FileText,
   LayoutDashboard,
-  Settings,
   Users,
   Waypoints,
 } from "lucide-react";
@@ -22,5 +21,4 @@ export const dashboardNavItems: DashboardNavItem[] = [
   { href: "/agencies", label: "Agences", icon: Building2 },
   { href: "/quotes", label: "Devis", icon: FileText },
   { href: "/users", label: "Équipe", icon: Users },
-  { href: "/settings", label: "Réglages", icon: Settings },
 ];

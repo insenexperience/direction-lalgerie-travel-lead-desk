@@ -1,10 +1,4 @@
-import type {
-  CrmCommercialPriority,
-  CrmConversionBand,
-  CrmFeasibilityBand,
-  CrmFollowUpStrategy,
-  CrmPrimaryObjection,
-} from "@/lib/crm-fields";
+import type { CrmConversionBand, CrmFollowUpStrategy } from "@/lib/crm-fields";
 import type { LeadStatus } from "@/lib/mock-leads";
 
 /** Ligne `leads` telle qu’affichée / éditée sur la fiche Supabase. */
@@ -28,9 +22,17 @@ export type SupabaseLeadRow = {
   source: string;
   priority: "normal" | "high";
   updated_at: string;
-  crm_commercial_priority: CrmCommercialPriority;
   crm_conversion_band: CrmConversionBand;
-  crm_feasibility_band: CrmFeasibilityBand;
   crm_follow_up_strategy: CrmFollowUpStrategy;
-  crm_primary_objection: CrmPrimaryObjection;
+  intake_channel: string | null;
+  whatsapp_phone_number: string | null;
+  whatsapp_thread_id: string | null;
+  conversation_transcript: unknown;
+  ai_qualification_payload: unknown;
+  ai_qualification_confidence: number | null;
+  scoring_weights: unknown;
+  qualification_validated_at: string | null;
+  qualification_validated_by: string | null;
+  qualification_validation_status: string;
+  manual_takeover: boolean;
 };
