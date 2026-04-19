@@ -60,7 +60,8 @@ Si le dépôt existe déjà : `git remote -v` puis `git push`.
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`  
    Reprendre les valeurs du dashboard Supabase → Settings → API (clé **anon** uniquement pour les variables `NEXT_PUBLIC_*`).
-   - **v2 (serveur uniquement, ne jamais préfixer `NEXT_PUBLIC_`)** : `OPENAI_API_KEY`, `OPENAI_MODEL`, clés WhatsApp (`WHATSAPP_API_TOKEN` ou `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` pour la signature `X-Hub-Signature-256`), et `SUPABASE_SERVICE_ROLE_KEY` pour webhooks publics, stockage devis (`quote_pdfs`) et autres opérations serveur. La `service_role` ne doit pas être exposée au navigateur.
+   - **v2 (serveur uniquement, ne jamais préfixer `NEXT_PUBLIC_`)** : `OPENAI_API_KEY`, `OPENAI_MODEL`, clés WhatsApp (`WHATSAPP_API_TOKEN` ou `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET` pour la signature `X-Hub-Signature-256`), et `SUPABASE_SERVICE_ROLE_KEY` pour webhooks publics, stockage devis (`quote_pdfs`), route **`/api/intake`** (formulaire Squarespace) et autres opérations serveur. La `service_role` ne doit pas être exposée au navigateur.
+   - **`ALLOWED_ORIGIN`** : origine CORS autorisée pour `POST /api/intake` en production (ex. `https://www.direction-lalgerie.com`). En dev, l’API répond avec `Access-Control-Allow-Origin: *`.
 
 6. Déployer : **Deploy**. Les **Preview** reçoivent une URL `https://<projet>-<hash>.vercel.app` : ajoute-la (ou le motif `https://*.vercel.app/**`) dans les Redirect URLs Supabase.
 
