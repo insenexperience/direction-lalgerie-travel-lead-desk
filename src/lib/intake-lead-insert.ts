@@ -162,14 +162,19 @@ function parseAllowedOrigins(): string[] {
   if (!raw) return [];
   return raw
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => normalizeOrigin(s))
     .filter(Boolean);
+}
+
+function normalizeOrigin(origin: string): string {
+  return origin.trim().replace(/\/+$/, "");
 }
 
 export function resolveCors(request: Request): { allowOrigin: string; forbidden: boolean } {
   const isProd = process.env.NODE_ENV === "production";
   const allowedList = parseAllowedOrigins();
-  const reqOrigin = request.headers.get("origin");
+  const reqOriginRaw = request.headers.get("origin");
+  const reqOrigin = reqOriginRaw ? normalizeOrigin(reqOriginRaw) : null;
 
   if (!isProd) {
     return { allowOrigin: "*", forbidden: false };
