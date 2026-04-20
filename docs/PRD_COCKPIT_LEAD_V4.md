@@ -11,11 +11,15 @@
 | Ordre des étapes pipeline | Aligné sur **`LEAD_PIPELINE`** dans [`src/lib/mock-leads.ts`](../src/lib/mock-leads.ts) : `new → qualification → agency_assignment → co_construction → quote → negotiation → won → lost` (et non l’ordre inversé co_construction / assignation du brouillon PRD initial). |
 | Maquette HTML | `lead-cockpit-light-v3.html` **non fournie** ; trace : [`docs/mockups/README.md`](mockups/README.md). L’UI suit la spec textuelle + design tokens existants. |
 | Date assignation référent | Colonne **`referent_assigned_at`** ajoutée ; mise à jour lors de **`claimLead`** et **`assignLeadReferent`** quand un référent est posé. |
-| Fiche complète | Lien **ancre** `#lead-fiche-edit` vers le bloc [`LeadFicheModifier`](../src/components/leads/lead-fiche-modifier.tsx) existant (pas de nouvelle route `/fiche` en v4). |
+| Fiche complète | Bloc d’édition sous **ancre** `#lead-fiche-edit` dans [`LeadCockpitDossier`](../src/components/leads/lead-cockpit-dossier.tsx) (bouton « Modifier la fiche » / `LeadEditForm`) — pas de carte séparée « Fiche complète ». |
 | Suppression lead | **RLS** : uniquement admin (`leads_delete_admin`) ; l’action serveur vérifie aussi `profiles.role === 'admin'` pour un message d’erreur explicite. |
 | Suppression soft vs hard | **Hard delete** conservé (aligné sur l’existant). |
 | Poids score | Stockés dans `leads.scoring_weights` (JSON) ; édition réservée admin dans la modale score. |
 | `toggleAiAutopilot` | Exposé comme **`toggleAiAutopilot`** dans [`ai-actions.ts`](../src/app/(dashboard)/leads/ai-actions.ts) : bascule `manual_takeover` + journal `activities.kind = 'ai_autopilot_toggle'`. |
+| Hiérarchie fiche lead & contexte | **L1** : carte « étape active » (`#lead-stage-active`, [`LeadSupabaseStageWorkspace`](../src/components/leads/lead-supabase-stage-workspace.tsx)) en premier dans le contenu principal. **L2** : section « Contexte » regroupant workflow + conversation IA ([`lead-detail-supabase.tsx`](../src/app/(dashboard)/leads/[id]/lead-detail-supabase.tsx)). Bandeaux réutilisables : [`ContextBanner`](../src/components/leads/context-banner.tsx). |
+| Gate Qualification → Assignation | Pas de valeur `lead_status` supplémentaire (Option B) : garde-fou serveur [`assertBriefExploitableBeforeAgencyAssignment`](../src/app/(dashboard)/leads/actions.ts) + règles [`lead-brief-gate.ts`](../src/lib/lead-brief-gate.ts) ; checklist UI en étape `qualification`. |
+| CTA fiche | Encart Dossier : libellé **« Modifier la fiche »** (ancre `#lead-fiche-edit`). |
+| Doc parcours (vivante) | Flux opérateur, couches d’état et conflits connus : [`USER_JOURNEYS.md`](USER_JOURNEYS.md) ; à mettre à jour avec toute évolution cockpit / pipeline / workflow (voir [`CONTRIBUTING.md`](../CONTRIBUTING.md)). |
 
 ---
 

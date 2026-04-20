@@ -135,7 +135,7 @@ Assemblage : [`LeadCockpitShell`](../../src/components/leads/lead-cockpit-shell.
 1. **Bande** [`lead-cockpit-strip.tsx`](../../src/components/leads/lead-cockpit-strip.tsx) : `bg-panel`, bordure basse, référence monospace, pastille score (barre `--steel`), pastille IA (couleurs hex PRD `#2d7a5f` / `#c47c20`), bouton Suspendre / Reprendre, lien « Tous les leads ».
 2. **Pipeline horizontal** [`lead-cockpit-pipeline.tsx`](../../src/components/leads/lead-cockpit-pipeline.tsx) : `bg-panel-muted`, scroll horizontal, étapes cliquables (terminées + active) alignées sur `LEAD_PIPELINE`.
 3. **Panneaux existants** : `lead-workflow-panel`, `lead-ai-ops-panel` (toggle IA masqué — contrôle dans la bande), puis **workspace par étape** [`lead-supabase-stage-workspace.tsx`](../../src/components/leads/lead-supabase-stage-workspace.tsx) (sans barre flottante interne ; titre `font-display`).
-4. **Fiche complète** : [`lead-fiche-modifier.tsx`](../../src/components/leads/lead-fiche-modifier.tsx) avec ancre `#lead-fiche-edit` (`scroll-mt-24`).
+4. **Fiche complète** : édition dans [`lead-cockpit-dossier.tsx`](../../src/components/leads/lead-cockpit-dossier.tsx) avec ancre `#lead-fiche-edit` (`scroll-mt-32`).
 5. **Encart Dossier** [`lead-cockpit-dossier.tsx`](../../src/components/leads/lead-cockpit-dossier.tsx) : grille 1 / 2 / 4 colonnes, micro-typo specs PRD.
 6. **Bottom nav** [`lead-cockpit-bottom-nav.tsx`](../../src/components/leads/lead-cockpit-bottom-nav.tsx) : fixe `lg:left-[18rem]`, `backdrop-blur`, pills, drawer « Détails », CTA primaire (pipeline suivant).
 7. **Modale score** [`lead-score-modal.tsx`](../../src/components/leads/lead-score-modal.tsx) : overlay centré / bas sur mobile.

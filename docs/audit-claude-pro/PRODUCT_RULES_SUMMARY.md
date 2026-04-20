@@ -1,6 +1,6 @@
 # Règles produit (résumé)
 
-**Spec complète** : [docs/PRODUCT_SPEC.md](../PRODUCT_SPEC.md) — ce fichier ne fait que rappeler l’essentiel pour cadrer un audit ou une session de brainstorming.
+**Spec complète** : [docs/PRODUCT_SPEC.md](../PRODUCT_SPEC.md) — **parcours opérateur & garde-fous (doc vivante)** : [docs/USER_JOURNEYS.md](../USER_JOURNEYS.md) — ce fichier ne fait que rappeler l’essentiel pour cadrer un audit ou une session de brainstorming.
 
 ## Vision
 

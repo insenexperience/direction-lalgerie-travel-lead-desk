@@ -1,5 +1,7 @@
 # Routes, navigation et mutations
 
+**Parcours opérateur et garde-fous** (document vivant, à tenir à jour avec les features) : [`../USER_JOURNEYS.md`](../USER_JOURNEYS.md).
+
 ## Navigation principale (sidebar)
 
 Entrées de [`src/lib/nav-config.tsx`](../../src/lib/nav-config.tsx) (`dashboardNavItems`) :

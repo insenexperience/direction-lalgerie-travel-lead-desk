@@ -162,6 +162,11 @@ Le produit prévoit **deux niveaux d’autorisation distincts** (matrice droits 
 * recherche / filtres
 * création lead
 
+### 7.3.1 Parcours opérateur (doc vivante)
+
+* **Document canonique des flux** (diagrammes, couches d’état, conflits connus, changelog) : [`USER_JOURNEYS.md`](./USER_JOURNEYS.md). Il doit **évoluer avec le code** : toute évolution des règles pipeline, qualification, workflow voyageur, référent, intake ou RLS sur les leads y est reflétée (voir [`CONTRIBUTING.md`](../CONTRIBUTING.md)).
+* **Modèle mental** : le statut pipeline (`leads.status`) n’est pas la seule dimension — session workflow, `manual_takeover`, validation qualification et agence retenue peuvent interagir ; le détail est dans `USER_JOURNEYS.md`.
+
 ---
 
 ## 7.4 Lead Detail
@@ -170,6 +175,7 @@ Le produit prévoit **deux niveaux d’autorisation distincts** (matrice droits 
 * qualification
 * assignation **référent lead** (tour à tour ou manuelle) et suivi des **consultations agences**
 * timeline
+* **Hiérarchie écran (avril 2026)** : la carte **étape active** (tâche courante) est affichée **en premier** dans le contenu scrollable ; la section **Contexte** regroupe workflow lancé + bloc conversation / IA ; l’encart Dossier (cockpit) expose le CTA **« Modifier la fiche »** vers l’ancre `#lead-fiche-edit`.
 
 ---
 
@@ -181,6 +187,24 @@ Le produit prévoit **deux niveaux d’autorisation distincts** (matrice droits 
 * style
 * score
 * résumé DA
+
+### 7.5.1 Gate « brief exploitable » avant assignation agence partenaire
+
+* **Objectif** : ne passer à l’étape **Assignation** (`agency_assignment`) qu’avec une fiche suffisamment complète et une qualification cohérente (parcours IA ou manuel).
+* **Implémentation** : pas de nouvelle valeur dans l’enum Postgres `lead_status` ; contrôle dans [`src/app/(dashboard)/leads/actions.ts`](../src/app/(dashboard)/leads/actions.ts) (`assertBriefExploitableBeforeAgencyAssignment`) pour les transitions `qualification` → `agency_assignment` (y compris via `moveLeadPipelineStep` / pipeline cockpit).
+* **Règles** (détail dans [`src/lib/lead-brief-gate.ts`](../src/lib/lead-brief-gate.ts)) :
+  * champs minimum renseignés sur le lead : nom voyageur, e-mail, téléphone **ou** numéro WhatsApp DA, dates / période, groupe, budget, résumé du voyage, style ;
+  * statut `rejected` → passage bloqué ;
+  * qualification **validée ou ajustée** (`validated` / `overridden`) **ou** parcours **`workflow_mode = manual`** avec statut autre que `rejected` (champs complets = parité manuel sans blocage « pending » infini).
+* **UI** : checklist sur la fiche lead lorsque `status = qualification` ; message d’action si le passage est encore bloqué ; bloc **Contexte** — boutons **Valider / Ajuster / Rejeter** dès que la validation est `pending`, même sans `ai_qualification_payload` (brief manuel ou IA sans synthèse structurée).
+
+### 7.5.2 Session workflow voyageur (IA / manuel)
+
+* Chaque lancement crée une **référence** `workflow_run_ref` (ex. `WF-…`) sur `public.leads`.
+* Lancement possible depuis **Nouveau** ou **Qualification** tant qu’aucune session n’est active (`workflow_launched_at` + `workflow_mode`).
+* **Suppression de session** (`resetWorkflowVoyageurSession` dans [`workflow-actions.ts`](../src/app/(dashboard)/leads/workflow-actions.ts)) : le référent remet à zéro mode / dates / référence, transcript, brouillon IA et validation qualification ; le statut pipeline ne change pas.
+* **Reprise manuelle** : `manual_takeover` (bandeau cockpit) ; la page `/leads/[id]/workflow` n’est accessible que si l’IA est suspendue ou qu’aucune session n’est active (pas de session **manuelle** déjà enregistrée).
+* **Cohérence pipeline (P0)** : à la sortie du statut `qualification` vers une autre étape, les champs de **session workflow** (`workflow_launched_at`, `workflow_mode`, `workflow_run_ref`, `workflow_launched_by`, `manual_takeover`) sont effacés côté serveur pour éviter une session « fantôme » ; idem lors d’un **changement de référent** (`assignLeadReferent`). Les non-admins ne peuvent pas sauter plusieurs étapes via `updateLeadStatus` (voir [`USER_JOURNEYS.md`](./USER_JOURNEYS.md)).
 
 ---
 
