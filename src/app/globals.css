@@ -1,31 +1,65 @@
 @import "tailwindcss";
 
 :root {
-  --background: #fafafa;
-  --foreground: #0b0c0d;
-  --panel: #ffffff;
-  --panel-muted: #f4f7fa;
-  --border: #e6ebef;
-  --steel: #182b35;
+  /* Brand */
+  --steel: #15323f;
   --steel-ink: #f3f7fa;
-  --accent: #182b35;
-  --accent-foreground: #f3f7fa;
-  --muted-foreground: #60727c;
+
+  /* Ink scale */
+  --ink:   #0e1a21;
+  --ink-2: #3a4a55;
+  --ink-3: #6b7a85;
+  --ink-4: #9aa7b0;
+
+  /* Surfaces */
+  --bg:      #f6f7f8;
+  --surface: #ffffff;
+  --line:    #e4e8eb;
+
+  /* Semantic */
+  --revenue: #0f6b4b;
+  --hot:     #c1411f;
+  --warn:    #a8710b;
+  --info:    #1e5a8a;
+  --gold:    #b68d3d;
+
+  /* Legacy aliases for existing components */
+  --background:        var(--bg);
+  --foreground:        var(--ink);
+  --panel:             var(--surface);
+  --panel-muted:       #f4f7fa;
+  --border:            var(--line);
+  --accent:            var(--steel);
+  --accent-foreground: var(--steel-ink);
+  --muted-foreground:  var(--ink-3);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-panel: var(--panel);
-  --color-panel-muted: var(--panel-muted);
-  --color-border: var(--border);
-  --color-steel: var(--steel);
-  --color-steel-ink: var(--steel-ink);
-  --color-accent: var(--accent);
+  --color-steel:            var(--steel);
+  --color-steel-ink:        var(--steel-ink);
+  --color-ink:              var(--ink);
+  --color-ink-2:            var(--ink-2);
+  --color-ink-3:            var(--ink-3);
+  --color-ink-4:            var(--ink-4);
+  --color-bg:               var(--bg);
+  --color-surface:          var(--surface);
+  --color-line:             var(--line);
+  --color-revenue:          var(--revenue);
+  --color-hot:              var(--hot);
+  --color-warn:             var(--warn);
+  --color-info:             var(--info);
+  --color-gold:             var(--gold);
+  /* Legacy aliases */
+  --color-background:       var(--background);
+  --color-foreground:       var(--foreground);
+  --color-panel:            var(--panel);
+  --color-panel-muted:      var(--panel-muted);
+  --color-border:           var(--border);
+  --color-accent:           var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-muted-foreground: var(--muted-foreground);
-  --font-sans: var(--font-poppins), system-ui, "Segoe UI", sans-serif;
-  --font-display: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
+  --font-sans: var(--font-inter), "Inter", system-ui, "Segoe UI", sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", "Fira Code", monospace;
 }
 
 * {
@@ -40,7 +74,9 @@ body {
   min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-poppins), system-ui, "Segoe UI", sans-serif;
+  font-family: var(--font-inter), "Inter", system-ui, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 a {
@@ -54,7 +90,8 @@ select {
   font: inherit;
 }
 
-/* Titres éditoriaux (Cormorant) — complète la token `--font-display` du thème */
-.font-display {
-  font-family: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
+/* Monospace for tabular numbers, budgets, IDs */
+.font-mono {
+  font-family: var(--font-jetbrains), "JetBrains Mono", "Fira Code", monospace;
+  font-variant-numeric: tabular-nums;
 }

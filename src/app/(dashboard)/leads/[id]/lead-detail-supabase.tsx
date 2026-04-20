@@ -1,6 +1,5 @@
 import { LeadAiOpsPanel } from "@/components/leads/lead-ai-ops-panel";
 import { LeadCockpitShell } from "@/components/leads/lead-cockpit-shell";
-import { LeadFicheModifier } from "@/components/leads/lead-fiche-modifier";
 import { LeadSupabaseStageWorkspace } from "@/components/leads/lead-supabase-stage-workspace";
 import { LeadWorkflowPanel } from "@/components/leads/lead-workflow-panel";
 import type {
@@ -49,40 +48,56 @@ export function LeadDetailSupabase({
       referentLabel={referentLabel}
       qualificationValidatorLabel={qualificationValidatorLabel}
       isAdmin={isAdmin}
+      currentUserId={currentUserId}
     >
-      <LeadWorkflowPanel
-        leadId={lead.id}
-        currentUserId={currentUserId}
-        referentId={lead.referent_id}
-        status={lead.status}
-        workflowLaunchedAt={lead.workflow_launched_at}
-        workflowMode={lead.workflow_mode}
-        workflowEmailBanner={workflowEmailBanner}
-      />
+      <div className="scroll-mt-20 space-y-5">
+        {/* L1 — Tâche / étape active (premier focus) */}
+        <div className="space-y-3">
+          {!lead.referent_id ? (
+            <p
+              className="rounded-md border border-dashed border-amber-300/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-950"
+              role="status"
+            >
+              À l’étape <strong className="text-foreground">Nouveau</strong>, allouez un{" "}
+              <strong className="text-foreground">opérateur travel desk</strong> dans le bloc
+              ci-dessous pour débloquer le passage aux étapes suivantes.
+            </p>
+          ) : null}
+          <LeadSupabaseStageWorkspace
+            lead={lead}
+            referents={referents}
+            referentLabel={referentLabel}
+            agencies={agencies}
+            retainedAgencyLabel={retainedAgencyLabel}
+            coProposals={coProposals}
+            leadQuotes={leadQuotes}
+          />
+        </div>
 
-      {!lead.referent_id ? (
-        <p
-          className="rounded-md border border-dashed border-border bg-panel-muted/50 px-4 py-3 text-sm text-muted-foreground"
-          role="status"
+        {/* L2 — Contexte pipeline / IA (second plan) */}
+        <section
+          className="space-y-4 rounded-lg border border-border/80 bg-panel-muted/25 p-4 sm:p-5"
+          aria-labelledby="lead-context-heading"
         >
-          À l’étape <strong className="text-foreground">Nouveau</strong>, allouez un{" "}
-          <strong className="text-foreground">opérateur travel desk</strong> (bloc ci-dessous)
-          pour débloquer le passage aux étapes suivantes.
-        </p>
-      ) : null}
-
-      <div className="space-y-5">
-        <LeadAiOpsPanel lead={lead} hideAutopilotToggle />
-        <LeadSupabaseStageWorkspace
-          lead={lead}
-          referents={referents}
-          referentLabel={referentLabel}
-          agencies={agencies}
-          retainedAgencyLabel={retainedAgencyLabel}
-          coProposals={coProposals}
-          leadQuotes={leadQuotes}
-        />
-        <LeadFicheModifier lead={lead} />
+          <h2
+            id="lead-context-heading"
+            className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground"
+          >
+            Contexte
+          </h2>
+          <LeadWorkflowPanel
+            leadId={lead.id}
+            currentUserId={currentUserId}
+            referentId={lead.referent_id}
+            status={lead.status}
+            workflowLaunchedAt={lead.workflow_launched_at}
+            workflowMode={lead.workflow_mode}
+            workflowRunRef={lead.workflow_run_ref}
+            manualTakeover={lead.manual_takeover}
+            workflowEmailBanner={workflowEmailBanner}
+          />
+          <LeadAiOpsPanel lead={lead} hideAutopilotToggle />
+        </section>
       </div>
     </LeadCockpitShell>
   );

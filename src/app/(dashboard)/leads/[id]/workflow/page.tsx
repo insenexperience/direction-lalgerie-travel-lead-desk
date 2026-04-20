@@ -14,6 +14,7 @@ import {
 import { isPostgresUndefinedColumnError } from "@/lib/supabase-schema-fallback";
 import { LeadCockpitShell } from "@/components/leads/lead-cockpit-shell";
 import { LeadManualWorkflowForm } from "./lead-manual-workflow-form";
+import { LeadWorkflowSessionResetPanel } from "./lead-workflow-session-reset-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -81,11 +82,16 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
     redirect(`/leads/${id}`);
   }
 
-  if (lead.status !== "new") {
+  if (lead.status !== "new" && lead.status !== "qualification") {
     redirect(`/leads/${id}`);
   }
 
-  if (lead.workflow_launched_at) {
+  const aiWorkflowActiveBlocksManualPage =
+    Boolean(lead.workflow_launched_at) &&
+    lead.workflow_mode === "ai" &&
+    !lead.manual_takeover;
+
+  if (aiWorkflowActiveBlocksManualPage) {
     redirect(`/leads/${id}`);
   }
 
@@ -121,6 +127,7 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
   const title = lead.traveler_name || "Lead";
   const summary = lead.trip_summary.trim() || "—";
   const emailHints = getWorkflowEmailDeliveryHints();
+  const hasWorkflowSession = Boolean(lead.workflow_launched_at && lead.workflow_mode);
 
   return (
     <LeadCockpitShell
@@ -128,6 +135,7 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
       referentLabel={referentLabel}
       qualificationValidatorLabel={qualificationValidatorLabel}
       isAdmin={isAdmin}
+      currentUserId={user.id}
       showFicheLink={false}
     >
       <Link
@@ -168,6 +176,11 @@ export default async function LeadWorkflowManualPage({ params }: PageProps) {
         </dl>
 
         <div className="mt-8 border-t border-border pt-8">
+          <LeadWorkflowSessionResetPanel
+            leadId={id}
+            hasSession={hasWorkflowSession}
+            workflowRunRef={lead.workflow_run_ref}
+          />
           <LeadManualWorkflowForm leadId={id} resendReady={emailHints.resendReady} />
         </div>
       </div>
