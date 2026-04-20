@@ -4,6 +4,7 @@ import { AssignPartnerAgencyForm } from "@/components/leads/assign-partner-agenc
 import { AssignReferentForm } from "@/components/leads/assign-referent-form";
 import { LeadCommercialCrmForm } from "@/components/leads/lead-commercial-crm-form";
 import { CoConstructionPanel } from "@/components/leads/co-construction-panel";
+import { LeadQualificationWorkspace } from "@/components/leads/lead-qualification-workspace";
 import { LeadQuotesPanel } from "@/components/leads/lead-quotes-panel";
 import type {
   CoConstructionProposalRow,
@@ -154,18 +155,7 @@ export function LeadSupabaseStageWorkspace({
         ) : null}
 
         {status === "qualification" ? (
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Menu — Grille CRM express
-            </h3>
-            <p className="mt-2 text-sm text-foreground/85">
-              Probabilité de conversion et stratégie de relance — utile pour closer sans alourdir la
-              fiche voyageur.
-            </p>
-            <div className="mt-4 rounded-md border border-border bg-panel-muted/30 p-4 sm:p-5">
-              <LeadCommercialCrmForm lead={lead} />
-            </div>
-          </div>
+          <LeadQualificationWorkspace lead={lead} />
         ) : null}
 
         {/* Opérateur travel desk : uniquement à l’étape Nouveau (allocation). */}

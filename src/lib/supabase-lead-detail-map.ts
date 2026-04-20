@@ -45,6 +45,9 @@ export const LEAD_SELECT_V2 = [
   "lead_score_computed_at",
   "referent_assigned_at",
   "created_at",
+  "travel_desire_narrative",
+  "destination_main",
+  "qualification_notes",
 ].join(", ");
 
 export const LEAD_SELECT_LEGACY = [
@@ -134,6 +137,9 @@ export function mapRowToSupabaseLeadRow(
       lead_score_override: null,
       lead_score_computed_at: null,
       referent_assigned_at: null,
+      travel_desire_narrative: null,
+      destination_main: null,
+      qualification_notes: null,
     };
   }
 
@@ -196,6 +202,15 @@ export function mapRowToSupabaseLeadRow(
       : null,
     referent_assigned_at: row.referent_assigned_at
       ? String(row.referent_assigned_at)
+      : null,
+    travel_desire_narrative: row.travel_desire_narrative != null
+      ? String(row.travel_desire_narrative)
+      : null,
+    destination_main: row.destination_main != null
+      ? String(row.destination_main)
+      : null,
+    qualification_notes: row.qualification_notes != null
+      ? String(row.qualification_notes)
       : null,
   };
 }

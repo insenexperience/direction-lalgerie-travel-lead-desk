@@ -355,6 +355,236 @@ export async function generateAgencyShortlist(leadId: string): Promise<AiActionR
   return { ok: true };
 }
 
+// ─── Qualification Agent (Claude Haiku via Anthropic API) ─────────────────────
+
+export type QualificationAgentResult =
+  | {
+      ok: true;
+      destination_main: string;
+      trip_dates: string;
+      travelers: string;
+      budget: string;
+      travel_style: string;
+      travel_desire_narrative: string;
+      ai_qualification_confidence: number;
+    }
+  | { ok: false; error: string };
+
+export async function runQualificationAgent(
+  leadId: string,
+): Promise<QualificationAgentResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+  const lead = leadRaw as unknown as Record<string, unknown>;
+
+  if (lead.status !== "qualification") {
+    return { ok: false, error: "Ce lead n'est pas à l'étape qualification." };
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { ok: false, error: "Variable ANTHROPIC_API_KEY manquante." };
+  }
+
+  const transcript = Array.isArray(lead.conversation_transcript)
+    ? (lead.conversation_transcript as { role: string; content: string }[])
+        .map((m) => `${m.role === "user" ? "Voyageur" : "DA"}: ${m.content}`)
+        .join("\n")
+    : "Pas de transcription.";
+
+  const systemPrompt = `Tu es un expert en qualification de leads voyage pour Direction l'Algérie.
+Tu reçois la fiche brute d'un voyageur + la transcription de sa conversation.
+Réponds UNIQUEMENT avec un objet JSON valide, sans markdown, sans texte avant ou après.
+Structure exacte :
+{
+  "destination_main": "région ou destination principale",
+  "trip_dates": "période et durée souhaitées",
+  "travelers": "composition exacte du groupe",
+  "budget": "fourchette budget",
+  "travel_style": "styles séparés par virgule",
+  "travel_desire_narrative": "paragraphe narratif 3-5 phrases. Ton chaleureux, subjectif, évocateur. PAS une liste. Capture le ressenti, le désir profond, la promesse implicite du voyage rêvé.",
+  "confidence": 0.85
+}`;
+
+  const userMessage =
+    `FICHE VOYAGEUR :\n` +
+    `Nom : ${lead.traveler_name ?? "Inconnu"}\n` +
+    `Résumé : ${lead.trip_summary ?? "—"}\n` +
+    `Destination notée : ${lead.destination_main ?? "non renseignée"}\n` +
+    `Style : ${lead.travel_style ?? "—"}\n` +
+    `Groupe : ${lead.travelers ?? "—"}\n` +
+    `Budget : ${lead.budget ?? "—"}\n` +
+    `Dates : ${lead.trip_dates ?? "—"}\n\n` +
+    `TRANSCRIPTION :\n${transcript}`;
+
+  let parsed: {
+    destination_main?: string;
+    trip_dates?: string;
+    travelers?: string;
+    budget?: string;
+    travel_style?: string;
+    travel_desire_narrative?: string;
+    confidence?: number;
+  };
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      const t = await response.text();
+      return {
+        ok: false,
+        error: `API Anthropic ${response.status} : ${t.slice(0, 200)}`,
+      };
+    }
+
+    const data = await response.json();
+    const rawText: string = data?.content?.[0]?.text ?? "";
+    parsed = JSON.parse(rawText.replace(/```json|```/g, "").trim());
+  } catch (err) {
+    return { ok: false, error: `Erreur agent : ${String(err).slice(0, 200)}` };
+  }
+
+  const { error: updateErr } = await supabase
+    .from("leads")
+    .update({
+      destination_main: parsed.destination_main ?? lead.destination_main,
+      trip_dates: parsed.trip_dates ?? lead.trip_dates,
+      travelers: parsed.travelers ?? lead.travelers,
+      budget: parsed.budget ?? lead.budget,
+      travel_style: parsed.travel_style ?? lead.travel_style,
+      travel_desire_narrative: parsed.travel_desire_narrative ?? null,
+      ai_qualification_payload: parsed as unknown as Record<string, unknown>,
+      ai_qualification_confidence: parsed.confidence ?? null,
+      qualification_validation_status: "pending",
+    })
+    .eq("id", leadId);
+
+  if (updateErr)
+    return { ok: false, error: `Erreur sauvegarde : ${updateErr.message}` };
+
+  await logActivity(
+    supabase,
+    leadId,
+    user.id,
+    "ai_qualification_run",
+    `Agent IA exécuté — confidence : ${parsed.confidence ?? "—"}`,
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+
+  return {
+    ok: true,
+    destination_main: parsed.destination_main ?? "",
+    trip_dates: parsed.trip_dates ?? "",
+    travelers: parsed.travelers ?? "",
+    budget: parsed.budget ?? "",
+    travel_style: parsed.travel_style ?? "",
+    travel_desire_narrative: parsed.travel_desire_narrative ?? "",
+    ai_qualification_confidence: parsed.confidence ?? 0,
+  };
+}
+
+export type ValidationResult = { ok: true } | { ok: false; error: string };
+
+export async function validateQualification(
+  leadId: string,
+): Promise<ValidationResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      qualification_validation_status: "validated",
+      qualification_validated_at: new Date().toISOString(),
+      qualification_validated_by: user.id,
+      status: "agency_assignment",
+    })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(
+    supabase,
+    leadId,
+    user.id,
+    "qualification_validated",
+    "Qualification validée — passage à Assignation agence.",
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
+export type QualificationFields = {
+  destination_main?: string;
+  trip_dates?: string;
+  travelers?: string;
+  budget?: string;
+  travel_style?: string;
+  travel_desire_narrative?: string;
+  qualification_notes?: string;
+};
+
+export async function saveQualificationFields(
+  leadId: string,
+  fields: QualificationFields,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function compareAgencyProposals(leadId: string): Promise<AiActionResult> {
   if (!isUuid(leadId)) {
     return { ok: false, error: "Lead invalide." };
