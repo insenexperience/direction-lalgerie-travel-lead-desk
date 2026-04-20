@@ -2,12 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, FileEdit } from "lucide-react";
 import { deleteLead } from "@/app/(dashboard)/leads/actions";
 import { displayLeadScore, scoreTier as scoreTierFn } from "@/lib/lead-score";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import type { LeadStatus } from "@/lib/mock-leads";
 import { leadStatusLabelFr, LEAD_PIPELINE } from "@/lib/mock-leads";
+import { LeadEditForm } from "@/components/leads/lead-edit-form";
 import { LeadScorePill } from "./lead-score-pill";
 
 const tierLabel: Record<string, string> = {
@@ -72,7 +73,7 @@ type LeadCockpitDossierProps = {
   qualificationValidatorLabel: string | null;
   isAdmin: boolean;
   onOpenScoreModal: () => void;
-  /** Masquer le lien ancre vers la fiche (ex. page workflow sans bloc fiche). */
+  /** Masquer l’édition fiche (ex. page workflow manuel). */
   showFicheLink?: boolean;
 };
 
@@ -87,11 +88,27 @@ export function LeadCockpitDossier({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [ficheOpen, setFicheOpen] = useState(false);
   const emailDisp = truncateEmail(lead.email);
   const score = displayLeadScore(lead);
   const tier = tierLabel[scoreTierFn(score)] ?? "—";
   const stepIdx = LEAD_PIPELINE.indexOf(lead.status as LeadStatus);
   const stepLabel = leadStatusLabelFr[lead.status as LeadStatus];
+
+  function toggleFiche() {
+    setFicheOpen((v) => {
+      const next = !v;
+      if (next) {
+        queueMicrotask(() => {
+          document.getElementById("lead-fiche-edit")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
+      }
+      return next;
+    });
+  }
 
   function runDelete() {
     const ok = window.confirm(
@@ -270,6 +287,14 @@ export function LeadCockpitDossier({
                 ) : null}
               </dd>
             </div>
+            {lead.workflow_run_ref ? (
+              <div>
+                <dt className="text-[10px] text-muted-foreground">Réf. session workflow</dt>
+                <dd className="font-mono text-[12px] font-semibold text-steel">
+                  {lead.workflow_run_ref}
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt className="text-[10px] text-muted-foreground">Étape</dt>
               <dd className="text-[12px] font-medium text-foreground">
@@ -284,13 +309,24 @@ export function LeadCockpitDossier({
       <div className="mt-3 border-t border-border pt-3">
         <div className="flex flex-wrap items-center gap-3">
           {showFicheLink ? (
-            <a
-              href="#lead-fiche-edit"
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-transparent px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-panel-muted focus:outline-none focus:ring-2 focus:ring-steel/25"
+            <button
+              type="button"
+              onClick={toggleFiche}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-panel"
+              aria-expanded={ficheOpen}
             >
-              <ExternalLink className="size-4 shrink-0" aria-hidden />
-              Fiche complète
-            </a>
+              {ficheOpen ? (
+                <>
+                  <ChevronDown className="size-4 shrink-0" aria-hidden />
+                  Fermer la fiche
+                </>
+              ) : (
+                <>
+                  <FileEdit className="size-4 shrink-0" aria-hidden />
+                  Modifier la fiche
+                </>
+              )}
+            </button>
           ) : null}
           {isAdmin ? (
             <button
@@ -304,6 +340,33 @@ export function LeadCockpitDossier({
             </button>
           ) : null}
         </div>
+        {showFicheLink && !ficheOpen ? (
+          <p className="mt-3 flex items-start gap-2 text-sm text-muted-foreground">
+            <ChevronRight className="mt-0.5 size-4 shrink-0 opacity-70" aria-hidden />
+            <span>
+              Les blocs au-dessus correspondent à l’étape du pipeline. Ouvrez « Modifier la fiche »
+              pour corriger ou enrichir tous les champs voyageur.
+            </span>
+          </p>
+        ) : null}
+        {showFicheLink && ficheOpen ? (
+          <div
+            id="lead-fiche-edit"
+            className="scroll-mt-32 mt-4 border-t border-border pt-4"
+          >
+            <p className="mb-4 text-sm text-muted-foreground">
+              Tous les champs du dossier voyageur — enregistrez pour appliquer les changements.
+            </p>
+            <LeadEditForm
+              key={lead.updated_at}
+              lead={lead}
+              onSaved={() => {
+                setFicheOpen(false);
+                router.refresh();
+              }}
+            />
+          </div>
+        ) : null}
         {err ? (
           <p className="mt-2 text-sm text-red-600" role="alert">
             {err}

@@ -406,3 +406,47 @@ export async function generateQuoteFromProposal(proposalId: string): Promise<Act
   revalidatePath("/metrics");
   return { ok: true };
 }
+
+/** Supprime une proposition de circuit tant qu’aucun devis n’y est lié. */
+export async function deleteCircuitProposal(proposalId: string): Promise<ActionResult> {
+  if (!isUuid(proposalId)) {
+    return { ok: false, error: "Identifiant de proposition invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { data: row, error: fetchError } = await supabase
+    .from("lead_circuit_proposals")
+    .select("id, lead_id, converted_quote_id")
+    .eq("id", proposalId)
+    .maybeSingle();
+
+  if (fetchError || !row) {
+    return { ok: false, error: "Proposition introuvable." };
+  }
+
+  if (row.converted_quote_id) {
+    return {
+      ok: false,
+      error:
+        "Impossible de supprimer : un devis est déjà lié à cette proposition. Retirez ou archivez le devis d’abord.",
+    };
+  }
+
+  const { error: delError } = await supabase.from("lead_circuit_proposals").delete().eq("id", proposalId);
+
+  if (delError) {
+    return { ok: false, error: delError.message };
+  }
+
+  revalidatePath(`/leads/${row.lead_id as string}`);
+  revalidatePath("/leads");
+  revalidatePath("/metrics");
+  return { ok: true };
+}

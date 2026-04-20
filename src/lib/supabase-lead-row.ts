@@ -40,6 +40,8 @@ export type SupabaseLeadRow = {
   workflow_launched_at: string | null;
   workflow_launched_by: string | null;
   workflow_mode: "ai" | "manual" | null;
+  /** Référence de la session workflow active (ex. WF-xxxxxxxx). */
+  workflow_run_ref: string | null;
   /** Référence cockpit `DA-YYYY-NNNN` (nullable avant backfill / allocation). */
   reference: string | null;
   lead_score: number | null;

@@ -11,12 +11,27 @@ type LeadSupabasePipelineProps = {
   leadId: string;
   status: LeadStatus;
   referentId: string | null;
+  isAdmin?: boolean;
 };
+
+function allowedPipelineSelectStatuses(
+  current: LeadStatus,
+  isAdmin: boolean,
+): LeadStatus[] {
+  if (isAdmin) return [...LEAD_PIPELINE];
+  const i = LEAD_PIPELINE.indexOf(current);
+  const set = new Set<LeadStatus>([current]);
+  if (i > 0) set.add(LEAD_PIPELINE[i - 1]!);
+  if (i >= 0 && i < LEAD_PIPELINE.length - 1) set.add(LEAD_PIPELINE[i + 1]!);
+  if (current === "negotiation") set.add("lost");
+  return LEAD_PIPELINE.filter((s) => set.has(s));
+}
 
 export function LeadSupabasePipeline({
   leadId,
   status,
   referentId,
+  isAdmin = false,
 }: LeadSupabasePipelineProps) {
   const router = useRouter();
   const [localStatus, setLocalStatus] = useState<LeadStatus>(status);
@@ -29,6 +44,7 @@ export function LeadSupabasePipeline({
 
   const currentIndex = LEAD_PIPELINE.indexOf(localStatus);
   const canAdvance = Boolean(referentId);
+  const selectStatuses = allowedPipelineSelectStatuses(localStatus, isAdmin);
 
   async function applyStatus(next: LeadStatus) {
     if (next === localStatus) return;
@@ -97,8 +113,10 @@ export function LeadSupabasePipeline({
         </h3>
         <p className="mt-2 text-sm text-foreground/85">
           {canAdvance
-            ? "Choisissez l’étape du pipeline. Les changements sont enregistrés dans Supabase."
-            : "Allouez d’abord un opérateur travel desk (étape « Nouveau ») pour débloquer les étapes suivantes."}
+            ? isAdmin
+              ? "Choisissez l'étape du pipeline. Les changements sont enregistrés dans Supabase."
+              : "Choisissez l'étape suivante ou précédente (une étape à la fois), ou demandez à un administrateur pour un saut d'étape."
+            : "Allouez d'abord un opérateur travel desk (étape « Nouveau ») pour débloquer les étapes suivantes."}
         </p>
         <label className="mt-4 block text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">Étape</span>
@@ -108,7 +126,7 @@ export function LeadSupabasePipeline({
             onChange={(e) => void applyStatus(e.target.value as LeadStatus)}
             className="mt-2 w-full max-w-md rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-steel/25 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {LEAD_PIPELINE.map((s) => (
+            {selectStatuses.map((s) => (
               <option
                 key={s}
                 value={s}

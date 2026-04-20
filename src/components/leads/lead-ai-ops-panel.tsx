@@ -2,12 +2,14 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { Sparkles } from "lucide-react";
 import {
   compareAgencyProposals,
   generateAgencyShortlist,
   setLeadManualTakeover,
   validateLeadQualification,
 } from "@/app/(dashboard)/leads/ai-actions";
+import { ContextBanner } from "@/components/leads/context-banner";
 import type { TranscriptEntry } from "@/lib/ai/types";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 
@@ -58,14 +60,40 @@ export function LeadAiOpsPanel({
   }
 
   return (
-    <section className="rounded-md border border-border bg-panel p-4 sm:p-6">
+    <section
+      id="lead-ai-ops-panel"
+      className="rounded-md border border-border bg-panel p-4 sm:p-6"
+    >
       <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         Conversation voyageur &amp; IA
       </h3>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Transcript WhatsApp / IA (lecture seule). Activez la reprise manuelle pour suspendre
-        l&apos;envoi automatique des messages IA.
-      </p>
+      {entries.length > 0 ? (
+        <div className="mt-3">
+          <ContextBanner variant="ia" title="Transcript" icon={Sparkles}>
+            <span>
+              {entries.length} message{entries.length > 1 ? "s" : ""} enregistré
+              {entries.length > 1 ? "s" : ""} — voir le fil ci-dessous ou{" "}
+              <a
+                href="#lead-ai-transcript"
+                className="font-semibold text-sky-900 underline decoration-sky-700/40 underline-offset-2 hover:decoration-sky-900"
+              >
+                accéder au transcript
+              </a>
+              .
+            </span>
+          </ContextBanner>
+        </div>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Transcript WhatsApp / IA (lecture seule). Aucun message enregistré pour l’instant.
+        </p>
+      )}
+      {entries.length > 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Activez la reprise manuelle (bandeau cockpit) pour suspendre l&apos;envoi automatique des
+          messages IA.
+        </p>
+      ) : null}
 
       {hideAutopilotToggle ? null : (
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -82,9 +110,17 @@ export function LeadAiOpsPanel({
         </div>
       )}
 
-      {pendingQual && lead.ai_qualification_payload ? (
+      {pendingQual ? (
         <div className="mt-6 border-t border-border pt-4">
-          <p className="text-sm font-semibold text-foreground">Validation qualification</p>
+          <p className="text-sm font-semibold text-foreground">
+            Validation du brief — assignation agence
+          </p>
+          {!lead.ai_qualification_payload ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Pas encore de synthèse IA structurée sur ce dossier : validez tout de même le brief
+              (fiche complète + contexte) pour débloquer le passage à l’étape « Assignation ».
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -145,7 +181,10 @@ export function LeadAiOpsPanel({
         </p>
       ) : null}
 
-      <div className="mt-6 max-h-80 space-y-2 overflow-y-auto rounded-md border border-border bg-panel-muted/40 p-3">
+      <div
+        id="lead-ai-transcript"
+        className="mt-6 max-h-80 space-y-2 overflow-y-auto scroll-mt-28 rounded-md border border-border bg-panel-muted/40 p-3"
+      >
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Aucun message enregistré.</p>
         ) : (

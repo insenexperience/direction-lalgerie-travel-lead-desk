@@ -38,6 +38,7 @@ export const LEAD_SELECT_V2 = [
   "workflow_launched_at",
   "workflow_launched_by",
   "workflow_mode",
+  "workflow_run_ref",
   "reference",
   "lead_score",
   "lead_score_override",
@@ -127,6 +128,7 @@ export function mapRowToSupabaseLeadRow(
       workflow_launched_at: null,
       workflow_launched_by: null,
       workflow_mode: null,
+      workflow_run_ref: null,
       reference: null,
       lead_score: null,
       lead_score_override: null,
@@ -174,6 +176,10 @@ export function mapRowToSupabaseLeadRow(
     workflow_mode:
       row.workflow_mode === "ai" || row.workflow_mode === "manual"
         ? row.workflow_mode
+        : null,
+    workflow_run_ref:
+      row.workflow_run_ref != null && String(row.workflow_run_ref).trim() !== ""
+        ? String(row.workflow_run_ref).trim()
         : null,
     reference: row.reference != null ? String(row.reference).trim() || null : null,
     lead_score:

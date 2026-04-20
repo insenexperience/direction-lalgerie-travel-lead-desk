@@ -9,13 +9,18 @@ import { LEAD_PIPELINE, leadStatusLabelFr } from "@/lib/mock-leads";
 type LeadCockpitPipelineProps = {
   leadId: string;
   status: LeadStatus;
+  isAdmin?: boolean;
 };
 
 function visibleSteps(status: LeadStatus): LeadStatus[] {
   return LEAD_PIPELINE.filter((s) => s !== "lost" || status === "lost");
 }
 
-export function LeadCockpitPipeline({ leadId, status }: LeadCockpitPipelineProps) {
+export function LeadCockpitPipeline({
+  leadId,
+  status,
+  isAdmin = false,
+}: LeadCockpitPipelineProps) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -37,23 +42,22 @@ export function LeadCockpitPipeline({ leadId, status }: LeadCockpitPipelineProps
   }
 
   return (
-    <div className="border-b border-border bg-panel-muted">
-      <div className="overflow-x-auto pb-1 pt-1 [-ms-overflow-style:none] [scrollbar-width:thin]">
-        <ol className="flex min-w-max items-center gap-0 px-0.5">
+    <div className="border-b border-border bg-panel">
+      <div className="overflow-x-auto px-1 py-2 [-ms-overflow-style:none] [scrollbar-width:thin] sm:px-2">
+        <ol className="flex min-w-max items-center gap-1.5">
           {steps.map((step, i) => {
             const idx = LEAD_PIPELINE.indexOf(step);
             const isFuture = idx > curIdx;
             const isActive = idx === curIdx;
             const isDone = idx < curIdx;
-            const clickable = !isFuture && !pending;
+            const clickable =
+              !pending &&
+              (isAdmin ? !isFuture : isActive || idx === curIdx - 1);
 
             return (
               <li key={step} className="flex items-center">
                 {i > 0 ? (
-                  <ChevronRight
-                    className="mx-0.5 size-3 shrink-0 text-muted-foreground/60"
-                    aria-hidden
-                  />
+                  <ChevronRight className="mx-0.5 size-3 shrink-0 text-muted-foreground/60" aria-hidden />
                 ) : null}
                 <button
                   type="button"
@@ -68,21 +72,21 @@ export function LeadCockpitPipeline({ leadId, status }: LeadCockpitPipelineProps
                     apply(step);
                   }}
                   className={[
-                    "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
+                    "group flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
                     isActive
-                      ? "border-b-2 border-steel bg-panel text-steel"
+                      ? "border-steel bg-steel text-steel-ink shadow-sm"
                       : isDone
-                        ? "text-foreground hover:bg-panel/80"
-                        : "cursor-not-allowed text-foreground/40",
+                        ? "border-border bg-panel-muted text-foreground hover:bg-panel"
+                        : "cursor-not-allowed border-border/70 bg-transparent text-foreground/45",
                   ].join(" ")}
                 >
                   <span
                     className={[
-                      "flex size-2 shrink-0 rounded-full border",
+                      "flex size-2.5 shrink-0 rounded-full border",
                       isDone
                         ? "border-emerald-600 bg-[#e8f4ef]"
                         : isActive
-                          ? "border-steel bg-steel"
+                          ? "border-steel-ink/70 bg-steel-ink"
                           : "border-border bg-transparent",
                     ].join(" ")}
                     aria-hidden
@@ -92,7 +96,9 @@ export function LeadCockpitPipeline({ leadId, status }: LeadCockpitPipelineProps
                       ✓
                     </span>
                   ) : null}
-                  <span className="max-w-[9rem] truncate">{leadStatusLabelFr[step]}</span>
+                  <span className="max-w-[10rem] truncate">
+                    {leadStatusLabelFr[step]}
+                  </span>
                 </button>
               </li>
             );
@@ -100,7 +106,7 @@ export function LeadCockpitPipeline({ leadId, status }: LeadCockpitPipelineProps
         </ol>
       </div>
       {err ? (
-        <p className="px-2 pb-2 text-xs text-red-600" role="alert">
+        <p className="px-2 pb-2 text-xs font-medium text-red-600" role="alert">
           {err}
         </p>
       ) : null}

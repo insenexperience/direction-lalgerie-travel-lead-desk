@@ -19,11 +19,15 @@ export type WorkflowLaunchResult =
   | { ok: true; travelerEmailSent: boolean }
   | { ok: false; error: string };
 
+export type WorkflowSessionResetResult = { ok: true } | { ok: false; error: string };
+
 type LeadWorkflowRow = {
   id: string;
   referent_id: string | null;
   status: string;
   workflow_launched_at: string | null;
+  workflow_mode: string | null;
+  manual_takeover: boolean;
   email: string;
   traveler_name: string;
   trip_summary: string;
@@ -38,7 +42,7 @@ async function logWorkflowActivity(
   supabase: Awaited<ReturnType<typeof createClient>>,
   leadId: string,
   actorId: string,
-  kind: "workflow_launch_ai" | "workflow_launch_manual",
+  kind: string,
   detail: string,
 ) {
   await supabase.from("activities").insert({
@@ -49,6 +53,14 @@ async function logWorkflowActivity(
   });
 }
 
+function newWorkflowRunRef(): string {
+  const id =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().replace(/-/g, "")
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `WF-${id.slice(0, 12).toUpperCase()}`;
+}
+
 async function fetchLeadForWorkflow(
   supabase: Awaited<ReturnType<typeof createClient>>,
   leadId: string,
@@ -56,13 +68,18 @@ async function fetchLeadForWorkflow(
   const { data, error } = await supabase
     .from("leads")
     .select(
-      "id, referent_id, status, workflow_launched_at, email, traveler_name, trip_summary, travel_style, travelers, budget, trip_dates, submission_id",
+      "id, referent_id, status, workflow_launched_at, workflow_mode, manual_takeover, email, traveler_name, trip_summary, travel_style, travelers, budget, trip_dates, submission_id",
     )
     .eq("id", leadId)
     .maybeSingle();
 
   if (error) {
-    if (error.message?.includes("workflow_launched_at") || error.message?.includes("submission_id")) {
+    if (
+    error.message?.includes("workflow_launched_at") ||
+    error.message?.includes("submission_id") ||
+    error.message?.includes("workflow_run_ref") ||
+    error.message?.includes("manual_takeover")
+  ) {
       return {
         ok: false,
         error:
@@ -84,6 +101,8 @@ async function fetchLeadForWorkflow(
       workflow_launched_at: data.workflow_launched_at
         ? String(data.workflow_launched_at)
         : null,
+      workflow_mode: data.workflow_mode != null ? String(data.workflow_mode) : null,
+      manual_takeover: Boolean(data.manual_takeover),
       email: String(data.email ?? "").trim(),
       traveler_name: String(data.traveler_name ?? ""),
       trip_summary: String(data.trip_summary ?? ""),
@@ -99,9 +118,10 @@ async function fetchLeadForWorkflow(
   };
 }
 
-function assertCanLaunch(
+function assertCanLaunchWorkflow(
   row: LeadWorkflowRow,
   userId: string,
+  kind: "ai" | "manual",
 ): WorkflowLaunchResult | null {
   if (row.referent_id !== userId) {
     return {
@@ -109,18 +129,45 @@ function assertCanLaunch(
       error: "Seul le référent assigné à ce dossier peut lancer le workflow.",
     };
   }
-  if (row.status !== "new") {
+  if (row.status !== "new" && row.status !== "qualification") {
     return {
       ok: false,
-      error: "Le workflow ne peut être lancé que pour un lead au statut « Nouveau ».",
+      error:
+        "Le workflow voyageur ne peut être lancé qu’aux étapes « Nouveau » ou « Qualification & affinage ».",
     };
-  }
-  if (row.workflow_launched_at) {
-    return { ok: false, error: "Le workflow a déjà été lancé pour ce dossier." };
   }
   if (!row.email) {
     return { ok: false, error: "Aucune adresse email voyageur sur la fiche." };
   }
+
+  const sessionActive = Boolean(row.workflow_launched_at && row.workflow_mode);
+
+  if (kind === "ai") {
+    if (sessionActive) {
+      return {
+        ok: false,
+        error:
+          "Une session workflow est déjà active sur ce dossier (supprimez-la depuis la fiche ou la page manuelle pour en lancer une autre en mode IA).",
+      };
+    }
+    return null;
+  }
+
+  if (sessionActive && row.workflow_mode === "manual") {
+    return {
+      ok: false,
+      error:
+        "Une session manuelle est déjà enregistrée. Supprimez la session workflow ci-dessous pour en lancer une autre.",
+    };
+  }
+  if (sessionActive && row.workflow_mode === "ai" && !row.manual_takeover) {
+    return {
+      ok: false,
+      error:
+        "L’IA est active sur ce dossier : suspendez-la depuis la fiche (bandeau cockpit), ou supprimez la session workflow.",
+    };
+  }
+
   return null;
 }
 
@@ -142,7 +189,7 @@ export async function launchWorkflowAi(leadId: string): Promise<WorkflowLaunchRe
   const fetched = await fetchLeadForWorkflow(supabase, leadId);
   if (!fetched.ok) return { ok: false, error: fetched.error };
 
-  const block = assertCanLaunch(fetched.row, user.id);
+  const block = assertCanLaunchWorkflow(fetched.row, user.id, "ai");
   if (block) return block;
 
   let travelerEmailSent = false;
@@ -191,21 +238,31 @@ export async function launchWorkflowAi(leadId: string): Promise<WorkflowLaunchRe
   }
 
   const now = new Date().toISOString();
-  const { error: upErr } = await supabase
-    .from("leads")
-    .update({
-      status: "qualification",
-      workflow_launched_at: now,
-      workflow_launched_by: user.id,
-      workflow_mode: "ai",
-    })
-    .eq("id", leadId);
+  const runRef = newWorkflowRunRef();
+  const patch: Record<string, unknown> = {
+    workflow_launched_at: now,
+    workflow_launched_by: user.id,
+    workflow_mode: "ai",
+    workflow_run_ref: runRef,
+    manual_takeover: false,
+  };
+  if (fetched.row.status === "new") {
+    patch.status = "qualification";
+  }
+
+  const { error: upErr } = await supabase.from("leads").update(patch).eq("id", leadId);
 
   if (upErr) {
     return { ok: false, error: upErr.message };
   }
 
-  await logWorkflowActivity(supabase, leadId, user.id, "workflow_launch_ai", activityDetail);
+  await logWorkflowActivity(
+    supabase,
+    leadId,
+    user.id,
+    "workflow_launch_ai",
+    `${activityDetail} Réf. session : ${runRef}.`,
+  );
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath(`/leads/${leadId}/workflow`);
@@ -233,7 +290,7 @@ export async function launchWorkflowManual(
   const fetched = await fetchLeadForWorkflow(supabase, leadId);
   if (!fetched.ok) return { ok: false, error: fetched.error };
 
-  const block = assertCanLaunch(fetched.row, user.id);
+  const block = assertCanLaunchWorkflow(fetched.row, user.id, "manual");
   if (block) return block;
 
   let travelerEmailSent = false;
@@ -262,25 +319,121 @@ export async function launchWorkflowManual(
   }
 
   const now = new Date().toISOString();
-  const { error: upErr } = await supabase
-    .from("leads")
-    .update({
-      status: "qualification",
-      workflow_launched_at: now,
-      workflow_launched_by: user.id,
-      workflow_mode: "manual",
-    })
-    .eq("id", leadId);
+  const runRef = newWorkflowRunRef();
+  const patch: Record<string, unknown> = {
+    workflow_launched_at: now,
+    workflow_launched_by: user.id,
+    workflow_mode: "manual",
+    workflow_run_ref: runRef,
+    manual_takeover: false,
+  };
+  if (fetched.row.status === "new") {
+    patch.status = "qualification";
+  }
+
+  const { error: upErr } = await supabase.from("leads").update(patch).eq("id", leadId);
 
   if (upErr) {
     return { ok: false, error: upErr.message };
   }
 
-  await logWorkflowActivity(supabase, leadId, user.id, "workflow_launch_manual", activityDetail);
+  await logWorkflowActivity(
+    supabase,
+    leadId,
+    user.id,
+    "workflow_launch_manual",
+    `${activityDetail} Réf. session : ${runRef}.`,
+  );
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/dashboard");
   return { ok: true, travelerEmailSent };
+}
+
+/**
+ * Supprime la session workflow voyageur en cours (références, mode, transcript IA associé,
+ * validation qualification). Ne change pas le statut pipeline du lead.
+ */
+export async function resetWorkflowVoyageurSession(
+  leadId: string,
+): Promise<WorkflowSessionResetResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const { data: row, error } = await supabase
+    .from("leads")
+    .select("referent_id, workflow_launched_at, workflow_mode, workflow_run_ref")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error || !row) {
+    return { ok: false, error: "Lead introuvable." };
+  }
+
+  if (row.referent_id !== user.id) {
+    return {
+      ok: false,
+      error: "Seul le référent assigné peut supprimer la session workflow sur ce dossier.",
+    };
+  }
+
+  if (!row.workflow_launched_at) {
+    return { ok: false, error: "Aucune session workflow active à supprimer." };
+  }
+
+  const refNote =
+    row.workflow_run_ref != null ? String(row.workflow_run_ref) : "(sans référence)";
+
+  const { error: upErr } = await supabase
+    .from("leads")
+    .update({
+      workflow_launched_at: null,
+      workflow_launched_by: null,
+      workflow_mode: null,
+      workflow_run_ref: null,
+      manual_takeover: false,
+      conversation_transcript: [],
+      ai_qualification_payload: null,
+      ai_qualification_confidence: null,
+      qualification_validation_status: "pending",
+      qualification_validated_at: null,
+      qualification_validated_by: null,
+    })
+    .eq("id", leadId);
+
+  if (upErr) {
+    if (upErr.message?.includes("workflow_run_ref")) {
+      return {
+        ok: false,
+        error:
+          "Colonne workflow_run_ref absente : exécutez les migrations Supabase (`npm run db:push`).",
+      };
+    }
+    return { ok: false, error: upErr.message };
+  }
+
+  await logWorkflowActivity(
+    supabase,
+    leadId,
+    user.id,
+    "workflow_session_reset",
+    `Session workflow supprimée (réf. ${refNote}). Transcript / brouillon qualification réinitialisés.`,
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath(`/leads/${leadId}/workflow`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
 }

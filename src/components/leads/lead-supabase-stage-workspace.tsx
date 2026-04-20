@@ -11,7 +11,13 @@ import type {
 } from "@/lib/co-construction-proposal";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import type { LeadStatus } from "@/lib/mock-leads";
-import { leadStatusLabelFr } from "@/lib/mock-leads";
+import { LEAD_PIPELINE, leadStatusLabelFr } from "@/lib/mock-leads";
+import {
+  getBriefGateBlockMessage,
+  isLeadBriefExploitable,
+  leadBriefChecklist,
+} from "@/lib/lead-brief-gate";
+import { ContextBanner } from "@/components/leads/context-banner";
 
 import type { ReferentDisplayRow } from "@/lib/referent-display";
 
@@ -39,17 +45,17 @@ function stageIntro(status: LeadStatus): { title: string; body: string } {
     qualification: {
       title: "Qualification & affinage du besoin",
       body:
-        "Infos voyageur souvent incomplètes à l’entrée : un échange (e-mail, appel ou WhatsApp) permet d’enrichir la fiche (menu « Modifier la fiche »). La conversation IA apparaît dans le bloc « Conversation voyageur & IA ». Grille CRM express ci-dessous (conversion + relance) — cible ~1 minute.",
+        "Enrichissez la fiche jusqu’à ce qu’elle soit exploitable (mêmes champs requis en mode IA ou manuel). Validez la qualification dans le bloc « Contexte » si l’IA a produit une proposition. La grille CRM express (conversion + relance) reste en dessous — cible ~1 minute.",
     },
     agency_assignment: {
       title: "Assignation — agence partenaire",
       body:
-        "Choisissez l’agence partenaire chargée de traiter ce lead (réseau Direction l’Algérie). Ce n’est pas l’opérateur travel desk, déjà alloué à l’étape « Nouveau ».",
+        "Choisissez l’agence partenaire chargée de traiter ce lead (réseau Direction l’Algérie). La fiche anonymisée part vers l’agence pour préparer les propositions de circuit. Ce n’est pas l’opérateur travel desk, déjà alloué à l’étape « Nouveau ».",
     },
     co_construction: {
-      title: "Co-construction",
+      title: "Co-construction — propositions de circuit",
       body:
-        "Propositions de circuit avec l’agence retenue : en attente de proposition, puis réception et retouches, validation travel desk, et génération du devis.",
+        "L’agence retenue envoie des propositions de circuit ; vous comparez, affinez, puis validez. L’IA ou l’opérateur peut aider à trancher la meilleure option avant génération du devis chiffré.",
     },
     quote: {
       title: "Devis",
@@ -86,21 +92,67 @@ export function LeadSupabaseStageWorkspace({
   const intro = stageIntro(status);
   const isNew = status === "new";
   const isAgencyAssignment = status === "agency_assignment";
+  const stepIdx = LEAD_PIPELINE.indexOf(status);
+  const stepHuman = stepIdx >= 0 ? stepIdx + 1 : 0;
+  const stepTotal = LEAD_PIPELINE.length;
 
   return (
     <>
-      <section className="rounded-md border border-[#182b35]/25 bg-panel p-4 sm:p-6">
+      <section
+        id="lead-stage-active"
+        className="relative z-[1] scroll-mt-24 rounded-xl border-2 border-steel/20 bg-panel p-4 shadow-sm ring-1 ring-steel/10 sm:p-6"
+      >
         <div className="border-b border-border pb-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-steel">
-            Étape active — {leadStatusLabelFr[status]}
+          <p className="inline-flex items-center gap-2 rounded-full border border-border bg-panel-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-steel">
+            <span className="size-1.5 shrink-0 rounded-full bg-steel" aria-hidden />
+            Étape active · {stepHuman} / {stepTotal}
+            <span className="sr-only"> ({leadStatusLabelFr[status]})</span>
           </p>
-          <h2 className="mt-2 font-display text-xl font-semibold tracking-tight text-foreground">
+          <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {leadStatusLabelFr[status]}
+          </p>
+          <h2 className="mt-2 font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
             {intro.title}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-foreground/85">{intro.body}</p>
         </div>
 
         <div className="mt-6 space-y-8">
+        {status === "qualification" ? (
+          <div className="rounded-lg border border-border bg-panel-muted/35 p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Brief prêt pour l’assignation agence
+            </h3>
+            <p className="mt-2 text-sm text-foreground/85">
+              Tant que la checklist n’est pas complète ou la qualification non validée, le passage
+              à « Assignation » est bloqué côté serveur.
+            </p>
+            {!isLeadBriefExploitable(lead) && getBriefGateBlockMessage(lead) ? (
+              <div className="mt-3">
+                <ContextBanner variant="operator" title="Action requise">
+                  {getBriefGateBlockMessage(lead)}
+                </ContextBanner>
+              </div>
+            ) : null}
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+              {leadBriefChecklist(lead).map((item) => (
+                <li
+                  key={item.id}
+                  className={[
+                    "flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-medium",
+                    item.ok
+                      ? "border-emerald-200/90 bg-emerald-50/80 text-emerald-950"
+                      : "border-border bg-panel text-foreground/80",
+                  ].join(" ")}
+                >
+                  <span aria-hidden>{item.ok ? "✓" : "○"}</span>
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         {status === "qualification" ? (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -202,7 +254,7 @@ export function LeadSupabaseStageWorkspace({
         ) : null}
 
         {status !== "co_construction" && coProposals.length > 0 ? (
-          <div>
+          <div className="rounded-lg border border-dashed border-border/90 bg-panel-muted/20 p-4 opacity-95">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Historique — propositions de circuit
             </h3>

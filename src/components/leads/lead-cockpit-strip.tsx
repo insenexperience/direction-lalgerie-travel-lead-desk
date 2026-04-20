@@ -41,53 +41,53 @@ export function LeadCockpitStrip({
   }
 
   return (
-    <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-panel px-0 py-2 sm:gap-x-4">
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 sm:gap-x-3">
-        <span className="font-mono text-xs font-semibold text-steel sm:text-sm">{ref}</span>
-        <span className="hidden text-muted-foreground sm:inline" aria-hidden>
-          |
-        </span>
-        <span className="min-w-0 truncate text-sm font-semibold text-foreground">
-          {lead.traveler_name || "—"}
-        </span>
-        <span className="hidden text-muted-foreground sm:inline" aria-hidden>
-          |
-        </span>
-        <LeadScorePill lead={lead} onOpenModal={onOpenScoreModal} />
-        <span className="hidden text-muted-foreground sm:inline" aria-hidden>
-          |
-        </span>
-        <LeadAiStatusPill lead={lead} onOpenDetails={onOpenDetailsDrawer} />
-        <button
-          type="button"
-          disabled={pending}
-          onClick={toggleTakeover}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-panel-muted px-2 py-1 text-xs font-semibold text-foreground hover:bg-panel disabled:opacity-50"
-        >
-          {lead.manual_takeover ? (
-            <>
-              <Play className="size-3.5 shrink-0" aria-hidden />
-              Reprendre
-            </>
-          ) : (
-            <>
-              <Pause className="size-3.5 shrink-0" aria-hidden />
-              Suspendre
-            </>
-          )}
-        </button>
-        {err ? (
-          <span className="w-full text-xs text-red-600 sm:w-auto" role="alert">
-            {err}
+    <div className="border-b border-border bg-panel">
+      <div className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 px-1 py-2 sm:gap-x-4 sm:px-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-2">
+          <span className="inline-flex items-center rounded-md border border-border bg-panel-muted px-2 py-1 font-mono text-xs font-semibold text-steel sm:text-sm">
+            {ref}
           </span>
-        ) : null}
+          <span className="min-w-0 truncate text-sm font-semibold text-foreground sm:text-[15px]">
+            {lead.traveler_name || "—"}
+          </span>
+
+          <div className="hidden h-6 w-px bg-border sm:block" aria-hidden />
+          <LeadScorePill lead={lead} onOpenModal={onOpenScoreModal} />
+
+          <div className="hidden h-6 w-px bg-border sm:block" aria-hidden />
+          <LeadAiStatusPill lead={lead} onOpenDetails={onOpenDetailsDrawer} />
+
+          <button
+            type="button"
+            disabled={pending}
+            onClick={toggleTakeover}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2.5 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:bg-panel disabled:opacity-50"
+          >
+            {lead.manual_takeover ? (
+              <>
+                <Play className="size-3.5 shrink-0" aria-hidden />
+                Reprendre
+              </>
+            ) : (
+              <>
+                <Pause className="size-3.5 shrink-0" aria-hidden />
+                Suspendre
+              </>
+            )}
+          </button>
+          {err ? (
+            <span className="w-full text-xs font-medium text-red-600 sm:w-auto" role="alert">
+              {err}
+            </span>
+          ) : null}
+        </div>
+        <Link
+          href="/leads"
+          className="shrink-0 rounded-md px-2 py-1 text-sm font-semibold text-muted-foreground transition-colors hover:bg-panel-muted hover:text-foreground"
+        >
+          ← Tous les leads
+        </Link>
       </div>
-      <Link
-        href="/leads"
-        className="shrink-0 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← Tous les leads
-      </Link>
     </div>
   );
 }

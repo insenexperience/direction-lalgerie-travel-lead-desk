@@ -2,10 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { Trash2 } from "lucide-react";
 import {
   type ActionResult,
   approveCircuitProposal,
   createCircuitProposal,
+  deleteCircuitProposal,
   generateQuoteFromProposal,
   submitCircuitProposalFromAgency,
   updateCircuitProposalOutline,
@@ -119,9 +121,29 @@ export function CoConstructionPanel({
                     </p>
                   ) : null}
                 </div>
-                <span className="rounded-none border border-border bg-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/90">
-                  {coConstructionProposalStatusLabelFr[p.status]}
-                </span>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <span className="rounded-none border border-border bg-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/90">
+                    {coConstructionProposalStatusLabelFr[p.status]}
+                  </span>
+                  {!p.converted_quote_id ? (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      title="Supprimer cette proposition"
+                      onClick={() => {
+                        const ok = window.confirm(
+                          `Supprimer la proposition « ${p.title} » (v${p.version}) ? Cette action est définitive.`,
+                        );
+                        if (!ok) return;
+                        run(() => deleteCircuitProposal(p.id));
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50/90 px-2 py-1 text-[11px] font-semibold text-red-900 hover:bg-red-100 disabled:opacity-50"
+                    >
+                      <Trash2 className="size-3.5 shrink-0" aria-hidden />
+                      Supprimer
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               {p.status === "awaiting_agency" && editable ? (

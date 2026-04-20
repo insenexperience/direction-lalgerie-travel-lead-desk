@@ -10,6 +10,10 @@ import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fiel
 import { buildLeadInsertFromIntake } from "@/lib/intake-lead-insert";
 import { computeScoreFromWeights } from "@/lib/lead-score";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
+import {
+  getBriefGateBlockMessage,
+  type LeadBriefGateRow,
+} from "@/lib/lead-brief-gate";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -60,7 +64,7 @@ export async function assignLeadReferent(
 
   const { data: prevRow, error: prevErr } = await supabase
     .from("leads")
-    .select("id")
+    .select("id, referent_id")
     .eq("id", leadId)
     .maybeSingle();
 
@@ -68,11 +72,19 @@ export async function assignLeadReferent(
     return { ok: false, error: "Lead introuvable." };
   }
 
+  const prevReferentId =
+    prevRow.referent_id != null ? String(prevRow.referent_id) : null;
+  const nextReferentId = referentId;
+
   const patch: Record<string, unknown> = { referent_id: referentId };
   if (referentId !== null) {
     patch.referent_assigned_at = new Date().toISOString();
   } else {
     patch.referent_assigned_at = null;
+  }
+
+  if (prevReferentId !== nextReferentId) {
+    Object.assign(patch, clearedWorkflowSessionPatch());
   }
 
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
@@ -344,6 +356,58 @@ function pipelineIndex(status: LeadStatus): number {
   return LEAD_PIPELINE.indexOf(status);
 }
 
+
+/** Réinitialise les champs de session workflow voyageur (sans toucher au transcript ni à la validation). */
+function clearedWorkflowSessionPatch(): Record<string, unknown> {
+  return {
+    workflow_launched_at: null,
+    workflow_launched_by: null,
+    workflow_mode: null,
+    workflow_run_ref: null,
+    manual_takeover: false,
+  };
+}
+
+function shouldClearWorkflowSessionLeavingQualification(
+  currentStatus: LeadStatus,
+  nextStatus: LeadStatus,
+): boolean {
+  return currentStatus === "qualification" && nextStatus !== "qualification";
+}
+
+async function loadUserIsAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<boolean> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .maybeSingle();
+  return profile?.role === "admin";
+}
+
+function assertAdjacentPipelineStepChange(
+  currentStatus: LeadStatus,
+  nextStatus: LeadStatus,
+  isAdmin: boolean,
+): ActionResult | null {
+  if (isAdmin) return null;
+  if (currentStatus === nextStatus) return null;
+  const fromIdx = pipelineIndex(currentStatus);
+  const toIdx = pipelineIndex(nextStatus);
+  if (fromIdx < 0 || toIdx < 0) {
+    return { ok: false, error: "Statut du lead inconnu." };
+  }
+  if (Math.abs(toIdx - fromIdx) === 1) return null;
+  if (currentStatus === "negotiation" && nextStatus === "lost") return null;
+  return {
+    ok: false,
+    error:
+      "Les non-administrateurs ne peuvent avancer ou reculer le pipeline que d'une étape à la fois. Utilisez « Précédent » / « Suivant » dans la barre du bas, ou demandez à un administrateur pour corriger une étape en avance.",
+  };
+}
+
 function assertLeadStatusTransition(
   currentStatus: LeadStatus,
   nextStatus: LeadStatus,
@@ -380,6 +444,46 @@ function assertLeadStatusTransition(
   return null;
 }
 
+async function assertBriefExploitableBeforeAgencyAssignment(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  currentStatus: LeadStatus,
+  nextStatus: LeadStatus,
+): Promise<ActionResult | null> {
+  if (currentStatus !== "qualification" || nextStatus !== "agency_assignment") {
+    return null;
+  }
+  const { data, error } = await supabase
+    .from("leads")
+    .select(
+      [
+        "traveler_name",
+        "email",
+        "phone",
+        "whatsapp_phone_number",
+        "trip_dates",
+        "travelers",
+        "budget",
+        "trip_summary",
+        "travel_style",
+        "qualification_validation_status",
+        "workflow_mode",
+      ].join(", "),
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return {
+      ok: false,
+      error: "Impossible de vérifier les champs du brief avant l’assignation.",
+    };
+  }
+  const msg = getBriefGateBlockMessage(data as unknown as LeadBriefGateRow);
+  if (msg) return { ok: false, error: msg };
+  return null;
+}
+
 export async function updateLeadStatus(
   leadId: string,
   nextStatus: LeadStatus,
@@ -410,6 +514,10 @@ export async function updateLeadStatus(
   }
 
   const currentStatus = normalizeLeadStatusForUi(String(row.status ?? "new"));
+  if (nextStatus === currentStatus) {
+    return { ok: true };
+  }
+
   const blocked = assertLeadStatusTransition(
     currentStatus,
     nextStatus,
@@ -417,6 +525,22 @@ export async function updateLeadStatus(
     row.retained_agency_id as string | null,
   );
   if (blocked) return blocked;
+
+  const isAdmin = await loadUserIsAdmin(supabase, user.id);
+  const jumpBlocked = assertAdjacentPipelineStepChange(
+    currentStatus,
+    nextStatus,
+    isAdmin,
+  );
+  if (jumpBlocked) return jumpBlocked;
+
+  const briefBlock = await assertBriefExploitableBeforeAgencyAssignment(
+    supabase,
+    leadId,
+    currentStatus,
+    nextStatus,
+  );
+  if (briefBlock) return briefBlock;
 
   const coBlock = await assertCoConstructionApprovedIfLeaving(
     supabase,
@@ -426,10 +550,12 @@ export async function updateLeadStatus(
   );
   if (coBlock) return coBlock;
 
-  const { error } = await supabase
-    .from("leads")
-    .update({ status: nextStatus })
-    .eq("id", leadId);
+  const patch: Record<string, unknown> = { status: nextStatus };
+  if (shouldClearWorkflowSessionLeavingQualification(currentStatus, nextStatus)) {
+    Object.assign(patch, clearedWorkflowSessionPatch());
+  }
+
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
 
   if (error) {
     return { ok: false, error: error.message };
@@ -537,6 +663,14 @@ export async function moveLeadPipelineStep(
   );
   if (blocked) return blocked;
 
+  const briefBlock = await assertBriefExploitableBeforeAgencyAssignment(
+    supabase,
+    leadId,
+    currentStatus,
+    nextStatus,
+  );
+  if (briefBlock) return briefBlock;
+
   const coBlock = await assertCoConstructionApprovedIfLeaving(
     supabase,
     leadId,
@@ -545,10 +679,12 @@ export async function moveLeadPipelineStep(
   );
   if (coBlock) return coBlock;
 
-  const { error } = await supabase
-    .from("leads")
-    .update({ status: nextStatus })
-    .eq("id", leadId);
+  const patch: Record<string, unknown> = { status: nextStatus };
+  if (shouldClearWorkflowSessionLeavingQualification(currentStatus, nextStatus)) {
+    Object.assign(patch, clearedWorkflowSessionPatch());
+  }
+
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
 
   if (error) {
     return { ok: false, error: error.message };
