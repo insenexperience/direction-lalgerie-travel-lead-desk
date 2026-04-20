@@ -48,4 +48,8 @@ export type SupabaseLeadRow = {
   lead_score_override: number | null;
   lead_score_computed_at: string | null;
   referent_assigned_at: string | null;
+  // Qualification v2
+  travel_desire_narrative: string | null;
+  destination_main: string | null;
+  qualification_notes: string | null;
 };
