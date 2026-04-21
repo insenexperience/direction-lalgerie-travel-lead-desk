@@ -11,12 +11,14 @@ Référence complète pour tout agent IA (Claude Design ou autre) chargé de pro
 3. [Typographie](#3-typographie)
 4. [Espacement, radii & z-index](#4-espacement-radii--z-index)
 5. [Composants UI atomiques](#5-composants-ui-atomiques)
-6. [Composants domaine Lead](#6-composants-domaine-lead)
+6. [Composants domaine Lead — atomiques](#6-composants-domaine-lead)
 7. [Navigation & layout global](#7-navigation--layout-global)
 8. [États interactifs](#8-états-interactifs)
 9. [Responsive](#9-responsive)
 10. [Accessibilité](#10-accessibilité)
 11. [Patterns UX](#11-patterns-ux)
+12. [Pipeline Lead — logique complète](#12-pipeline-lead--logique-complète)
+13. [Composants pipeline — détail exhaustif](#13-composants-pipeline--détail-exhaustif)
 
 ---
 
@@ -684,4 +686,720 @@ Ne jamais utiliser `--revenue` / `--hot` / `--warn` pour un effet décoratif. Ce
 
 ---
 
-*Généré le 2026-04-21 — à mettre à jour à chaque ajout de composant ou modification des tokens.*
+## 12. Pipeline Lead — logique complète
+
+### 12.1 Machine d'état
+
+Le pipeline est une séquence ordonnée de 8 statuts définis dans `src/lib/mock-leads.ts` :
+
+```ts
+export const LEAD_PIPELINE: LeadStatus[] = [
+  "new", "qualification", "agency_assignment",
+  "co_construction", "quote", "negotiation", "won", "lost"
+];
+```
+
+| # | Statut | Label FR | Accès modification |
+|---|---|---|---|
+| 1 | `new` | Nouveau | Référent assigné |
+| 2 | `qualification` | Qualification & affinage | Référent assigné |
+| 3 | `agency_assignment` | Assignation | Référent assigné + brief validé |
+| 4 | `co_construction` | Co-construction | Référent assigné |
+| 5 | `quote` | Devis | Référent assigné + proposition approuvée |
+| 6 | `negotiation` | Négociation | Référent assigné |
+| 7 | `won` | Gagné | Admin ou référent |
+| 8 | `lost` | Perdu | Admin ou référent |
+
+`lost` est exclu du pipeline visible sauf si le lead est déjà `lost`. Il ne s'affiche pas comme étape suivante normale.
+
+### 12.2 Guards de transition
+
+**`new` → `qualification`** : libre (le référent peut avancer dès assignation).
+
+**`qualification` → `agency_assignment`** : bloqué côté serveur si `isLeadBriefExploitable(lead)` retourne `false`. La checklist doit être complète :
+- `destination_main` renseigné
+- `trip_dates` renseigné
+- `travelers` renseigné
+- `budget` renseigné
+- `travel_desire_narrative` ≥ 20 caractères
+- ET `qualification_validation_status` = `"validated"` ou `"overridden"`
+
+**`co_construction` → `quote`** : une proposition doit avoir le statut `"approved"` et générer un devis (`converted_quote_id` non null).
+
+**Navigation admin vs référent** (dans `LeadCockpitPipeline`) :
+- **Admin** : peut cliquer sur toute étape passée ou actuelle (pas les futures).
+- **Référent** : peut cliquer sur l'étape active et l'étape précédente uniquement.
+- **Future** : `cursor-not-allowed`, tooltip "Complétez l'étape en cours avant de sauter en avant."
+
+### 12.3 Modes workflow
+
+Chaque lead a un `workflow_mode` (`"ai"` | `"manual"`) et un flag `manual_takeover` (boolean).
+
+| Mode | `manual_takeover` | Signification |
+|---|---|---|
+| `ai` | `false` | Autopilot IA actif — envois WhatsApp automatiques |
+| `ai` | `true` | IA suspendue manuellement — opérateur en contrôle |
+| `manual` | any | Mode manuel dès le départ |
+
+Le toggle **Suspendre / Reprendre** dans le strip cockpit appelle `toggleAiAutopilot()` qui inverse `manual_takeover`.
+
+### 12.4 Statuts de qualification IA
+
+`qualification_validation_status` : `"pending"` | `"validated"` | `"overridden"` | `"rejected"`
+
+| Valeur | Label UI | Couleur badge |
+|---|---|---|
+| `pending` | En attente de validation | `#c47c20` (amber) |
+| `validated` | Qualifiée | `#2d7a5f` (vert) |
+| `overridden` | Modifiée manuellement | `#182b35` (steel) |
+| `rejected` | Rejetée | `#a83232` (rouge) |
+
+Style badge inline : `background: ${hex}18, border: 1px solid ${hex}30, border-radius: 4px, padding: 2px 8px, font-size: 11px, font-weight: 600, text-transform: uppercase, letter-spacing: 0.04em`
+
+### 12.5 Statuts co-construction proposal
+
+`CoConstructionProposalRow.status` :
+
+| Statut | Label FR |
+|---|---|
+| `awaiting_agency` | En attente agence |
+| `submitted` | Reçue — modifiable |
+| `approved` | Validée pour devis |
+
+### 12.6 Statuts devis (QuoteWorkflowStatus)
+
+**Suivi actif** (`TRACKING`) : `draft`, `sent`, `awaiting_response`, `renegotiation`
+
+**Issues terminales** (`OUTCOMES`) : `won`, `lost`, `suspended`
+
+| Statut terminal | Fond | Texte | Bordure |
+|---|---|---|---|
+| `won` | `emerald-50` | `emerald-900` | `emerald-700` |
+| `lost` | `red-50` | `red-900` | `red-300` |
+| `suspended` | `amber-50` | `amber-950` | `amber-600` |
+
+### 12.7 Canaux d'entrée (intake_channel)
+
+| Valeur DB | Label UI |
+|---|---|
+| `web_form` | Formulaire |
+| `whatsapp` | WhatsApp |
+| `manual` | Manuel |
+
+### 12.8 Priorité lead
+
+`priority`: `"normal"` | `"high"`
+
+Lead haute priorité (`"high"`) → barre rouge verticale `w-[3px] bg-[#c1411f]` en bord gauche de la ligne/card (absolue, `absolute inset-y-0 left-0`).
+
+### 12.9 SLA de réponse
+
+Calculé comme `created_at + 30 minutes`. États :
+- **Done** : `referent_assigned_at` renseigné → dot steel plein
+- **À risque** : délai restant < 2h ET non assigné → dot `#a8710b` + label " — À risque"
+- **Dépassé** : deadline passée ET non assigné → dot `#c1411f` + label " — Dépassé"
+
+### 12.10 Score commercial & grade
+
+`ai_score` (0–100) → grade + couleur :
+
+| Score | Grade | Couleur hex |
+|---|---|---|
+| ≥ 90 | A+ | `#0f6b4b` |
+| ≥ 75 | A | `#0f6b4b` |
+| ≥ 60 | B+ | `#3a4a55` |
+| ≥ 45 | B | `#a8710b` |
+| < 45 | C | `#c1411f` |
+| null | — | `#9aa7b0` |
+
+Tier textuel (affiché dans LeadScorePill) :
+- 0–24 : `cold` / "Froid"
+- 25–49 : `tepid` / "Tiède"
+- 50–74 : `warm` / "Chaud"
+- 75–100 : `hot` / "Très chaud"
+
+### 12.11 DotsRating (notation 5 étoiles)
+
+Composant interne `DotsRating` dans `lead-cockpit-shell.tsx` :
+- 5 points `h-2 w-2 rounded-full`
+- Rempli : `bg-[#15323f]`
+- Vide : `bg-[#e4e8eb]`
+
+### 12.12 Transcript IA — bulles de conversation
+
+Dans `LeadAiOpsPanel`, le transcript `conversation_transcript` (JSON array) est affiché en bulles :
+
+| `from` | Fond | Texte | Alignement |
+|---|---|---|---|
+| `traveler` | `bg-white shadow-sm` | `text-foreground` | `ml-4` (droite) |
+| `operator` | `bg-amber-50` | `text-amber-950` | `mr-4` (gauche) |
+| `ai` | `bg-[#182b35]` | `text-[#f3f7fa]` | `mr-4` (gauche) |
+
+Label expéditeur : `text-[10px] font-semibold uppercase tracking-wide opacity-80`
+- `traveler` → "Voyageur"
+- `operator` → "Opérateur"
+- `ai` → "Direction l'Algérie"
+
+Conteneur scroll : `max-h-80 space-y-2 overflow-y-auto scroll-mt-28 rounded-md border border-border bg-panel-muted/40 p-3`
+
+---
+
+## 13. Composants pipeline — détail exhaustif
+
+### 13.1 LeadCockpitPipeline — `src/components/leads/lead-cockpit-pipeline.tsx`
+
+Barre de navigation horizontale sticky, affichée au-dessus du workspace. Permet de changer l'étape du lead en cliquant.
+
+```ts
+props: { leadId: string; status: LeadStatus; isAdmin?: boolean }
+```
+
+**Conteneur** : `border-b border-border bg-panel`
+**Scroll horizontal** : `overflow-x-auto px-1 py-2 [-ms-overflow-style:none] [scrollbar-width:thin]`
+**Liste** : `flex min-w-max items-center gap-1.5` — `<ol>`
+
+**Séparateur entre étapes** : `<ChevronRight className="mx-0.5 size-3 shrink-0 text-muted-foreground/60" />`
+
+**Bouton d'étape** : `group flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm`
+
+| État | Classes |
+|---|---|
+| Actif | `border-steel bg-steel text-steel-ink shadow-sm` |
+| Terminé | `border-border bg-panel-muted text-foreground hover:bg-panel` |
+| Futur | `cursor-not-allowed border-border/70 bg-transparent text-foreground/45` |
+
+**Dot interne** : `flex size-2.5 shrink-0 rounded-full border`
+
+| État | Dot |
+|---|---|
+| Terminé | `border-emerald-600 bg-[#e8f4ef]` + `✓` en `text-emerald-800` |
+| Actif | `border-steel-ink/70 bg-steel-ink` |
+| Futur | `border-border bg-transparent` |
+
+**Erreur** : `px-2 pb-2 text-xs font-medium text-red-600` avec `role="alert"`
+
+---
+
+### 13.2 LeadCockpitStrip — `src/components/leads/lead-cockpit-strip.tsx`
+
+Bande sticky sous la barre pipeline. Affiche la référence, le nom, les pills de score/IA et le toggle Suspendre/Reprendre.
+
+```ts
+props: { lead: SupabaseLeadRow; onOpenScoreModal: () => void; onOpenDetailsDrawer: () => void }
+```
+
+**Conteneur** : `border-b border-border bg-panel`
+**Ligne interne** : `flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 px-1 py-2 sm:gap-x-4 sm:px-2`
+
+**Référence lead** : `inline-flex items-center rounded-md border border-border bg-panel-muted px-2 py-1 font-mono text-xs font-semibold text-steel sm:text-sm`
+
+**Nom voyageur** : `min-w-0 truncate text-sm font-semibold text-foreground sm:text-[15px]`
+
+**Dividers** : `hidden h-6 w-px bg-border sm:block` (cachés sur mobile)
+
+**Bouton Suspendre / Reprendre** :
+`inline-flex items-center gap-1.5 rounded-md border border-border bg-panel-muted px-2.5 py-1.5 text-xs font-semibold text-foreground shadow-sm hover:bg-panel disabled:opacity-50`
+- Icône `<Pause />` (suspendre) ou `<Play />` (reprendre), `size-3.5`
+
+**Lien retour** : `shrink-0 rounded-md px-2 py-1 text-sm font-semibold text-muted-foreground hover:bg-panel-muted hover:text-foreground` — texte "← Tous les leads"
+
+---
+
+### 13.3 LeadSupabaseStageWorkspace — `src/components/leads/lead-supabase-stage-workspace.tsx`
+
+Orchestrateur principal du workspace lead. Rend le contenu de l'étape active, les formulaires d'assignation, et les sections contextuelles.
+
+```ts
+props: {
+  lead: SupabaseLeadRow;
+  referents: ReferentDisplayRow[];
+  referentLabel: string | null;
+  agencies: { id: string; label: string }[];
+  retainedAgencyLabel: string | null;
+  coProposals: CoConstructionProposalRow[];
+  leadQuotes: LeadQuoteListItem[];
+}
+```
+
+**Section active** : `relative z-[1] scroll-mt-24 rounded-xl border-2 border-steel/20 bg-panel p-4 shadow-sm ring-1 ring-steel/10 sm:p-6`
+
+> La section active a une double bordure `border-steel/20` + ring `ring-steel/10` pour la faire ressortir visuellement.
+
+**Badge "Étape active · N / Total"** : `inline-flex items-center gap-2 rounded-full border border-border bg-panel-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-steel`
+- Dot : `size-1.5 shrink-0 rounded-full bg-steel`
+
+**Statut en clair** : `text-[11px] font-semibold uppercase tracking-wider text-muted-foreground` (mt-2)
+
+**Titre de l'étape** : `font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl` (mt-2)
+
+**Description de l'étape** : `text-sm leading-relaxed text-foreground/85` (mt-2)
+
+**Textes d'introduction par étape** :
+
+| Étape | Titre | Corps (résumé) |
+|---|---|---|
+| `new` | Nouveau — prise en main | Allouez un opérateur travel desk, puis avancez le pipeline |
+| `qualification` | Qualification & affinage du besoin | Enrichissez la fiche, validez la qualification pour débloquer Assignation |
+| `agency_assignment` | Assignation — agence partenaire | Choisissez l'agence partenaire (réseau DA) |
+| `co_construction` | Co-construction — propositions de circuit | Comparez, affinez, validez avant génération du devis |
+| `quote` | Devis | Consolidation et préparation du devis voyageur |
+| `negotiation` | Négociation | Ajustements avec le voyageur après envoi de l'offre |
+| `won` | Dossier gagné | Projet validé — suite hors périmètre |
+| `lost` | Dossier clos | Lead archivé |
+
+**Sections internes** : `space-y-8` avec titres `text-xs font-semibold uppercase tracking-wider text-muted-foreground`
+
+**Checklist qualification** (si `status === "qualification"`) : `rounded-lg border border-border bg-panel-muted/35 p-4`
+- Items OK : `border-emerald-200/90 bg-emerald-50/80 text-emerald-950`
+- Items NOK : `border-border bg-panel text-foreground/80`
+- Style commun : `flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-medium`
+- Grid : `grid gap-2 sm:grid-cols-2`
+
+**Historique propositions circuit** (lecture seule) : `rounded-lg border border-dashed border-border/90 bg-panel-muted/20 p-4 opacity-95`
+
+---
+
+### 13.4 LeadQualificationWorkspace — `src/components/leads/lead-qualification-workspace.tsx`
+
+Formulaire de qualification IA + manuel. Section centrale à l'étape `qualification`.
+
+```ts
+props: { lead: SupabaseLeadRow }
+```
+
+**Conteneur** : `rounded-md border bg-panel p-4 sm:p-6` avec `borderColor: "#182b35"` (steel foncé)
+
+**Header** : `mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4`
+- Titre : `font-display text-lg font-semibold text-foreground`
+- Sous-titre mode : `mt-0.5 text-xs text-muted-foreground`
+  - IA : "Mode IA — lancez l'agent pour pré-remplir, puis validez."
+  - Manuel : "Mode manuel — remplissez directement les champs ci-dessous."
+- Confiance IA : `text-[11px] text-muted-foreground` — "Confiance IA : XX %"
+
+**Alertes inline** :
+- Erreur : `flex items-start gap-2 rounded-md border border-red-200/80 bg-red-50/80 px-3 py-2.5 text-sm text-red-900` + icône `<AlertCircle className="mt-0.5 size-4 shrink-0 text-red-600" />`
+- Succès : `flex items-start gap-2 rounded-md border border-emerald-200/80 bg-emerald-50/80 px-3 py-2.5 text-sm text-emerald-900` + icône `<CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />`
+
+**Grille de champs** : `grid grid-cols-1 gap-6 lg:grid-cols-2`
+
+**FieldRow (champ standard)** :
+- Label : `text-[10px] font-bold uppercase tracking-[0.09em] text-muted-foreground`
+- Input/Textarea : `rounded-md border border-border bg-panel-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#182b35] focus:outline-none focus:ring-2 focus:ring-[#182b35]/20`
+
+**Champs structurés** (colonne gauche) :
+- Destination principale
+- Période & durée
+- Composition du groupe
+- Budget indicatif
+- Style de voyage
+- Notes internes opérateur (multiline)
+
+**Zone narrative** (colonne droite) : `flex flex-1 rounded-md border border-dashed bg-panel-muted/40` avec `borderColor: "#182b35"`, `minHeight: 220`
+- Textarea libre, pas de resize, `min-h-[200px]`
+- Placeholder : "Ce voyageur porte depuis longtemps le rêve du désert vrai…"
+
+**Actions** : `mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-5`
+
+| Bouton | Condition | Style |
+|---|---|---|
+| Lancer l'agent IA | `!isManual && !isValidated` | `bg-[#182b35] border-[#182b35] text-[#f3f7fa]` + icône `<Sparkles />` |
+| Sauvegarder | `!isValidated` | `border-border bg-panel text-foreground hover:bg-panel-muted` + icône `<Save />` |
+| Valider la qualification | `!isValidated` | Si `canValidate` : `bg-[#2d7a5f] border-[#2d7a5f] text-white` + icône `<UserCheck /><ChevronRight />`. Sinon : `border-border text-muted-foreground` |
+| État validé | `isValidated` | `border-emerald-200/80 bg-emerald-50/80 px-4 py-2 text-sm font-semibold text-emerald-900` + `<CheckCircle2 />` |
+
+**Condition `canValidate`** : destination + dates + groupe + budget renseignés ET narrative ≥ 20 caractères.
+
+**États loading** : spinner `<Loader2 className="size-4 animate-spin" />` remplace l'icône du bouton actif. Textes : "Agent en cours…", "Sauvegarde…", "Validation…".
+
+---
+
+### 13.5 LeadAiOpsPanel — `src/components/leads/lead-ai-ops-panel.tsx`
+
+Panel IA — transcript conversation, toggle autopilot, shortlist agences.
+
+```ts
+props: { lead: SupabaseLeadRow; hideAutopilotToggle?: boolean }
+```
+
+**Conteneur** : `rounded-md border border-border bg-panel p-4 sm:p-6`
+
+**Titre** : `text-xs font-semibold uppercase tracking-wider text-muted-foreground` — "Conversation voyageur & IA"
+
+**Toggle autopilot** (si `!hideAutopilotToggle`) :
+`rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-semibold hover:bg-panel`
+- Texte : "Reprise manuelle (stop IA)" ou "Reprendre le fil IA"
+
+**Section validation brief** (si `qualification_validation_status === "pending"`) :
+- Titre : `text-sm font-semibold text-foreground`
+- Bouton **Valider** : `rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:opacity-95`
+- Bouton **Marquer ajustée** : `rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-panel-muted`
+- Bouton **Rejeter** : `rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900 hover:opacity-95`
+
+**Section shortlist** (si `validated` ou `overridden`) :
+- Bouton **Générer shortlist IA** : `rounded-md bg-[#182b35] px-3 py-2 text-sm font-semibold text-[#f3f7fa] hover:opacity-95`
+- Bouton **Comparer propositions** : `rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-panel-muted`
+
+**Erreur** : `text-sm text-red-600` avec `role="status"`
+
+**Transcript** : voir §12.12.
+
+---
+
+### 13.6 LeadWorkflowPanel — `src/components/leads/lead-workflow-panel.tsx`
+
+Panel de lancement/gestion du workflow voyageur (email + IA ou manuel).
+
+```ts
+props: {
+  leadId: string; currentUserId: string | null; referentId: string | null;
+  status: LeadStatus; workflowLaunchedAt: string | null;
+  workflowMode: "ai" | "manual" | null; workflowRunRef: string | null;
+  manualTakeover: boolean; workflowEmailBanner: string | null;
+}
+```
+
+**Visible si** : utilisateur = référent ET (`status === "new"` ou `"qualification"`) ET pas encore lancé — OU workflow déjà actif.
+
+**État : workflow actif** → ContextBanner `variant="info"` avec `icon={CalendarClock}` :
+- Titre : "Workflow voyageur"
+- Contenu : réf. `font-mono font-semibold` + date + mode (IA / Manuel)
+
+**Bouton Supprimer session** (référent uniquement) :
+`rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900 hover:bg-red-100`
+— précédé d'un `window.confirm()`.
+
+**Lien "Gérer manuellement"** : `rounded-md border border-border bg-panel px-4 py-2 text-sm font-semibold text-foreground hover:bg-panel-muted`
+
+**État : lancement disponible** :
+- Conteneur : `rounded-md border border-border bg-panel p-4 sm:p-5`
+- Titre : `text-sm font-semibold uppercase tracking-wide text-muted-foreground`
+- Bouton **Lancer le workflow IA** : `rounded-md bg-[#182b35] px-4 py-2.5 text-sm font-semibold text-[#f3f7fa] hover:opacity-95`
+- Bouton **Gérer manuellement** : lien `rounded-md border border-border bg-panel px-4 py-2.5 text-sm font-semibold`
+- Si `workflowEmailBanner` : ContextBanner `variant="warning"` + icône `<MailWarning />`
+
+---
+
+### 13.7 ContextBanner — `src/components/leads/context-banner.tsx`
+
+Alerte contextuelle non-dismissable, utilisée dans tous les panels.
+
+```ts
+props: { variant: ContextBannerVariant; title: string; children: ReactNode; icon?: LucideIcon; className?: string }
+type ContextBannerVariant = "info" | "ia" | "operator" | "agency" | "warning"
+```
+
+**Structure** : `rounded-md border px-3 py-2.5 text-sm leading-snug` avec `role="note"`
+
+| Variante | Fond | Texte | Bordure |
+|---|---|---|---|
+| `info` | `sky-50/90` | `sky-950` | `sky-200/90` |
+| `ia` | `sky-50/90` | `sky-950` | `sky-200/90` |
+| `operator` | `amber-50/90` | `amber-950` | `amber-200/90` |
+| `warning` | `amber-50/90` | `amber-950` | `amber-200/90` |
+| `agency` | `panel-muted` | `foreground` | `border` |
+
+**Icône** (si fournie) : `mt-0.5 size-4 shrink-0 opacity-90`
+
+**Titre** : `block text-[10px] font-bold uppercase tracking-[0.08em] opacity-90`
+
+**Corps** : `mt-1 block font-medium`
+
+**Lien interne** (ex. vers transcript) : `font-semibold text-sky-900 underline decoration-sky-700/40 underline-offset-2 hover:decoration-sky-900`
+
+---
+
+### 13.8 AssignReferentForm — `src/components/leads/assign-referent-form.tsx`
+
+Formulaire d'assignation de l'opérateur travel desk au lead.
+
+```ts
+props: {
+  leadId: string; currentReferentId: string | null;
+  referents: ReferentDisplayRow[]; variant?: "travel_desk" | "referent"
+}
+```
+
+**Structure** : `space-y-3` dans un `<form>`
+
+**Label** : `text-xs text-muted-foreground` — span `font-semibold uppercase tracking-wider`
+
+**Select** : `mt-2 w-full rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-steel/25`
+- Option vide : "— Non assigné —"
+
+**Bouton submit** : `w-full rounded-md bg-steel px-3 py-2 text-sm font-semibold text-steel-ink hover:opacity-95 disabled:opacity-50`
+- Textes : "Allouer l'opérateur" (travel_desk) / "Enregistrer l'opérateur" (referent) / "Enregistrement…" (pending)
+
+**Feedback** :
+- Succès : `text-sm text-emerald-700`
+- Erreur : `text-sm text-red-600`
+
+---
+
+### 13.9 AssignPartnerAgencyForm — `src/components/leads/assign-partner-agency-form.tsx`
+
+Formulaire d'assignation de l'agence partenaire (étape `agency_assignment`).
+
+```ts
+props: { leadId: string; currentAgencyId: string | null; agencies: { id: string; label: string }[] }
+```
+
+Structure identique à `AssignReferentForm`. Différences :
+- Label : "Agence partenaire (traitement du lead)"
+- Bouton : "Assigner l'agence partenaire"
+- Option vide : "— Aucune agence assignée —"
+- Message succès : "Agence partenaire enregistrée."
+
+---
+
+### 13.10 CoConstructionPanel — `src/components/leads/co-construction-panel.tsx`
+
+Gestion des propositions de circuit. Présent à l'étape `co_construction` (éditable) et en historique sur les autres étapes (lecture seule).
+
+```ts
+props: { leadId: string; proposals: CoConstructionProposalRow[]; editable: boolean }
+```
+
+**En-tête** : `flex flex-wrap items-center justify-between gap-3`
+- Description : `text-sm text-foreground/90`
+- Bouton "+ Nouvelle proposition" (si `editable`) : `rounded-md border border-[#182b35] bg-[#182b35] px-3 py-2 text-sm font-semibold text-[#f3f7fa] hover:bg-[#213e4b]`
+
+**Erreur** : `rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900`
+
+**État vide** : `text-sm text-muted-foreground`
+
+**Carte proposition** : `rounded-md border border-border bg-panel-muted/30 p-4 sm:p-5`
+
+Header carte :
+- Titre : `font-semibold text-foreground`
+- Version + date : `text-xs text-muted-foreground` — "Version X — JJ/MM"
+- Scores IA : `text-xs text-foreground/90` — "Match IA : XX% · recommandée"
+- Rationale IA : `text-xs italic text-muted-foreground`
+
+**Badge statut** : `rounded-none border border-border bg-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground/90`
+
+**Bouton Supprimer** : `inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50/90 px-2 py-1 text-[11px] font-semibold text-red-900 hover:bg-red-100` + icône `<Trash2 className="size-3.5" />`
+— déclenche `window.confirm()`.
+
+**Sous-états selon `proposal.status`** :
+
+**`awaiting_agency` + editable** (AwaitingAgencyForm) :
+- Textarea "Circuit proposé *" : `w-full resize-y rounded-md border border-border bg-panel px-3 py-2 text-sm focus:ring-2 focus:ring-steel/25`, `rows={8}`
+- Bouton : `rounded-md border border-border bg-panel px-3 py-2 text-sm font-semibold hover:bg-panel-muted`
+
+**`submitted` + editable** (SubmittedForms) :
+- Textarea "Circuit (modifiable)" : `rows={10}`, même style
+- Bouton "Enregistrer" : `border-border bg-panel hover:bg-panel-muted`
+- Bouton **"Valider pour devis"** : `rounded-md border border-[#182b35] bg-[#182b35] px-3 py-2 text-sm font-semibold text-[#f3f7fa] hover:bg-[#213e4b]`
+
+**`submitted` lecture seule** (OutlineReadOnly) : `pre` avec `max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-sm`
+
+**`approved`** (ApprovedBlock) :
+- Si devis généré : `text-sm font-medium text-foreground` + réf. `font-mono text-xs`
+- Bouton **"Générer le devis"** : même style steel foncé
+- Si devis généré → pipeline passe à `quote`
+
+---
+
+### 13.11 LeadQuotesPanel — `src/components/leads/lead-quotes-panel.tsx`
+
+Liste et gestion des devis. Visible aux étapes `quote` et `negotiation`.
+
+```ts
+props: { leadId: string; quotes: LeadQuoteListItem[] }
+```
+
+**État vide** : `text-sm text-muted-foreground`
+
+**Carte devis** : `rounded-md border border-border bg-panel-muted/30 p-4 sm:p-5`
+
+Header :
+- ID : `font-mono text-[11px] text-muted-foreground` (8 premiers chars + "…")
+- Date : `text-xs text-muted-foreground`
+
+Boutons header :
+- **Télécharger PDF** : `inline-flex items-center gap-2 rounded-md border border-[#182b35] bg-panel px-3 py-2 text-sm font-semibold text-[#182b35] hover:bg-panel-muted` + `<Download className="size-4" />`
+- **Envoyer PDF (WhatsApp)** (si non terminal) : `inline-flex items-center gap-2 rounded-md border border-emerald-800 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-emerald-100` + `<MessageCircle className="size-4" />`
+
+Suivi : `text-muted-foreground` + statut `font-semibold text-foreground` + kind `text-xs text-muted-foreground`
+
+**Bloc contrôle** (si non terminal) : `rounded-md border border-border bg-panel p-3`
+- Select statut : `w-full max-w-md rounded-md border border-border bg-panel-muted px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-steel/25`
+- Titre issues : `text-xs font-semibold uppercase tracking-wide text-muted-foreground`
+- Boutons issue : voir §12.6
+
+**Lignes devis** : `space-y-1.5` — label `font-medium text-foreground` + detail `text-muted-foreground`
+
+**Résumé texte brut** : `<details>` avec `<pre class="max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-xs">`
+
+**État terminal** : `text-xs text-muted-foreground` — "Devis clos — le statut ne peut plus être modifié."
+
+---
+
+### 13.12 LeadCommercialCrmForm — `src/components/leads/lead-commercial-crm-form.tsx`
+
+Grille CRM express (étape `qualification`). Deux selects + bouton. Cible ~1 min opérateur.
+
+```ts
+props: { lead: SupabaseLeadRow }
+```
+
+**Grid** : `grid gap-3 sm:grid-cols-2`
+
+**Select** : `mt-1.5 w-full rounded-md border border-border bg-panel px-2 py-1.5 text-sm font-medium text-foreground outline-none focus:ring-2 focus:ring-steel/25`
+
+**Champs** :
+- `crm_conversion_band` — "Probabilité de conversion" (`CRM_CONVERSION_OPTIONS`)
+- `crm_follow_up_strategy` — "Stratégie de relance" (`CRM_FOLLOW_UP_OPTIONS`)
+
+**Bouton** : `rounded-md bg-steel px-3 py-2 text-sm font-semibold text-steel-ink hover:opacity-95`
+
+**Sous-texte** : `text-xs text-muted-foreground` — "Cible ~1 min : conversion + relance."
+
+---
+
+### 13.13 Table Leads (LeadsListServer) — `src/components/leads/leads-list-server.tsx`
+
+Tableau serveur de la liste des leads avec tabs de statut.
+
+**Sous-header** : `text-[13px] text-[#6b7a85]` — "X dossiers · Y k€ de pipeline visible"
+
+**Tabs de statut** : `flex flex-wrap gap-1 border-b border-[#e4e8eb] pb-0`
+
+**TabLink** : `flex items-center gap-1.5 border-b-2 px-3 py-2 text-[12px] font-medium transition-colors`
+- Actif : `border-[#15323f] text-[#0e1a21]`
+- Inactif : `border-transparent text-[#6b7a85] hover:text-[#3a4a55]`
+- Badge count actif : `rounded-full px-1.5 text-[10px] font-semibold tabular-nums bg-[#15323f] text-white`
+- Badge count inactif : `bg-[#f4f7fa] text-[#6b7a85]`
+
+**Table** : `overflow-x-auto rounded-[8px] border border-[#e4e8eb] bg-white`
+
+**En-têtes** : `px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9aa7b0]`
+Colonnes : (hot) · Voyageur · Projet · Étape · Budget · Dates · Référent · Canal · Activité · (actions)
+
+**Ligne** : `group relative border-b border-[#e4e8eb] last:border-0 transition-colors hover:bg-[#f6f7f8]`
+
+**Barre priorité haute** : `h-full w-[3px] rounded-r bg-[#c1411f]` dans la 1ère `<td>` (`min-height: 40px`)
+
+**Voyageur** : Avatar(30, gold) + nom `text-[13px] font-medium text-[#0e1a21]` + email `text-[11px] text-[#6b7a85]`
+
+**Projet** : `max-w-[200px]` — résumé `line-clamp-2 text-[12px] text-[#3a4a55]` + composition `text-[11px] text-[#9aa7b0]`
+
+**Étape** : `flex items-center gap-1.5 whitespace-nowrap rounded-[4px] border border-[#e4e8eb] px-2 py-1 text-[11px] font-medium text-[#3a4a55]` + StageDot
+
+**Budget** : `font-mono text-[12px] font-medium text-[#0e1a21]` (aligné à droite)
+
+**Référent** : Avatar(22) + prénom `text-[12px] text-[#3a4a55]` — ou Pill `variant="warn"` "Non assigné"
+
+**Activité** : `text-[12px] text-[#9aa7b0]` (relative time)
+
+**Actions hover** : `hidden items-center gap-1 group-hover:flex` — bouton "Ouvrir" `rounded-[4px] border border-[#e4e8eb] bg-white px-2 py-1 text-[11px] font-medium`
+
+**État vide** : `flex flex-col items-center justify-center gap-2 py-20 text-[#9aa7b0]` + lien "Réinitialiser les filtres" en `text-[#1e5a8a] underline`
+
+---
+
+### 13.14 InboxItem — `src/components/leads/inbox-item.tsx`
+
+Item de la liste inbox (vue liste compacte, alternative au tableau).
+
+```ts
+props: { lead: SupabaseLeadRow; selected: boolean; onClick: () => void }
+```
+
+**Bouton** : `group relative flex w-full flex-col gap-2 border-b border-[#e4e8eb] px-4 py-3.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#15323f]/40`
+- Sélectionné : `bg-[#15323f]/5`
+- Non sélectionné : `bg-white hover:bg-[#f6f7f8]`
+
+**Barre haute priorité** : `absolute inset-y-0 left-0 w-[3px] rounded-l bg-[#c1411f]`
+
+**Ligne 1** : `flex items-center gap-2`
+- StageDot (status)
+- Nom : `flex-1 truncate text-[13px] font-semibold text-[#0e1a21]`
+- Date relative : `shrink-0 text-[11px] text-[#9aa7b0]`
+- Dot validation pending : `h-2 w-2 shrink-0 rounded-full bg-[#1e5a8a]`
+
+**Ligne 2** (résumé) : `line-clamp-2 text-[12px] leading-snug text-[#6b7a85]`
+
+**Ligne 3** (meta chips) : `flex flex-wrap gap-1.5` — Pills `variant="neutral"` pour canal, budget, dates. Pill `variant="warn"` si `!referent_id`.
+
+---
+
+### 13.15 LeadIntakeModal — `src/components/leads/lead-intake-modal.tsx`
+
+Modale de création manuelle d'un lead (bouton "+ Nouveau lead").
+
+```ts
+props: { open: boolean; onClose: () => void; onCreated: () => void }
+```
+
+**Backdrop** : `fixed inset-0 z-[100] flex items-end justify-center p-4 sm:items-center` + overlay `bg-[#0b1419]/50`
+
+**Panel** : `relative z-10 flex max-h-[min(92vh,40rem)] w-full max-w-2xl flex-col overflow-hidden rounded-md border border-border bg-panel shadow-lg`
+
+**Header** : `flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-4 sm:px-6`
+- Titre : `font-display text-lg font-semibold text-foreground` — "Nouveau lead (formulaire site)"
+- Bouton fermer : `rounded p-1 text-muted-foreground hover:bg-panel-muted hover:text-foreground` + `<X className="size-5" />`
+
+**Corps scroll** : `min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 sm:px-6`
+
+**Sections et champs** :
+
+| Section | Champs |
+|---|---|
+| Contact voyageur | Prénom, Nom, Email*, Téléphone |
+| Projet | Étape de planification, Type de groupe, Nombre de voyageurs |
+| Dates | Mode (select), Début, Fin, Mois flexible, Durée |
+| Préférences | Hébergements, Vision du voyage, Préférences de suivi |
+| Budget | Devise (select EUR/USD/DZD), Budget idéal/pers., Budget max/pers. |
+| Notes | Notes détaillées, URL page origine, ID soumission, Priorité (select) |
+
+**Titres de section** : `text-xs font-semibold uppercase tracking-wider text-muted-foreground`
+
+**Field (input)** : `mt-1 w-full rounded-md border border-border bg-panel-muted/40 px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-steel/25`
+- Label : `block text-xs font-semibold uppercase tracking-wide text-muted-foreground`
+
+**TextArea** : même style + `resize-y`
+
+**Select** : `mt-1 w-full rounded-md border border-border bg-panel-muted/40 px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-steel/25`
+
+**Footer** : `flex shrink-0 justify-end gap-2 border-t border-border bg-panel px-5 py-4 sm:px-6`
+- Bouton Annuler : `rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground hover:bg-panel-muted`
+- Bouton Créer : `rounded-md border border-transparent bg-steel px-4 py-2 text-sm font-semibold text-[#f3f7fa] hover:bg-[#0f1c24] disabled:opacity-50`
+- Textes : "Créer le lead" / "Création…"
+
+**Erreur** : `text-sm text-red-600` avec `role="alert"` — inline dans le corps du form.
+
+---
+
+### 13.16 SlaChronology (interne à LeadCockpitShell)
+
+Composant interne dans `lead-cockpit-shell.tsx`. Timeline verticale 4 étapes.
+
+**Étapes** :
+1. Créé (`created_at`)
+2. Référent assigné (`referent_assigned_at`)
+3. Qualif. terminée (`qualification_validated_at`)
+4. SLA 1ʳᵉ réponse (30 min après `created_at`)
+
+**Dot** : `mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full border-2`
+
+| État | Couleur |
+|---|---|
+| Terminé | `border-[#15323f] bg-[#15323f]` |
+| SLA dépassé | `border-[#c1411f] bg-[#c1411f]` |
+| SLA à risque | `border-[#a8710b] bg-[#a8710b]` |
+| En attente | `border-[#e4e8eb] bg-white` |
+
+**Connecteur vertical** : `mt-0.5 h-4 w-[2px] shrink-0 bg-[#e4e8eb]`
+
+**Label** : `text-[12px] font-medium`
+- Dépassé : `text-[#c1411f]` + " — Dépassé"
+- À risque : `text-[#a8710b]` + " — À risque"
+- Fait : `text-[#0e1a21]`
+- Futur : `text-[#9aa7b0]`
+
+**Date** : `text-[11px] text-[#6b7a85]`
+
+---
+
+*Mis à jour le 2026-04-21 — document exhaustif extrait du code source. À synchroniser à chaque ajout de composant pipeline ou modification de logique métier.*
