@@ -3,7 +3,7 @@
 | Champ | Valeur |
 |-------|--------|
 | **Périmètre** | Cockpit lead (`/leads/[id]`), liste leads, workflow voyageur (`/leads/[id]/workflow`), statuts pipeline Supabase, gates brief, intake, webhooks ; effets **côté opérateur** des politiques RLS. |
-| **Dernière revue** | 2026-04-20 — P0 appliqué : transitions pipeline adjacentes (hors admin), nettoyage session workflow à la sortie de `qualification` et à la réassignation du référent ; UI cockpit / select filtré. Archive : [`CODE_PATCHES_P0_FROM_PLAN.md`](./CODE_PATCHES_P0_FROM_PLAN.md). |
+| **Dernière revue** | 2026-05-01 — Qualification Workspace v2 : 6 blocs thématiques structurés remplacent les champs libres + statut global. Gate brief refactorée sur `allBlocksValidated`. Archive précédent : [`CODE_PATCHES_P0_FROM_PLAN.md`](./CODE_PATCHES_P0_FROM_PLAN.md). |
 | **Sources de vérité** | Runtime : code dans `src/app/(dashboard)/leads/actions.ts`, `workflow-actions.ts`, `lead-brief-gate.ts`. Spec produit : [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md). |
 
 ## Carte des zones code (à re-vérifier quand le flux change)
@@ -103,44 +103,66 @@ flowchart LR
 
 ---
 
-## Parcours : qualification — IA / manuel / hybride
+## Parcours : qualification v2 — 6 blocs thématiques
 
-- Lancement workflow : `launchWorkflowAi` / `launchWorkflowManual` (`workflow-actions.ts`) ; seul le **référent** du dossier.
-- **Reset session** : `resetWorkflowVoyageurSession` (remet entre autres `manual_takeover` à `false` et nettoie transcript / brouillon qualification — voir code).
+> **v2 (2026-05-01)** — Remplace le workspace v1 (champs libres + statut global). Composant : `src/components/leads/qualification/lead-qualification-workspace.tsx`.
 
-### Workspace qualification (`LeadQualificationWorkspace`)
+### 6 blocs structurés
 
-Composant affiché à l'étape `qualification` dans `lead-supabase-stage-workspace.tsx`.
-Remplace l'ancienne grille CRM express (`LeadCommercialCrmForm`) pour cette étape.
+| Bloc | Description | Sections |
+|------|-------------|----------|
+| `vibes` | Ambiance & type de voyage | expériences, rythme, structure |
+| `group` | Composition du groupe | taille, profil, niveau physique |
+| `timing` | Temporalité | durée, saison, flexibilité |
+| `stay` | Hébergement | type, confort |
+| `highlights` | Incontournables & contraintes | must-see, évitements, contraintes |
+| `budget` | Budget | fourchette, valeur, inclusions |
 
-**Actions disponibles :**
+### 4 états d'un bloc
+
+| État (`ai_status` / `op_action`) | Affichage |
+|----------------------------------|-----------|
+| `pending` + `op_action=null` | En attente (gris) — boutons "Suggestions IA" ou "Remplir manuellement" |
+| `in_progress` + `op_action=null` | IA en cours (ambre, spinner) |
+| `ready_for_review` + `op_action=null` | Prêt à valider (bleu) — chips IA affichées, actions Confirmer/Ajuster/Manuel |
+| tout + `op_action!=null` | Validé (vert) — chips figées, bouton "Modifier" |
+
+### Actions disponibles (v2)
 
 | Action | Server action | Effet |
 |--------|--------------|-------|
-| Lancer l'agent IA | `runQualificationAgent` (`ai-actions.ts`) | Appelle Claude Haiku (Anthropic), pré-remplit les champs + narrative, sauvegarde en base |
-| Sauvegarder | `saveQualificationFields` (`ai-actions.ts`) | Persiste les champs éditables sans changer le statut |
-| Valider | `validateQualification` (`ai-actions.ts`) | `qualification_validation_status = 'validated'` + `status = 'agency_assignment'` |
+| Générer suggestions | `runQualificationSuggestions` | OpenAI → suggestions chips par bloc, confiance, sections manquantes |
+| Valider un bloc | `validateQualificationBlock` | `op_action = confirmed/adjusted/manual` + `op_validated_at` |
+| Mettre à jour sélections | `updateBlockSelections` | Sélections intermédiaires sans validation |
+| Rouvrir un bloc | `reopenQualificationBlock` | Reset `op_action=null`, conserve sélections |
+| Valider la qualification | `finalizeQualification` | Vérifie 6 blocs validés → `status = agency_assignment` |
 
-**Champs gérés :** `destination_main`, `trip_dates`, `travelers`, `budget`, `travel_style`, `travel_desire_narrative`, `qualification_notes`.
-
-**Prérequis validation :** destination + dates + groupe + budget + narrative (≥ 20 car.) tous remplis.
-
-**Variable d'env requise :** `ANTHROPIC_API_KEY` (server-only). Si absente, bouton IA désactivé avec message d'erreur gracieux.
+**Variable d'env requise :** `OPENAI_API_KEY` (server-only).
 
 ```mermaid
 flowchart TB
-  R[Référent] --> WS[LeadQualificationWorkspace]
-  WS --> IA[Lancer agent IA\nrunQualificationAgent]
-  WS --> SAVE[Sauvegarder\nsaveQualificationFields]
-  WS --> VAL[Valider\nvalidateQualification]
-  IA --> SAVE
-  VAL --> AA[status = agency_assignment]
+  R[Référent] --> SB[QualificationStatusBar]
+  SB -->|"Générer toutes"| IA[runQualificationSuggestions]
+  IA --> BL["6 blocs = ready_for_review"]
+  BL --> VAL[validateQualificationBlock x6]
+  VAL --> GATE[QualificationGate - 6/6]
+  GATE --> FIN[finalizeQualification]
+  FIN --> AA[status = agency_assignment]
+  R -->|"Remplir manuellement"| MANUAL["op_action = manual x6"]
+  MANUAL --> GATE
 ```
+
+### Lancement workflow (inchangé v1)
+
+- `launchWorkflowAi` / `launchWorkflowManual` (`workflow-actions.ts`) ; seul le **référent** du dossier.
+- **Reset session** : `resetWorkflowVoyageurSession`.
 
 ---
 
 ## Parcours : gate « brief prêt » → assignation agence
 
+- **v2** : `isLeadBriefExploitable` retourne `allBlocksValidated(lead.qualification_blocks)`. Tous les 6 blocs doivent avoir `op_action !== null`.
+- **Fallback v1** : si `qualification_blocks` est absent (leads legacy), la gate utilise la checklist 8-champs + `qualification_validation_status`.
 - Implémentation : `isLeadBriefExploitable` / `getBriefGateBlockMessage` (`lead-brief-gate.ts`) + `assertBriefExploitableBeforeAgencyAssignment` (`actions.ts`) sur `qualification` → `agency_assignment`.
 
 ---

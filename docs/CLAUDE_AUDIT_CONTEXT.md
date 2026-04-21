@@ -1,6 +1,6 @@
 # Contexte audit & stack — Travel Lead Desk (fichier plat)
 
-**Mise à jour : 20 avril 2026**
+**Mise à jour : 01 mai 2026** — Qualification Workspace v2 (blocs thématiques structurés).
 
 Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document** à la racine de `docs/`, pour les outils (ex. connecteur Git Claude) qui **ne listent pas les sous-dossiers**. Même intention que le dossier découpé : en cas de modification, mettre à jour **ce fichier et** les fichiers dans `docs/audit-claude-pro/`.
 
@@ -40,7 +40,9 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | Score lead (calcul pur) | `src/lib/lead-score.ts` |
 | Référence DA-… | `src/lib/lead-reference.ts` ; migration `20260430120000_lead_cockpit_v4.sql` |
 | Server actions | `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts` ; `src/app/(dashboard)/agencies/actions.ts` |
-| IA (prompts, agent) | `src/lib/ai/` (`agent.ts`, `prompts/*.ts`, `types.ts`) |
+| IA (prompts, agent) | `src/lib/ai/` (`agent.ts`, `prompts/*.ts` — dont `qualification-suggestions.ts` v2, `types.ts`) |
+| Qualification workspace v2 | `src/components/leads/qualification/` (8 composants : `lead-qualification-workspace`, `qualification-block`, `qualification-chips`, `qualification-gate`, `qualification-narrative`, `qualification-progress`, `qualification-status-bar`, `qualification-block-header`, `qualification-blocks-config`) |
+| Types blocs qualification | `src/lib/qualification-blocks.ts` (types + helpers `allBlocksValidated`, `safeQualificationBlocks`) |
 | API publique / sans UI | `src/app/api/intake/route.ts`, `src/app/api/whatsapp/webhook/route.ts` |
 | PDF devis | `src/app/api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` |
 | Contexte client leads | `src/context/leads-demo-context.tsx` |

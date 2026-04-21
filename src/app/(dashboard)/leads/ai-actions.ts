@@ -6,12 +6,25 @@ import { completeJson } from "@/lib/ai/agent";
 import { parseJsonObject } from "@/lib/ai/json-parse";
 import { AGENCY_SCORING_SYSTEM_PROMPT } from "@/lib/ai/prompts/agency-scoring";
 import { PROPOSAL_COMPARISON_SYSTEM_PROMPT } from "@/lib/ai/prompts/proposal-comparison";
+import {
+  QUALIFICATION_SUGGESTIONS_SYSTEM_PROMPT,
+  buildQualificationSuggestionsUserPrompt,
+} from "@/lib/ai/prompts/qualification-suggestions";
 import { isUuid } from "@/lib/is-uuid";
 import {
   findLeadIdByWhatsAppPhone,
   processTravelerWhatsAppMessage,
 } from "@/lib/leads-whatsapp-inbound";
 import { sendWhatsAppTextMessage, sendWhatsAppTemplate } from "@/lib/whatsapp/client";
+import {
+  type BlockId,
+  type OpAction,
+  type QualificationBlocks,
+  BLOCK_IDS,
+  allBlocksValidated,
+  safeQualificationBlocks,
+} from "@/lib/qualification-blocks";
+import { getBlockOptionIds } from "@/components/leads/qualification/qualification-blocks-config";
 
 export type AiActionResult = { ok: true } | { ok: false; error: string };
 
@@ -658,5 +671,302 @@ export async function compareAgencyProposals(leadId: string): Promise<AiActionRe
   await logActivity(supabase, leadId, user.id, "ai_compare", "Comparatif des propositions agences (IA).");
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+// ─── Qualification Workspace v2 — Bloc Actions ───────────────────────────────
+
+export type QualificationBlockResult =
+  | { ok: true; blocks: QualificationBlocks }
+  | { ok: false; error: string };
+
+export async function runQualificationSuggestions(params: {
+  leadId: string;
+  blockId?: BlockId;
+}): Promise<QualificationBlockResult> {
+  const { leadId, blockId } = params;
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select(
+      "status, qualification_blocks, intake_payload, conversation_transcript, " +
+      "destination_main, trip_dates, travelers, budget, travel_style, trip_summary, travel_desire_narrative"
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+
+  const row = leadRaw as unknown as Record<string, unknown>;
+  const currentBlocks = safeQualificationBlocks(row.qualification_blocks);
+
+  const targetBlockIds: BlockId[] = blockId
+    ? [blockId]
+    : BLOCK_IDS.filter(id => currentBlocks[id].op_action === null);
+
+  if (targetBlockIds.length === 0) {
+    return { ok: true, blocks: currentBlocks };
+  }
+
+  // Mark blocks as in_progress
+  const updatedBlocks = { ...currentBlocks };
+  for (const id of targetBlockIds) {
+    updatedBlocks[id] = { ...updatedBlocks[id], ai_status: 'in_progress' };
+  }
+  await supabase.from("leads").update({ qualification_blocks: updatedBlocks }).eq("id", leadId);
+
+  const userPrompt = buildQualificationSuggestionsUserPrompt({
+    blockIds: targetBlockIds,
+    intakePayload: row.intake_payload ?? null,
+    conversationTranscript: row.conversation_transcript ?? null,
+    surfaceFields: {
+      destination_main: row.destination_main != null ? String(row.destination_main) : null,
+      trip_dates: row.trip_dates != null ? String(row.trip_dates) : null,
+      travelers: row.travelers != null ? String(row.travelers) : null,
+      budget: row.budget != null ? String(row.budget) : null,
+      travel_style: row.travel_style != null ? String(row.travel_style) : null,
+      trip_summary: row.trip_summary != null ? String(row.trip_summary) : null,
+      travel_desire_narrative: row.travel_desire_narrative != null ? String(row.travel_desire_narrative) : null,
+    },
+  });
+
+  const aiResult = await completeJson(QUALIFICATION_SUGGESTIONS_SYSTEM_PROMPT, userPrompt);
+
+  if ("error" in aiResult) {
+    // Revert to pending on AI failure
+    for (const id of targetBlockIds) {
+      updatedBlocks[id] = { ...updatedBlocks[id], ai_status: 'pending' };
+    }
+    await supabase.from("leads").update({ qualification_blocks: updatedBlocks }).eq("id", leadId);
+    return { ok: false, error: aiResult.error };
+  }
+
+  const parsed = parseJsonObject<Record<string, { suggestions?: string[]; confidence?: number; missing?: string[] }>>(aiResult.raw);
+
+  for (const id of targetBlockIds) {
+    const aiBlock = parsed?.[id];
+    const validOptionIds = getBlockOptionIds(id);
+    const suggestions = Array.isArray(aiBlock?.suggestions)
+      ? aiBlock.suggestions.filter((s: string) => validOptionIds.has(s))
+      : [];
+    const confidence = typeof aiBlock?.confidence === 'number'
+      ? Math.min(1, Math.max(0, aiBlock.confidence))
+      : null;
+    const missing = Array.isArray(aiBlock?.missing) ? aiBlock.missing : [];
+
+    updatedBlocks[id] = {
+      ...updatedBlocks[id],
+      ai_status: 'ready_for_review',
+      ai_suggestions: suggestions,
+      ai_confidence: confidence,
+      ai_missing: missing,
+    };
+  }
+
+  const { error: saveErr } = await supabase
+    .from("leads")
+    .update({ qualification_blocks: updatedBlocks })
+    .eq("id", leadId);
+
+  if (saveErr) return { ok: false, error: saveErr.message };
+
+  await logActivity(
+    supabase, leadId, user.id,
+    "qualification_suggestions_run",
+    `Suggestions IA générées pour : ${targetBlockIds.join(', ')}.`,
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true, blocks: updatedBlocks };
+}
+
+export async function validateQualificationBlock(params: {
+  leadId: string;
+  blockId: BlockId;
+  selections: string[];
+  action: 'confirmed' | 'adjusted' | 'manual';
+}): Promise<QualificationBlockResult> {
+  const { leadId, blockId, selections, action } = params;
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select("qualification_blocks")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+
+  const row = leadRaw as unknown as Record<string, unknown>;
+  const blocks = safeQualificationBlocks(row.qualification_blocks);
+
+  const validOptionIds = getBlockOptionIds(blockId);
+  const validSelections = selections.filter(s => validOptionIds.has(s));
+
+  blocks[blockId] = {
+    ...blocks[blockId],
+    op_selections: validSelections,
+    op_action: action as OpAction,
+    op_validated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ qualification_blocks: blocks })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(
+    supabase, leadId, user.id,
+    "qualification_block_validated",
+    `Bloc "${blockId}" validé (${action}).`,
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true, blocks };
+}
+
+export async function updateBlockSelections(params: {
+  leadId: string;
+  blockId: BlockId;
+  selections: string[];
+}): Promise<{ ok: boolean; error?: string }> {
+  const { leadId, blockId, selections } = params;
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select("qualification_blocks")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+
+  const row = leadRaw as unknown as Record<string, unknown>;
+  const blocks = safeQualificationBlocks(row.qualification_blocks);
+
+  const validOptionIds = getBlockOptionIds(blockId);
+  blocks[blockId] = {
+    ...blocks[blockId],
+    op_selections: selections.filter(s => validOptionIds.has(s)),
+  };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ qualification_blocks: blocks })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+export async function reopenQualificationBlock(params: {
+  leadId: string;
+  blockId: BlockId;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { leadId, blockId } = params;
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select("qualification_blocks")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+
+  const row = leadRaw as unknown as Record<string, unknown>;
+  const blocks = safeQualificationBlocks(row.qualification_blocks);
+
+  blocks[blockId] = {
+    ...blocks[blockId],
+    op_action: null,
+    op_validated_at: null,
+  };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ qualification_blocks: blocks })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(
+    supabase, leadId, user.id,
+    "qualification_block_reopened",
+    `Bloc "${blockId}" rouvert pour modification.`,
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+export async function finalizeQualification(params: {
+  leadId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { leadId } = params;
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: leadRaw, error: fetchErr } = await supabase
+    .from("leads")
+    .select("qualification_blocks, status")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
+
+  const row = leadRaw as unknown as Record<string, unknown>;
+  const blocks = safeQualificationBlocks(row.qualification_blocks);
+
+  if (!allBlocksValidated(blocks)) {
+    const missing = BLOCK_IDS.filter(id => blocks[id].op_action === null);
+    return { ok: false, error: `Blocs non validés : ${missing.join(', ')}.` };
+  }
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      status: "agency_assignment",
+      qualification_validation_status: "validated",
+      qualification_validated_at: new Date().toISOString(),
+      qualification_validated_by: user.id,
+    })
+    .eq("id", leadId);
+
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(
+    supabase, leadId, user.id,
+    "qualification_finalized",
+    "Qualification complète validée — passage à Assignation agence.",
+  );
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/inbox");
   return { ok: true };
 }

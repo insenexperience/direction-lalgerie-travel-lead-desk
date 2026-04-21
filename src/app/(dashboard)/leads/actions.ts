@@ -468,6 +468,7 @@ async function assertBriefExploitableBeforeAgencyAssignment(
         "travel_style",
         "qualification_validation_status",
         "workflow_mode",
+        "qualification_blocks",
       ].join(", "),
     )
     .eq("id", leadId)

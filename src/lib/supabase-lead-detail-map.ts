@@ -1,6 +1,7 @@
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
+import { safeQualificationBlocks, EMPTY_QUALIFICATION_BLOCKS } from "@/lib/qualification-blocks";
 
 export const LEAD_SELECT_V2 = [
   "id",
@@ -48,6 +49,7 @@ export const LEAD_SELECT_V2 = [
   "travel_desire_narrative",
   "destination_main",
   "qualification_notes",
+  "qualification_blocks",
 ].join(", ");
 
 export const LEAD_SELECT_LEGACY = [
@@ -140,6 +142,7 @@ export function mapRowToSupabaseLeadRow(
       travel_desire_narrative: null,
       destination_main: null,
       qualification_notes: null,
+      qualification_blocks: { ...EMPTY_QUALIFICATION_BLOCKS },
     };
   }
 
@@ -212,5 +215,6 @@ export function mapRowToSupabaseLeadRow(
     qualification_notes: row.qualification_notes != null
       ? String(row.qualification_notes)
       : null,
+    qualification_blocks: safeQualificationBlocks(row.qualification_blocks),
   };
 }
