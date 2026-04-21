@@ -4,7 +4,7 @@ import { AssignPartnerAgencyForm } from "@/components/leads/assign-partner-agenc
 import { AssignReferentForm } from "@/components/leads/assign-referent-form";
 import { LeadCommercialCrmForm } from "@/components/leads/lead-commercial-crm-form";
 import { CoConstructionPanel } from "@/components/leads/co-construction-panel";
-import { LeadQualificationWorkspace } from "@/components/leads/lead-qualification-workspace";
+import { LeadQualificationWorkspace } from "@/components/leads/qualification/lead-qualification-workspace";
 import { LeadQuotesPanel } from "@/components/leads/lead-quotes-panel";
 import type {
   CoConstructionProposalRow,
@@ -13,11 +13,6 @@ import type {
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import type { LeadStatus } from "@/lib/mock-leads";
 import { LEAD_PIPELINE, leadStatusLabelFr } from "@/lib/mock-leads";
-import {
-  getBriefGateBlockMessage,
-  isLeadBriefExploitable,
-  leadBriefChecklist,
-} from "@/lib/lead-brief-gate";
 import { ContextBanner } from "@/components/leads/context-banner";
 
 import type { ReferentDisplayRow } from "@/lib/referent-display";
@@ -119,41 +114,6 @@ export function LeadSupabaseStageWorkspace({
         </div>
 
         <div className="mt-6 space-y-8">
-        {status === "qualification" ? (
-          <div className="rounded-lg border border-border bg-panel-muted/35 p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Brief prêt pour l’assignation agence
-            </h3>
-            <p className="mt-2 text-sm text-foreground/85">
-              Tant que la checklist n’est pas complète ou la qualification non validée, le passage
-              à « Assignation » est bloqué côté serveur.
-            </p>
-            {!isLeadBriefExploitable(lead) && getBriefGateBlockMessage(lead) ? (
-              <div className="mt-3">
-                <ContextBanner variant="operator" title="Action requise">
-                  {getBriefGateBlockMessage(lead)}
-                </ContextBanner>
-              </div>
-            ) : null}
-            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-              {leadBriefChecklist(lead).map((item) => (
-                <li
-                  key={item.id}
-                  className={[
-                    "flex items-center gap-2 rounded-md border px-2.5 py-2 text-xs font-medium",
-                    item.ok
-                      ? "border-emerald-200/90 bg-emerald-50/80 text-emerald-950"
-                      : "border-border bg-panel text-foreground/80",
-                  ].join(" ")}
-                >
-                  <span aria-hidden>{item.ok ? "✓" : "○"}</span>
-                  {item.label}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
         {status === "qualification" ? (
           <LeadQualificationWorkspace lead={lead} />
         ) : null}
