@@ -57,6 +57,7 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
           userEmail={user.email}
           userName={userName}
           userRole={userRole}
+          avatarUrl={avatarUrl}
         />
         <div className="flex min-h-screen min-w-0 flex-col">
           <Topbar userEmail={user.email} userName={userName} avatarUrl={avatarUrl} />
