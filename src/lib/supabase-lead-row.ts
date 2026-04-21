@@ -55,4 +55,14 @@ export type SupabaseLeadRow = {
   qualification_notes: string | null;
   // Qualification Workspace v2 — blocs thématiques structurés
   qualification_blocks: QualificationBlocks;
+  // MVP v5 — canal préféré (rempli à la première réponse du voyageur)
+  preferred_channel: "whatsapp" | "email" | null;
+  preferred_channel_detected_at: string | null;
+  // MVP v5 — email de bienvenue
+  welcome_email_sent_at: string | null;
+  welcome_email_template_used: string | null;
+  // MVP v5 — brief agence
+  generated_brief: string | null;
+  brief_generated_at: string | null;
+  brief_edited_at: string | null;
 };

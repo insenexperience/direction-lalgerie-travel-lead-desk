@@ -196,6 +196,54 @@ flowchart TB
 | 2026-04-20 | Création de ce document ; correctifs P0 mergés dans le code (`actions.ts`, cockpit pipeline, `lead-supabase-pipeline`). |
 | 2026-04-20 | Refonte UI/UX complète : inbox, cockpit 3 colonnes, dashboard pilotage, liste leads. |
 | 2026-04-20 | Workspace qualification unifié : `LeadQualificationWorkspace` + agent Claude Haiku + 3 server actions. Migration `destination_main`, `travel_desire_narrative`, `qualification_notes`. |
+| 2026-04-21 | Back Office v2 : fix sidebar sticky (layout), sparklines + top agencies réels dans Pilotage business, module Gestion agences v1 (CRUD, contacts, logos, détail 5 sections). |
+
+---
+
+---
+
+## Parcours admin — Gestion des agences
+
+### Créer une agence
+1. `/agencies` → bouton "Nouvelle agence" → drawer s’ouvre
+2. Remplir : raison sociale (obligatoire), type, pays, ville (obligatoires), contact principal (obligatoire en création)
+3. Submit → `createPartnerAgency()` → agence créée en `pending_validation`
+4. Apparaît dans la grille ; clic → `/agencies/[id]`
+
+### Modifier une agence
+1. `/agencies/[id]` → bouton "Modifier" → drawer pré-rempli
+2. Modification → `updateAgency()` — champs contacts non modifiés via ce drawer (utiliser section Contacts)
+3. Changement de statut via menu kebab → `updateAgencyStatus()`
+
+### Gérer les contacts
+1. Section "Contacts" de la fiche → bouton "+ Ajouter un contact"
+2. `addAgencyContact()` — le premier contact créé n’est pas automatiquement primaire
+3. "Définir comme principal" → `setPrimaryAgencyContact()` — reset l’ancien primary puis set le nouveau (deux updates, service role)
+4. Impossible de supprimer le contact principal sans en nommer un autre d’abord
+
+### Supprimer une agence
+**Guard de suppression (sans force) :**
+- Si l’agence a des leads avec `retained_agency_id` actifs (statut ≠ won/lost) → bloqué
+- Si l’agence a des consultations non terminées (≠ declined/quote_received) → bloqué
+- `deleteAgency(id)` retourne `{ blocked: true, activeLeads: N, activeConsultations: M }`
+- Le dialog affiche le détail d’impact, propose "Annuler" ou "Détacher et supprimer quand même"
+
+**Force delete (admin) :**
+- `deleteAgency(id, { force: true })` :
+  1. Détache `retained_agency_id = null` sur les leads actifs
+  2. Log `activities.kind = ‘agency_removed’` sur chaque lead impacté
+  3. Archive les consultations actives → status `declined`
+  4. Supprime l’agence
+
+**RLS :** mutations sur `agencies` et `agency_contacts` réservées aux admins (`is_app_admin()`). Les référents peuvent voir les agences mais pas les modifier.
+
+### Conflits agences (CA1–CA3)
+
+| ID | Sujet | Mitigation |
+|----|-------|------------|
+| CA1 | Suppression agence avec leads actifs | Guard bloquant + force delete explicite |
+| CA2 | Deux contacts `is_primary = true` | Unique index partiel `agency_contacts_primary_unique` |
+| CA3 | Logo upload concurrent (2 onglets) | Dernière écriture gagne — acceptable |
 
 ---
 

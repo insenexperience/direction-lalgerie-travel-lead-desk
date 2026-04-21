@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { moveLeadPipelineStep } from "@/app/(dashboard)/leads/actions";
@@ -20,8 +20,13 @@ export function LeadPipelineStepNav({
   variant = "inline",
 }: LeadPipelineStepNavProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  const viewingStage = searchParams.get("stage") as LeadStatus | null;
+  const isViewingOtherStage =
+    viewingStage !== null && viewingStage !== status;
 
   const idx = LEAD_PIPELINE.indexOf(status);
   const prevLabel = idx > 0 ? leadStatusLabelFr[LEAD_PIPELINE[idx - 1]!] : null;
@@ -119,8 +124,23 @@ export function LeadPipelineStepNav({
   return (
     <div className="rounded-md border border-border bg-panel-muted/40 p-4">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Pipeline
+        Pipeline — avancement
       </p>
+      {isViewingOtherStage ? (
+        <div className="mt-2 flex items-center gap-2 rounded-md border border-[var(--info-border)] bg-[var(--info-bg)] px-3 py-2 text-xs text-[var(--info)]">
+          <span>
+            Vous consultez l'étape{" "}
+            <strong>«&nbsp;{leadStatusLabelFr[viewingStage!]}&nbsp;»</strong>.
+          </span>
+          <button
+            type="button"
+            onClick={() => router.push(`/leads/${leadId}`)}
+            className="ml-auto shrink-0 rounded border border-[var(--info)] px-2 py-0.5 text-[11px] font-semibold hover:bg-[var(--info)] hover:text-white transition-colors"
+          >
+            Retour à l'étape active
+          </button>
+        </div>
+      ) : null}
       <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-foreground/90">
           Étape courante :{" "}

@@ -6,6 +6,7 @@ import {
   Inbox,
   Settings,
   Users,
+  Users2,
   Waypoints,
 } from "lucide-react";
 
@@ -23,6 +24,7 @@ export const workNavItems: DashboardNavItem[] = [
 
 export const resourceNavItems: DashboardNavItem[] = [
   { href: "/agencies", label: "Agences", icon: Building2 },
+  { href: "/contacts", label: "Contacts", icon: Users2 },
   { href: "/quotes", label: "Devis", icon: FileText },
   { href: "/users", label: "Équipe", icon: Users },
   { href: "/settings", label: "Réglages", icon: Settings },

@@ -50,6 +50,13 @@ export const LEAD_SELECT_V2 = [
   "destination_main",
   "qualification_notes",
   "qualification_blocks",
+  "preferred_channel",
+  "preferred_channel_detected_at",
+  "welcome_email_sent_at",
+  "welcome_email_template_used",
+  "generated_brief",
+  "brief_generated_at",
+  "brief_edited_at",
 ].join(", ");
 
 export const LEAD_SELECT_LEGACY = [
@@ -143,6 +150,13 @@ export function mapRowToSupabaseLeadRow(
       destination_main: null,
       qualification_notes: null,
       qualification_blocks: { ...EMPTY_QUALIFICATION_BLOCKS },
+      preferred_channel: null,
+      preferred_channel_detected_at: null,
+      welcome_email_sent_at: null,
+      welcome_email_template_used: null,
+      generated_brief: null,
+      brief_generated_at: null,
+      brief_edited_at: null,
     };
   }
 
@@ -216,5 +230,27 @@ export function mapRowToSupabaseLeadRow(
       ? String(row.qualification_notes)
       : null,
     qualification_blocks: safeQualificationBlocks(row.qualification_blocks),
+    preferred_channel:
+      row.preferred_channel === "whatsapp" || row.preferred_channel === "email"
+        ? row.preferred_channel
+        : null,
+    preferred_channel_detected_at: row.preferred_channel_detected_at
+      ? String(row.preferred_channel_detected_at)
+      : null,
+    welcome_email_sent_at: row.welcome_email_sent_at
+      ? String(row.welcome_email_sent_at)
+      : null,
+    welcome_email_template_used: row.welcome_email_template_used
+      ? String(row.welcome_email_template_used)
+      : null,
+    generated_brief: row.generated_brief != null
+      ? String(row.generated_brief)
+      : null,
+    brief_generated_at: row.brief_generated_at
+      ? String(row.brief_generated_at)
+      : null,
+    brief_edited_at: row.brief_edited_at
+      ? String(row.brief_edited_at)
+      : null,
   };
 }

@@ -23,6 +23,23 @@
   --info:    #1e5a8a;
   --gold:    #b68d3d;
 
+  /* Semantic bg/border pairs */
+  --revenue-bg:     #e6f4ee;  --revenue-border: #b8dece;
+  --hot-bg:         #fceee9;  --hot-border:     #f5c9bc;
+  --warn-bg:        #fdf3e2;  --warn-border:    #f0d49a;
+  --info-bg:        #e8f0f9;  --info-border:    #bdd3ee;
+  --gold-bg:        #faf1de;  --gold-border:    #e8d0a1;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 0 rgba(14,26,33,0.04);
+  --shadow-md: 0 1px 2px rgba(14,26,33,0.06), 0 4px 12px rgba(14,26,33,0.04);
+  --shadow-lg: 0 2px 4px rgba(14,26,33,0.06), 0 12px 32px rgba(14,26,33,0.08);
+
+  /* Agency status dots */
+  --status-active:    #0f6b4b;
+  --status-pending:   #a8710b;
+  --status-suspended: #6b7a85;
+
   /* Legacy aliases for existing components */
   --background:        var(--bg);
   --foreground:        var(--ink);
@@ -49,6 +66,21 @@
   --color-warn:             var(--warn);
   --color-info:             var(--info);
   --color-gold:             var(--gold);
+  /* Semantic bg/border */
+  --color-revenue-bg:       var(--revenue-bg);
+  --color-revenue-border:   var(--revenue-border);
+  --color-hot-bg:           var(--hot-bg);
+  --color-hot-border:       var(--hot-border);
+  --color-warn-bg:          var(--warn-bg);
+  --color-warn-border:      var(--warn-border);
+  --color-info-bg:          var(--info-bg);
+  --color-info-border:      var(--info-border);
+  --color-gold-bg:          var(--gold-bg);
+  --color-gold-border:      var(--gold-border);
+  /* Status dots */
+  --color-status-active:    var(--status-active);
+  --color-status-pending:   var(--status-pending);
+  --color-status-suspended: var(--status-suspended);
   /* Legacy aliases */
   --color-background:       var(--background);
   --color-foreground:       var(--foreground);

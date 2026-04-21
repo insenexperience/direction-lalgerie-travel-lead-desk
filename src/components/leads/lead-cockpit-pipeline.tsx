@@ -1,15 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
 import { ChevronRight } from "lucide-react";
-import { updateLeadStatus } from "@/app/(dashboard)/leads/actions";
 import type { LeadStatus } from "@/lib/mock-leads";
 import { LEAD_PIPELINE, leadStatusLabelFr } from "@/lib/mock-leads";
+
 type LeadCockpitPipelineProps = {
   leadId: string;
   status: LeadStatus;
-  isAdmin?: boolean;
+  displayedStage: LeadStatus;
 };
 
 function visibleSteps(status: LeadStatus): LeadStatus[] {
@@ -19,26 +18,19 @@ function visibleSteps(status: LeadStatus): LeadStatus[] {
 export function LeadCockpitPipeline({
   leadId,
   status,
-  isAdmin = false,
+  displayedStage,
 }: LeadCockpitPipelineProps) {
   const router = useRouter();
-  const [pending, start] = useTransition();
-  const [err, setErr] = useState<string | null>(null);
   const steps = visibleSteps(status);
   const curIdx = LEAD_PIPELINE.indexOf(status);
 
-  function apply(next: LeadStatus) {
-    setErr(null);
-    start(() => {
-      void (async () => {
-        const r = await updateLeadStatus(leadId, next);
-        if (!r.ok) {
-          setErr(r.error);
-          return;
-        }
-        router.refresh();
-      })();
-    });
+  function navigate(step: LeadStatus) {
+    if (step === status) {
+      // Back to active: remove query param
+      router.push(`/leads/${leadId}`);
+    } else {
+      router.push(`/leads/${leadId}?stage=${step}`);
+    }
   }
 
   return (
@@ -48,11 +40,9 @@ export function LeadCockpitPipeline({
           {steps.map((step, i) => {
             const idx = LEAD_PIPELINE.indexOf(step);
             const isFuture = idx > curIdx;
-            const isActive = idx === curIdx;
+            const isActive = step === status;
             const isDone = idx < curIdx;
-            const clickable =
-              !pending &&
-              (isAdmin ? !isFuture : isActive || idx === curIdx - 1);
+            const isViewed = step === displayedStage;
 
             return (
               <li key={step} className="flex items-center">
@@ -61,23 +51,21 @@ export function LeadCockpitPipeline({
                 ) : null}
                 <button
                   type="button"
-                  disabled={!clickable}
-                  title={
-                    isFuture
-                      ? "Complétez l’étape en cours avant de sauter en avant."
-                      : leadStatusLabelFr[step]
-                  }
-                  onClick={() => {
-                    if (!clickable) return;
-                    apply(step);
-                  }}
+                  title={leadStatusLabelFr[step]}
+                  onClick={() => navigate(step)}
                   className={[
                     "group flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
-                    isActive
+                    isViewed && isActive
                       ? "border-steel bg-steel text-steel-ink shadow-sm"
-                      : isDone
-                        ? "border-border bg-panel-muted text-foreground hover:bg-panel"
-                        : "cursor-not-allowed border-border/70 bg-transparent text-foreground/45",
+                      : isViewed
+                        ? "border-[var(--info)] bg-[var(--info-bg)] text-[var(--info)] ring-1 ring-[var(--info)]/40"
+                        : isDone
+                          ? "border-border bg-panel-muted text-foreground hover:bg-panel"
+                          : isActive
+                            ? "border-steel bg-steel text-steel-ink shadow-sm"
+                            : isFuture
+                              ? "border-border/70 bg-transparent text-foreground/45 hover:bg-panel-muted/50"
+                              : "border-border bg-panel-muted text-foreground hover:bg-panel",
                   ].join(" ")}
                 >
                   <span
@@ -87,7 +75,9 @@ export function LeadCockpitPipeline({
                         ? "border-emerald-600 bg-[#e8f4ef]"
                         : isActive
                           ? "border-steel-ink/70 bg-steel-ink"
-                          : "border-border bg-transparent",
+                          : isFuture
+                            ? "border-border bg-transparent"
+                            : "border-border bg-transparent",
                     ].join(" ")}
                     aria-hidden
                   />
@@ -99,17 +89,17 @@ export function LeadCockpitPipeline({
                   <span className="max-w-[10rem] truncate">
                     {leadStatusLabelFr[step]}
                   </span>
+                  {isViewed && !isActive ? (
+                    <span className="text-[9px] font-semibold uppercase tracking-wide opacity-70">
+                      ●
+                    </span>
+                  ) : null}
                 </button>
               </li>
             );
           })}
         </ol>
       </div>
-      {err ? (
-        <p className="px-2 pb-2 text-xs font-medium text-red-600" role="alert">
-          {err}
-        </p>
-      ) : null}
     </div>
   );
 }

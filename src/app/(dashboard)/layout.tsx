@@ -46,7 +46,7 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
   const { user, userName, userRole, inboxCount, leadsCount } = data;
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#f6f7f8]">
+    <div className="min-h-screen bg-[#f6f7f8]">
       <DashboardMobileNav />
       <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start">
         <SidebarNav

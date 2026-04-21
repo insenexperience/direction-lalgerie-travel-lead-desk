@@ -39,7 +39,10 @@ Ce fichier regroupe le contenu de `docs/audit-claude-pro/` en **un seul document
 | Mapping SQL lead | `src/lib/supabase-lead-detail-map.ts` |
 | Score lead (calcul pur) | `src/lib/lead-score.ts` |
 | Référence DA-… | `src/lib/lead-reference.ts` ; migration `20260430120000_lead_cockpit_v4.sql` |
-| Server actions | `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts` ; `src/app/(dashboard)/agencies/actions.ts` |
+| Server actions | `src/app/(dashboard)/leads/actions.ts`, `quote-actions.ts`, `co-construction-actions.ts`, `ai-actions.ts`, `workflow-actions.ts` ; `src/app/(dashboard)/agencies/actions.ts`, `contact-actions.ts`, `logo-actions.ts` |
+| Gestion agences | `src/app/(dashboard)/agencies/page.tsx` (liste), `src/app/(dashboard)/agencies/[id]/page.tsx` (détail) ; composants : `src/components/agencies/` ; lib : `src/lib/agencies/` (types, queries, logo-upload) |
+| Primitifs agences (UI) | `src/components/agencies/agency-logo.tsx`, `agency-status-badge.tsx`, `agency-card.tsx`, `agency-edit-drawer.tsx`, `agency-delete-dialog.tsx` |
+| Pilotage business | `src/app/(dashboard)/dashboard/page.tsx` ; `src/components/ui/sparkline.tsx` |
 | IA (prompts, agent) | `src/lib/ai/` (`agent.ts`, `prompts/*.ts` — dont `qualification-suggestions.ts` v2, `types.ts`) |
 | Qualification workspace v2 | `src/components/leads/qualification/` (8 composants : `lead-qualification-workspace`, `qualification-block`, `qualification-chips`, `qualification-gate`, `qualification-narrative`, `qualification-progress`, `qualification-status-bar`, `qualification-block-header`, `qualification-blocks-config`) |
 | Types blocs qualification | `src/lib/qualification-blocks.ts` (types + helpers `allBlocksValidated`, `safeQualificationBlocks`) |

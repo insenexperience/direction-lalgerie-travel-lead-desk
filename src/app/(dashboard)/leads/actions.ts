@@ -14,6 +14,7 @@ import {
   getBriefGateBlockMessage,
   type LeadBriefGateRow,
 } from "@/lib/lead-brief-gate";
+import { generateBrief } from "@/lib/brief/generate-brief";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -1074,5 +1075,305 @@ export async function updateConsultationQuoteForLead(
   }
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  return { ok: true };
+}
+
+// ─── MVP v5 — opérateur manuel ───────────────────────────────────────────────
+
+async function logLeadActivity(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  actorId: string | null,
+  kind: string,
+  detail?: string,
+): Promise<void> {
+  await supabase.from("activities").insert({
+    lead_id: leadId,
+    actor_id: actorId,
+    kind,
+    detail: detail ?? "",
+  });
+}
+
+/** Marque l'email de bienvenue comme envoyé et passe le lead en qualification. */
+export async function markWelcomeEmailSent(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: row, error: fetchErr } = await supabase
+    .from("leads")
+    .select("status, referent_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (fetchErr || !row) return { ok: false, error: "Lead introuvable." };
+  if (!row.referent_id) {
+    return { ok: false, error: "Allouez d'abord un opérateur travel desk." };
+  }
+
+  const patch: Record<string, unknown> = {
+    welcome_email_sent_at: new Date().toISOString(),
+    welcome_email_template_used: "ai_double_cta",
+  };
+  if (row.status === "new") patch.status = "qualification";
+
+  const { error: updErr } = await supabase.from("leads").update(patch).eq("id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "welcome_email_sent");
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Enregistre le canal préféré détecté à la première réponse du voyageur. */
+export async function setPreferredChannel(
+  leadId: string,
+  channel: "whatsapp" | "email",
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: updErr } = await supabase.from("leads").update({
+    preferred_channel: channel,
+    preferred_channel_detected_at: new Date().toISOString(),
+  }).eq("id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "preferred_channel_detected", channel);
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Génère et sauvegarde le brief agence à partir des données de qualification. */
+export async function generateAndSaveBrief(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: row, error: fetchErr } = await supabase
+    .from("leads")
+    .select(
+      "reference, traveler_name, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks",
+    )
+    .eq("id", leadId)
+    .maybeSingle();
+  if (fetchErr || !row) return { ok: false, error: "Lead introuvable." };
+
+  const brief = generateBrief(row as Parameters<typeof generateBrief>[0]);
+
+  const { error: updErr } = await supabase.from("leads").update({
+    generated_brief: brief,
+    brief_generated_at: new Date().toISOString(),
+  }).eq("id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "brief_generated");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Sauvegarde les modifications manuelles du brief. */
+export async function saveBriefEdit(leadId: string, text: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: updErr } = await supabase.from("leads").update({
+    generated_brief: text,
+    brief_edited_at: new Date().toISOString(),
+  }).eq("id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "brief_edited");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Crée des lignes lead_circuit_proposals pour N agences sélectionnées. */
+export async function assignMultipleAgencies(
+  leadId: string,
+  agencyIds: string[],
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  if (!agencyIds.length) return { ok: false, error: "Sélectionnez au moins une agence." };
+  if (agencyIds.some((id) => !isUuid(id))) {
+    return { ok: false, error: "Identifiant d'agence invalide." };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: agencies, error: agErr } = await supabase
+    .from("agencies")
+    .select("id")
+    .in("id", agencyIds);
+  if (agErr) return { ok: false, error: agErr.message };
+  const foundIds = new Set((agencies ?? []).map((a) => String(a.id)));
+  const missing = agencyIds.find((id) => !foundIds.has(id));
+  if (missing) return { ok: false, error: "Agence introuvable." };
+
+  // Upsert one row per agency — uses lead_id + agency_id uniqueness
+  for (const agencyId of agencyIds) {
+    const { error: upsErr } = await supabase.from("lead_circuit_proposals").insert({
+      lead_id: leadId,
+      agency_id: agencyId,
+      title: "Brief envoyé",
+      circuit_outline: "",
+      status: "pending_send",
+      created_by_profile_id: user.id,
+    });
+    if (upsErr && upsErr.code !== "23505") return { ok: false, error: upsErr.message };
+
+    await logLeadActivity(supabase, leadId, user.id, "agency_consultation_created", agencyId);
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Marque le brief comme envoyé à une agence. */
+export async function markBriefSent(proposalId: string, leadId: string): Promise<ActionResult> {
+  if (!isUuid(proposalId) || !isUuid(leadId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: updErr } = await supabase
+    .from("lead_circuit_proposals")
+    .update({ brief_sent_at: new Date().toISOString(), status: "awaiting_response" })
+    .eq("id", proposalId)
+    .eq("lead_id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "brief_sent_to_agency", proposalId);
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Enregistre une proposition reçue d'une agence. */
+export async function markProposalReceived(
+  proposalId: string,
+  leadId: string,
+  data: { price?: number | null; durationDays?: number | null; summary?: string },
+): Promise<ActionResult> {
+  if (!isUuid(proposalId) || !isUuid(leadId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: pErr } = await supabase
+    .from("lead_circuit_proposals")
+    .update({
+      status: "submitted",
+      proposal_received_at: new Date().toISOString(),
+      agency_proposal_price: data.price ?? null,
+      agency_proposal_duration_days: data.durationDays ?? null,
+      agency_proposal_summary: data.summary?.trim() ?? null,
+    })
+    .eq("id", proposalId)
+    .eq("lead_id", leadId);
+  if (pErr) return { ok: false, error: pErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "agency_proposal_received", proposalId);
+
+  const { data: leadRow } = await supabase
+    .from("leads").select("status").eq("id", leadId).maybeSingle();
+  if (leadRow?.status === "agency_assignment") {
+    await supabase.from("leads").update({ status: "co_construction" }).eq("id", leadId);
+    revalidatePath("/leads");
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Marque une proposition comme refusée par l'agence. */
+export async function markProposalDeclined(
+  proposalId: string,
+  leadId: string,
+): Promise<ActionResult> {
+  if (!isUuid(proposalId) || !isUuid(leadId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: updErr } = await supabase
+    .from("lead_circuit_proposals")
+    .update({ status: "declined", proposal_declined_at: new Date().toISOString() })
+    .eq("id", proposalId)
+    .eq("lead_id", leadId);
+  if (updErr) return { ok: false, error: updErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "agency_proposal_declined", proposalId);
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
+/** Retient une proposition d'agence (arbitrage co_construction). */
+export async function retainAgencyProposal(
+  leadId: string,
+  agencyId: string,
+  proposalId: string,
+): Promise<ActionResult> {
+  if (!isUuid(leadId) || !isUuid(agencyId) || !isUuid(proposalId)) {
+    return { ok: false, error: "Identifiants invalides." };
+  }
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error: propErr } = await supabase
+    .from("lead_circuit_proposals")
+    .update({
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      approved_by_profile_id: user.id,
+    })
+    .eq("id", proposalId)
+    .eq("lead_id", leadId);
+  if (propErr) return { ok: false, error: propErr.message };
+
+  const { error: leadErr } = await supabase
+    .from("leads")
+    .update({ retained_agency_id: agencyId })
+    .eq("id", leadId);
+  if (leadErr) return { ok: false, error: leadErr.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "agency_selected", agencyId);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Logge le déverrouillage d'une étape passée pour modification (traçabilité). */
+export async function unlockStepForEdit(
+  leadId: string,
+  stageName: LeadStatus,
+  motif?: string,
+): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  await logLeadActivity(
+    supabase, leadId, user.id,
+    "step_unlocked",
+    JSON.stringify({ stage: stageName, motif: motif?.trim() ?? "" }),
+  );
+  revalidatePath(`/leads/${leadId}`);
   return { ok: true };
 }

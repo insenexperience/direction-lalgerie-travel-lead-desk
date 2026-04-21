@@ -14,6 +14,8 @@ import {
   mapRowToSupabaseLeadRow,
 } from "@/lib/supabase-lead-detail-map";
 import { isPostgresUndefinedColumnError } from "@/lib/supabase-schema-fallback";
+import { LEAD_PIPELINE } from "@/lib/mock-leads";
+import type { LeadStatus } from "@/lib/mock-leads";
 import { LeadDetailSupabase } from "./lead-detail-supabase";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +23,7 @@ export const revalidate = 30;
 
 type PageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 const QUOTE_SELECT_V2 =
@@ -29,8 +32,10 @@ const QUOTE_SELECT_V2 =
 const QUOTE_SELECT_LEGACY =
   "id, kind, status, workflow_status, items, summary, created_at";
 
-export default async function LeadDetailPage({ params }: PageProps) {
+export default async function LeadDetailPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const sp = await searchParams;
+  const stageParam = typeof sp.stage === "string" ? sp.stage : null;
 
   if (!isUuid(id)) {
     notFound();
@@ -170,6 +175,11 @@ export default async function LeadDetailPage({ params }: PageProps) {
 
   const workflowHints = getWorkflowEmailDeliveryHints();
 
+  const displayedStage: LeadStatus =
+    stageParam && (LEAD_PIPELINE as string[]).includes(stageParam)
+      ? (stageParam as LeadStatus)
+      : lead.status;
+
   return (
     <LeadDetailSupabase
       lead={lead}
@@ -183,6 +193,7 @@ export default async function LeadDetailPage({ params }: PageProps) {
       retainedAgencyLabel={retainedAgencyLabel}
       coProposals={coProposals}
       leadQuotes={leadQuotes}
+      displayedStage={displayedStage}
     />
   );
 }

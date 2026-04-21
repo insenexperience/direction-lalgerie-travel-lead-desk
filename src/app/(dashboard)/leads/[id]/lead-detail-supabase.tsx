@@ -1,5 +1,8 @@
 import { LeadAiOpsPanel } from "@/components/leads/lead-ai-ops-panel";
+import { AiModuleDisabled } from "@/components/ai/ai-module-disabled";
 import { LeadCockpitShell } from "@/components/leads/lead-cockpit-shell";
+import { LeadCockpitPipeline } from "@/components/leads/lead-cockpit-pipeline";
+import { LeadPipelineStepNav } from "@/components/leads/lead-pipeline-step-nav";
 import { LeadSupabaseStageWorkspace } from "@/components/leads/lead-supabase-stage-workspace";
 import { LeadWorkflowPanel } from "@/components/leads/lead-workflow-panel";
 import type {
@@ -8,6 +11,7 @@ import type {
 } from "@/lib/co-construction-proposal";
 import type { ReferentDisplayRow } from "@/lib/referent-display";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
+import type { LeadStatus } from "@/lib/mock-leads";
 
 export type { SupabaseLeadRow };
 
@@ -27,6 +31,7 @@ type LeadDetailSupabaseProps = {
   retainedAgencyLabel: string | null;
   coProposals: CoConstructionProposalRow[];
   leadQuotes: LeadQuoteListItem[];
+  displayedStage: LeadStatus;
 };
 
 export function LeadDetailSupabase({
@@ -41,7 +46,10 @@ export function LeadDetailSupabase({
   retainedAgencyLabel,
   coProposals,
   leadQuotes,
+  displayedStage,
 }: LeadDetailSupabaseProps) {
+  const aiEnabled = process.env.NEXT_PUBLIC_AI_ENABLED === "true";
+
   return (
     <LeadCockpitShell
       lead={lead}
@@ -51,20 +59,28 @@ export function LeadDetailSupabase({
       currentUserId={currentUserId}
     >
       <div className="scroll-mt-20 space-y-5">
-        {/* L1 — Tâche / étape active (premier focus) */}
+        {/* Pipeline navigation bar */}
+        <LeadCockpitPipeline
+          leadId={lead.id}
+          status={lead.status}
+          displayedStage={displayedStage}
+        />
+
+        {/* L1 — Tâche / étape active */}
         <div className="space-y-3">
           {!lead.referent_id ? (
             <p
               className="rounded-md border border-dashed border-amber-300/80 bg-amber-50/80 px-4 py-3 text-sm text-amber-950"
               role="status"
             >
-              À l’étape <strong className="text-foreground">Nouveau</strong>, allouez un{" "}
+              À l'étape <strong className="text-foreground">Nouveau</strong>, allouez un{" "}
               <strong className="text-foreground">opérateur travel desk</strong> dans le bloc
               ci-dessous pour débloquer le passage aux étapes suivantes.
             </p>
           ) : null}
           <LeadSupabaseStageWorkspace
             lead={lead}
+            displayedStage={displayedStage}
             referents={referents}
             referentLabel={referentLabel}
             agencies={agencies}
@@ -74,7 +90,10 @@ export function LeadDetailSupabase({
           />
         </div>
 
-        {/* L2 — Contexte pipeline / IA (second plan) */}
+        {/* Pipeline advance buttons */}
+        <LeadPipelineStepNav leadId={lead.id} status={lead.status} />
+
+        {/* L2 — Contexte pipeline / IA */}
         <section
           className="space-y-4 rounded-lg border border-border/80 bg-panel-muted/25 p-4 sm:p-5"
           aria-labelledby="lead-context-heading"
@@ -96,7 +115,14 @@ export function LeadDetailSupabase({
             manualTakeover={lead.manual_takeover}
             workflowEmailBanner={workflowEmailBanner}
           />
-          <LeadAiOpsPanel lead={lead} hideAutopilotToggle />
+          {aiEnabled ? (
+            <LeadAiOpsPanel lead={lead} hideAutopilotToggle />
+          ) : (
+            <AiModuleDisabled
+              title="Conversation voyageur & IA"
+              description="Qualification IA et messagerie automatisée — activation prochaine."
+            />
+          )}
         </section>
       </div>
     </LeadCockpitShell>

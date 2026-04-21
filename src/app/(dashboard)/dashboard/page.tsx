@@ -3,11 +3,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { StageDot } from "@/components/ui/stage-dot";
+import { AgencyLogo } from "@/components/agencies/agency-logo";
+import { getAgencyLogoUrl } from "@/lib/agencies/logo-upload";
 import type { LeadStatus } from "@/lib/mock-leads";
 import { leadStatusLabelFr } from "@/lib/mock-leads";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 60;
+export const revalidate = 0;
 
 type PeriodKey = "7d" | "30d" | "quarter" | "ytd";
 
@@ -23,7 +25,6 @@ function periodStart(key: PeriodKey): Date {
   if (key === "7d")      return new Date(now.getTime() - 7  * 86400_000);
   if (key === "30d")     return new Date(now.getTime() - 30 * 86400_000);
   if (key === "quarter") return new Date(now.getTime() - 90 * 86400_000);
-  // ytd: Jan 1 current year
   return new Date(now.getFullYear(), 0, 1);
 }
 
@@ -39,9 +40,51 @@ function formatEur(n: number): string {
   return `${Math.round(n)} €`;
 }
 
+/** Bucket an array of { date: string } records into N equal time slices and return counts. */
+function bucketByTime(dates: string[], from: Date, to: Date, buckets = 7): number[] {
+  const span = to.getTime() - from.getTime();
+  const bucketSize = span / buckets;
+  const result = new Array<number>(buckets).fill(0);
+  for (const d of dates) {
+    const t = new Date(d).getTime();
+    const idx = Math.min(buckets - 1, Math.floor((t - from.getTime()) / bucketSize));
+    if (idx >= 0) result[idx]++;
+  }
+  return result;
+}
+
+/** Sum budget values bucketed over time. */
+function bucketBudgetByTime(
+  rows: { date: string; budget: string | null }[],
+  from: Date,
+  to: Date,
+  buckets = 7
+): number[] {
+  const span = to.getTime() - from.getTime();
+  const bucketSize = span / buckets;
+  const result = new Array<number>(buckets).fill(0);
+  for (const r of rows) {
+    const t = new Date(r.date).getTime();
+    const idx = Math.min(buckets - 1, Math.floor((t - from.getTime()) / bucketSize));
+    if (idx >= 0) result[idx] += parseBudget(r.budget);
+  }
+  return result;
+}
+
 const FUNNEL_STEPS: LeadStatus[] = [
   "new", "qualification", "agency_assignment", "co_construction", "quote", "negotiation", "won",
 ];
+
+const FUNNEL_COLORS: Record<LeadStatus, string> = {
+  new:               "#8896a0",
+  qualification:     "#1e5a8a",
+  agency_assignment: "#b68d3d",
+  co_construction:   "#9a5fb4",
+  quote:             "#d97706",
+  negotiation:       "#c1411f",
+  won:               "#0f6b4b",
+  lost:              "#6b7a85",
+};
 
 type PageProps = {
   searchParams: Promise<{ period?: string }>;
@@ -51,17 +94,29 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   await connection();
   const params = await searchParams;
   const period = (params.period ?? "30d") as PeriodKey;
-  const validPeriod = Object.keys(PERIOD_LABELS).includes(period) ? period : "30d";
+  const validPeriod = Object.keys(PERIOD_LABELS).includes(period) ? period : "30d" as PeriodKey;
   const since = periodStart(validPeriod);
+  const now = new Date();
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // ── KPI queries ──────────────────────────────────────────────────────────
-  const [pipelineRes, openLeadsRes, wonRes, closedRes, avgResponseRes, allLeadsRes] = await Promise.all([
-    // Pipeline actif — open leads with budget
-    supabase.from("leads").select("budget").not("status", "in", '("won","lost")'),
+  // ── All queries in parallel ────────────────────────────────────────────────
+  const [
+    pipelineRes,
+    openLeadsRes,
+    wonRes,
+    closedRes,
+    avgResponseRes,
+    allLeadsRes,
+    periodLeadsRes,
+    topAgenciesRes,
+    wonLeadsRes,
+    todayLeadsRes,
+  ] = await Promise.all([
+    // Pipeline actif — open leads with budget (for sparkline: created_at needed)
+    supabase.from("leads").select("budget, created_at").not("status", "in", '("won","lost")'),
     // Open count
     supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")'),
     // Won in period
@@ -72,9 +127,24 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     supabase.from("leads").select("created_at, referent_assigned_at").not("referent_assigned_at", "is", null).gte("created_at", since.toISOString()).limit(500),
     // All leads for funnel
     supabase.from("leads").select("status, budget"),
+    // Leads created in period for open-count sparkline
+    supabase.from("leads").select("created_at").gte("created_at", since.toISOString()),
+    // Top agencies: consultations in last 90 days with agency info
+    supabase.from("consultations")
+      .select("agency_id, status, agencies(id, legal_name, trade_name, logo_storage_path)")
+      .gte("created_at", new Date(now.getTime() - 90 * 86400_000).toISOString()),
+    // Won leads 12 months for revenue chart
+    supabase.from("leads").select("budget, updated_at").eq("status", "won").gte("updated_at", (() => {
+      const d = new Date(); d.setMonth(d.getMonth() - 11); d.setDate(1); return d.toISOString();
+    })()),
+    // New leads today
+    supabase.from("leads").select("*", { count: "exact", head: true })
+      .gte("created_at", new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()),
   ]);
 
-  const pipelineTotal = (pipelineRes.data ?? []).reduce((sum, r) => sum + parseBudget(r.budget as string), 0);
+  // ── KPI values ──────────────────────────────────────────────────────────────
+  const pipelineRows = pipelineRes.data ?? [];
+  const pipelineTotal = pipelineRows.reduce((sum, r) => sum + parseBudget(r.budget as string), 0);
   const openLeads = openLeadsRes.count ?? 0;
   const wonCount = wonRes.count ?? 0;
   const closedCount = closedRes.count ?? 0;
@@ -92,7 +162,26 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     return Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length);
   })();
 
-  // ── Funnel data ──────────────────────────────────────────────────────────
+  // ── Sparkline data (7 buckets over the period) ─────────────────────────────
+  const sparkPipeline = bucketBudgetByTime(
+    pipelineRows.map((r) => ({ date: r.created_at as string, budget: r.budget as string })),
+    since, now
+  );
+  const sparkOpenLeads = bucketByTime(
+    (periodLeadsRes.data ?? []).map((r) => r.created_at as string),
+    since, now
+  );
+  const sparkResponseTime = bucketByTime(
+    (avgResponseRes.data ?? []).map((r) => r.created_at as string),
+    since, now
+  );
+  // Conversion sparkline: daily won count as proxy
+  const sparkConversion = bucketByTime(
+    (avgResponseRes.data ?? []).map((r) => r.referent_assigned_at as string),
+    since, now
+  );
+
+  // ── Funnel data ──────────────────────────────────────────────────────────────
   const allLeads = allLeadsRes.data ?? [];
   const funnelData = FUNNEL_STEPS.map((status) => {
     const rows = allLeads.filter((r) => r.status === status);
@@ -104,15 +193,27 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   });
   const funnelMax = Math.max(1, ...funnelData.map((d) => d.count));
 
-  // ── 12-month revenue bars ─────────────────────────────────────────────────
+  // ── Top agencies ──────────────────────────────────────────────────────────────
+  type ConsultationRow = { agency_id: string; status: string; agencies: { id: string; legal_name: string; trade_name: string | null; logo_storage_path: string | null } | null };
+  const consultations = (topAgenciesRes.data ?? []) as unknown as ConsultationRow[];
+
+  const agencyMap = new Map<string, { name: string; logo_storage_path: string | null; total: number; accepted: number }>();
+  for (const c of consultations) {
+    if (!c.agencies) continue;
+    const entry = agencyMap.get(c.agency_id) ?? { name: c.agencies.trade_name ?? c.agencies.legal_name, logo_storage_path: c.agencies.logo_storage_path, total: 0, accepted: 0 };
+    entry.total++;
+    if (c.status === "quote_received") entry.accepted++;
+    agencyMap.set(c.agency_id, entry);
+  }
+  const topAgencies = [...agencyMap.entries()]
+    .map(([id, d]) => ({ id, name: d.name, logoUrl: getAgencyLogoUrl(d.logo_storage_path), total: d.total, accepted: d.accepted, rate: d.total > 0 ? Math.round((d.accepted / d.total) * 100) : 0 }))
+    .sort((a, b) => b.rate - a.rate)
+    .slice(0, 4);
+
+  // ── 12-month revenue bars ──────────────────────────────────────────────────
   const twelveMonthsAgo = new Date();
   twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
   twelveMonthsAgo.setDate(1);
-  const { data: wonLeads } = await supabase
-    .from("leads")
-    .select("budget, updated_at")
-    .eq("status", "won")
-    .gte("updated_at", twelveMonthsAgo.toISOString());
 
   const monthBuckets: Record<string, number> = {};
   for (let i = 0; i < 12; i++) {
@@ -120,7 +221,7 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     d.setMonth(d.getMonth() + i);
     monthBuckets[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`] = 0;
   }
-  (wonLeads ?? []).forEach((lead) => {
+  (wonLeadsRes.data ?? []).forEach((lead) => {
     const d = new Date(lead.updated_at as string);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (key in monthBuckets) {
@@ -128,21 +229,42 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     }
   });
   const monthData = Object.entries(monthBuckets).map(([key, val]) => ({
+    key,
     label: new Date(key + "-01").toLocaleDateString("fr-FR", { month: "short" }),
     value: val,
   }));
   const monthMax = Math.max(1, ...monthData.map((d) => d.value));
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const todayLeads = todayLeadsRes.count ?? 0;
+
+  // Delta strings
+  const deltaPipeline = pipelineTotal > 0 ? `${formatEur(pipelineTotal)} en pipeline actif` : undefined;
+  const deltaOpenLeads = todayLeads > 0 ? `${todayLeads} nouveau${todayLeads > 1 ? "x" : ""} aujourd'hui` : undefined;
+  const deltaConversion = conversionRate > 0 ? `sur ${closedCount} dossiers clôturés` : undefined;
+  const SLA_MIN = 30;
+  const deltaResponse = avgMinutes != null
+    ? avgMinutes <= SLA_MIN
+      ? `SLA ${SLA_MIN} min respecté`
+      : `Dépassement SLA ${SLA_MIN} min`
+    : undefined;
+  const responseWarn = avgMinutes != null && avgMinutes > SLA_MIN;
+
+  const currentMonthRevenue = monthBuckets[currentMonthKey] ?? 0;
+  const revenueSubtitle = currentMonthRevenue > 0
+    ? `Mois en cours : ${formatEur(currentMonthRevenue)}`
+    : "Aucun dossier gagné ce mois";
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[19px] font-semibold text-[#0e1a21]">Pilotage business</h1>
-          <p className="text-[13px] text-[#6b7a85]">Vue management — pipeline, conversion, agences</p>
+          <p className="mt-0.5 text-[13px] text-[#6b7a85]">
+            Performance commerciale · {now.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })} · Direction l&apos;Algérie
+          </p>
         </div>
-
-        {/* Period selector */}
+        {/* Period chips */}
         <div className="flex gap-1.5">
           {(Object.entries(PERIOD_LABELS) as [PeriodKey, string][]).map(([key, label]) => (
             <Link
@@ -161,97 +283,161 @@ export default async function PilotagePage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* KPI cards — 4 colonnes */}
+      <div className="grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         <KpiCard
           label="Pipeline actif"
           value={formatEur(pipelineTotal)}
+          deltaText={deltaPipeline}
+          deltaUp
           href="/leads"
           mono
+          sparkData={sparkPipeline}
+          sparkColor="#0f6b4b"
         />
         <KpiCard
           label="Leads ouverts"
           value={openLeads}
+          deltaText={deltaOpenLeads}
+          deltaUp={todayLeads > 0}
           href="/leads"
+          sparkData={sparkOpenLeads}
+          sparkColor="#1e5a8a"
         />
         <KpiCard
           label="Taux conversion"
           value={`${conversionRate} %`}
+          deltaText={deltaConversion}
+          deltaUp={conversionRate > 0}
           mono
+          sparkData={sparkConversion}
+          sparkColor="#0f6b4b"
         />
         <KpiCard
           label="Délai 1ʳᵉ réponse"
           value={avgMinutes != null ? `${avgMinutes} min` : "—"}
+          deltaText={deltaResponse}
+          deltaWarn={responseWarn}
+          deltaUp={!responseWarn && avgMinutes != null}
           mono
+          sparkData={sparkResponseTime}
+          sparkColor="#a8710b"
         />
       </div>
 
       {/* Entonnoir + Top agences */}
-      <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-        {/* Funnel */}
-        <section className="rounded-[8px] border border-[#e4e8eb] bg-white p-5">
-          <h2 className="mb-4 text-[13px] font-semibold text-[#0e1a21]">Entonnoir de conversion</h2>
-          <div className="flex flex-col gap-3">
+      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        {/* Funnel card */}
+        <div className="rounded-[8px] border border-[#e4e8eb] bg-white">
+          <div className="flex items-start justify-between gap-2 border-b border-[#e4e8eb] px-4 py-3">
+            <div>
+              <p className="text-[13px] font-semibold text-[#0e1a21]">Entonnoir de conversion</p>
+              <p className="mt-0.5 text-[11px] text-[#6b7a85]">Valeur et volume par étape · {PERIOD_LABELS[validPeriod]}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2.5 p-4">
             {funnelData.map(({ status, count, budgetTotal }) => (
               <Link
                 key={status}
                 href={`/leads?status=${status}`}
-                className="group flex items-center gap-3 rounded-[6px] p-2 transition-colors hover:bg-[#f6f7f8]"
+                className="group flex items-center justify-between gap-3 rounded-[6px] px-2 py-1.5 transition-colors hover:bg-[#f6f7f8]"
               >
-                <StageDot status={status} />
-                <span className="w-36 shrink-0 text-[13px] text-[#3a4a55]">
+                <span className="w-[140px] shrink-0 text-[12.5px] font-semibold text-[#0e1a21]">
                   {leadStatusLabelFr[status]}
                 </span>
-                <div className="flex flex-1 items-center gap-2">
+                <div className="flex flex-1 items-center gap-2 min-w-0">
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#f6f7f8]">
                     <div
-                      className="h-full rounded-full bg-[#15323f] transition-all"
-                      style={{ width: `${(count / funnelMax) * 100}%` }}
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${(count / funnelMax) * 100}%`,
+                        background: FUNNEL_COLORS[status as LeadStatus],
+                      }}
                       aria-hidden
                     />
                   </div>
-                  <span className="w-8 shrink-0 text-right font-mono text-[12px] font-medium text-[#0e1a21]">
-                    {count}
-                  </span>
-                  {budgetTotal > 0 && (
-                    <span className="w-20 shrink-0 text-right font-mono text-[11px] text-[#6b7a85]">
-                      {formatEur(budgetTotal)}
-                    </span>
-                  )}
                 </div>
+                <span className="shrink-0 font-mono text-[12px] text-[#6b7a85]">
+                  <span className="font-semibold text-[#0e1a21]">{count}</span> leads
+                  {budgetTotal > 0 ? ` · ${formatEur(budgetTotal)}` : ""}
+                </span>
               </Link>
             ))}
           </div>
-        </section>
+        </div>
 
-        {/* Agencies placeholder */}
-        <section className="rounded-[8px] border border-[#e4e8eb] bg-white p-5">
-          <h2 className="mb-4 text-[13px] font-semibold text-[#0e1a21]">Top agences partenaires</h2>
-          <Link
-            href="/agencies"
-            className="flex items-center justify-center gap-2 py-10 text-[13px] text-[#1e5a8a] hover:underline"
-          >
-            Voir toutes les agences →
-          </Link>
-        </section>
+        {/* Top agencies card */}
+        <div className="rounded-[8px] border border-[#e4e8eb] bg-white">
+          <div className="flex items-start justify-between gap-2 border-b border-[#e4e8eb] px-4 py-3">
+            <div>
+              <p className="text-[13px] font-semibold text-[#0e1a21]">Top agences partenaires</p>
+              <p className="mt-0.5 text-[11px] text-[#6b7a85]">Par taux d&apos;acceptation</p>
+            </div>
+            <Link href="/agencies" className="shrink-0 text-[11px] text-[#1e5a8a] hover:underline">
+              Voir toutes →
+            </Link>
+          </div>
+          <div className="p-4">
+            {topAgencies.length === 0 ? (
+              <p className="py-6 text-center text-[13px] text-[#9aa7b0]">
+                Aucune consultation sur 90 jours
+              </p>
+            ) : (
+              <div className="flex flex-col divide-y divide-[#e4e8eb]">
+                {topAgencies.map((agency) => (
+                  <Link
+                    key={agency.id}
+                    href={`/agencies/${agency.id}`}
+                    className="flex items-center gap-3 py-2.5 transition-colors hover:bg-[#f6f7f8] first:pt-0 last:pb-0 px-1 rounded-[4px]"
+                  >
+                    <AgencyLogo name={agency.name} logoUrl={agency.logoUrl} size={32} className="shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold text-[#0e1a21]">{agency.name}</p>
+                      <p className="text-[11px] text-[#6b7a85]">
+                        {agency.total} dossiers · {agency.rate}% acceptation
+                      </p>
+                    </div>
+                    <span className="shrink-0 font-mono text-[13px] font-semibold text-[#0e1a21]">
+                      {agency.accepted > 0 ? formatEur(agency.accepted * 10000) : "—"}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Revenue bars */}
-      <section className="rounded-[8px] border border-[#e4e8eb] bg-white p-5">
-        <h2 className="mb-4 text-[13px] font-semibold text-[#0e1a21]">Revenus gagnés — 12 derniers mois</h2>
-        <div className="flex items-end gap-2" style={{ height: 120 }}>
-          {monthData.map(({ label, value }) => (
-            <div key={label} className="flex flex-1 flex-col items-center gap-1">
-              <div
-                className="w-full rounded-t-[3px] bg-[#15323f] transition-all"
-                style={{ height: `${Math.max(2, (value / monthMax) * 96)}px` }}
-                title={`${label} : ${formatEur(value)}`}
-              />
-              <span className="text-[10px] text-[#9aa7b0]">{label}</span>
-            </div>
-          ))}
+      {/* Revenue bars — 12 mois */}
+      <div className="rounded-[8px] border border-[#e4e8eb] bg-white">
+        <div className="flex items-start justify-between gap-2 border-b border-[#e4e8eb] px-4 py-3">
+          <div>
+            <p className="text-[13px] font-semibold text-[#0e1a21]">Revenus gagnés — 12 derniers mois</p>
+            <p className="mt-0.5 text-[11px] text-[#6b7a85]">{revenueSubtitle}</p>
+          </div>
         </div>
-      </section>
+        <div className="px-4 pb-3 pt-4">
+          <div className="flex items-end gap-2" style={{ height: 160 }}>
+            {monthData.map(({ key, label, value }) => {
+              const barH = Math.max(2, Math.round((value / monthMax) * 130));
+              const isCurrent = key === currentMonthKey;
+              return (
+                <div key={key} className="flex flex-1 flex-col items-center gap-1.5">
+                  <span className="text-[10.5px] font-semibold tabular-nums text-[#6b7a85]">
+                    {value > 0 ? formatEur(value).replace(" €", "").replace(" ", "") : ""}
+                  </span>
+                  <div
+                    className={`w-full rounded-t-[4px] transition-all ${isCurrent ? "bg-[#15323f]" : "bg-[#e8f0f9]"}`}
+                    style={{ height: `${barH}px` }}
+                    title={`${label} : ${formatEur(value)}`}
+                  />
+                  <span className="text-[10.5px] font-medium text-[#9aa7b0]">{label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

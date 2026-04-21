@@ -3,9 +3,13 @@ import type { QuoteWorkflowStatus } from "@/lib/quote-workflow";
 import { coerceQuoteWorkflowStatus } from "@/lib/quote-workflow";
 
 export type CoConstructionProposalStatus =
+  | "pending_send"
+  | "awaiting_response"
   | "awaiting_agency"
   | "submitted"
-  | "approved";
+  | "approved"
+  | "declined"
+  | "expired";
 
 export type CoConstructionProposalRow = {
   id: string;
@@ -28,15 +32,27 @@ export type CoConstructionProposalRow = {
   ai_proposal_score?: number | null;
   ai_proposal_rationale?: string | null;
   agency_proposal_received_at?: string | null;
+  // MVP v5
+  brief_sent_at?: string | null;
+  agency_proposal_price?: number | null;
+  agency_proposal_duration_days?: number | null;
+  agency_proposal_summary?: string | null;
+  agency_proposal_pdf_path?: string | null;
+  proposal_received_at?: string | null;
+  proposal_declined_at?: string | null;
 };
 
 export const coConstructionProposalStatusLabelFr: Record<
   CoConstructionProposalStatus,
   string
 > = {
+  pending_send: "Brief à envoyer",
+  awaiting_response: "Brief envoyé — en attente",
   awaiting_agency: "En attente — proposition agence",
-  submitted: "Reçue — modifiable",
-  approved: "Validée — prêt pour devis",
+  submitted: "Proposition reçue",
+  approved: "Offre retenue",
+  declined: "Refus agence",
+  expired: "Expiré",
 };
 
 export type LeadQuoteListItem = {
@@ -56,8 +72,14 @@ export function mapProposalRowFromDb(
   r: Record<string, unknown>,
 ): CoConstructionProposalRow {
   const st = String(r.status ?? "awaiting_agency");
+  const knownStatuses: CoConstructionProposalStatus[] = [
+    "pending_send", "awaiting_response", "awaiting_agency",
+    "submitted", "approved", "declined", "expired",
+  ];
   const status: CoConstructionProposalStatus =
-    st === "submitted" || st === "approved" ? st : "awaiting_agency";
+    (knownStatuses as string[]).includes(st)
+      ? (st as CoConstructionProposalStatus)
+      : "awaiting_agency";
 
   const aiMatch = r.ai_match_score;
   const aiProp = r.ai_proposal_score;
@@ -93,6 +115,22 @@ export function mapProposalRowFromDb(
     agency_proposal_received_at: r.agency_proposal_received_at
       ? String(r.agency_proposal_received_at)
       : null,
+    brief_sent_at: r.brief_sent_at ? String(r.brief_sent_at) : null,
+    agency_proposal_price:
+      r.agency_proposal_price != null && Number.isFinite(Number(r.agency_proposal_price))
+        ? Number(r.agency_proposal_price)
+        : null,
+    agency_proposal_duration_days:
+      r.agency_proposal_duration_days != null &&
+      Number.isFinite(Number(r.agency_proposal_duration_days))
+        ? Number(r.agency_proposal_duration_days)
+        : null,
+    agency_proposal_summary:
+      r.agency_proposal_summary != null ? String(r.agency_proposal_summary) : null,
+    agency_proposal_pdf_path:
+      r.agency_proposal_pdf_path != null ? String(r.agency_proposal_pdf_path) : null,
+    proposal_received_at: r.proposal_received_at ? String(r.proposal_received_at) : null,
+    proposal_declined_at: r.proposal_declined_at ? String(r.proposal_declined_at) : null,
   };
 }
 

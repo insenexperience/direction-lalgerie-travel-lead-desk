@@ -9,7 +9,8 @@
     "serve": "next build --webpack && next start",
     "lint": "eslint",
     "db:link": "npx supabase@latest link",
-    "db:push": "npx supabase@latest db push"
+    "db:push": "npx supabase@latest db push",
+    "seed:pierre-dupont": "psql $DATABASE_URL -f supabase/seeds/pierre_dupont_demo.sql"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
