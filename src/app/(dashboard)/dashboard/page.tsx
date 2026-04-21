@@ -7,6 +7,8 @@ import { AgencyLogo } from "@/components/agencies/agency-logo";
 import { getAgencyLogoUrl } from "@/lib/agencies/logo-upload";
 import type { LeadStatus } from "@/lib/mock-leads";
 import { leadStatusLabelFr } from "@/lib/mock-leads";
+import { DashboardTeamLoad } from "@/components/dashboard/dashboard-team-load";
+import type { TeamLoadEntry } from "@/components/dashboard/dashboard-team-load";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -114,6 +116,7 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     topAgenciesRes,
     wonLeadsRes,
     todayLeadsRes,
+    teamLeadsRes,
   ] = await Promise.all([
     // Pipeline actif — open leads with budget (for sparkline: created_at needed)
     supabase.from("leads").select("budget, created_at").not("status", "in", '("won","lost")'),
@@ -140,6 +143,11 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     // New leads today
     supabase.from("leads").select("*", { count: "exact", head: true })
       .gte("created_at", new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()),
+    // Team load: active leads per referent
+    supabase.from("leads")
+      .select("referent_id, status, profiles!leads_referent_id_fkey(id, full_name, avatar_url)")
+      .not("status", "in", '("won","lost")')
+      .not("referent_id", "is", null),
   ]);
 
   // ── KPI values ──────────────────────────────────────────────────────────────
@@ -254,6 +262,30 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     ? `Mois en cours : ${formatEur(currentMonthRevenue)}`
     : "Aucun dossier gagné ce mois";
 
+  // ── Team load aggregation ────────────────────────────────────────────────────
+  type TeamLeadRow = {
+    referent_id: string;
+    status: string;
+    profiles: { id: string; full_name: string | null; avatar_url: string | null } | null;
+  };
+  const teamLeadRows = (teamLeadsRes.data ?? []) as unknown as TeamLeadRow[];
+  const teamMap = new Map<string, TeamLoadEntry>();
+  for (const row of teamLeadRows) {
+    if (!row.referent_id || !row.profiles) continue;
+    const existing = teamMap.get(row.referent_id) ?? {
+      referentId: row.referent_id,
+      fullName: row.profiles.full_name ?? "Opérateur",
+      avatarUrl: row.profiles.avatar_url ?? null,
+      totalActive: 0,
+      byStatus: {},
+    };
+    existing.totalActive++;
+    const s = row.status as LeadStatus;
+    existing.byStatus[s] = (existing.byStatus[s] ?? 0) + 1;
+    teamMap.set(row.referent_id, existing);
+  }
+  const teamEntries = [...teamMap.values()].sort((a, b) => b.totalActive - a.totalActive);
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -324,6 +356,9 @@ export default async function PilotagePage({ searchParams }: PageProps) {
           sparkColor="#a8710b"
         />
       </div>
+
+      {/* Team load */}
+      <DashboardTeamLoad entries={teamEntries} />
 
       {/* Entonnoir + Top agences */}
       <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
