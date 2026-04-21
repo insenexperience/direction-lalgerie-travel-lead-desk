@@ -58,7 +58,7 @@ export function KpiCard({
 
   if (href) {
     return (
-      <a href={href} className="block transition-opacity hover:opacity-80">
+      <a href={href} className="block cursor-pointer transition-opacity hover:opacity-80">
         {card}
       </a>
     );

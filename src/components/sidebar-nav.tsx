@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BrandLogoBlock } from "@/components/brand-logo-block";
 import { workNavItems, resourceNavItems } from "@/lib/nav-config";
-import { Avatar } from "@/components/ui/avatar";
+import { UserAvatarMenu } from "@/components/user-avatar-menu";
 
 type SidebarNavProps = {
   inboxCount?: number;
@@ -12,6 +12,7 @@ type SidebarNavProps = {
   userEmail?: string;
   userName?: string;
   userRole?: string;
+  avatarUrl?: string | null;
 };
 
 const badges: Record<string, number | undefined> = {};
@@ -22,6 +23,7 @@ export function SidebarNav({
   userEmail,
   userName,
   userRole,
+  avatarUrl,
 }: SidebarNavProps) {
   const currentPath = usePathname();
 
@@ -98,8 +100,8 @@ export function SidebarNav({
       {userEmail && (
         <div className="border-t border-[#e4e8eb] px-4 py-3">
           <div className="flex items-center gap-2.5">
-            <Avatar name={displayName} size={30} />
-            <div className="min-w-0 flex-1">
+            <UserAvatarMenu userName={displayName} avatarUrl={avatarUrl ?? null} />
+            <div className="min-w-0 flex-1 pointer-events-none">
               <p className="truncate text-[12px] font-medium text-[#0e1a21]">{displayName}</p>
               {roleLabel && (
                 <p className="text-[11px] text-[#6b7a85]">{roleLabel}</p>

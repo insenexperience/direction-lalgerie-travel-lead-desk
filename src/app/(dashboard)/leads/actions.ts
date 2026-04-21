@@ -567,6 +567,9 @@ export async function updateLeadStatus(
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
+  if (nextStatus === "won" || nextStatus === "lost") {
+    revalidatePath("/contacts");
+  }
   return { ok: true };
 }
 
@@ -696,6 +699,9 @@ export async function moveLeadPipelineStep(
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
+  if (nextStatus === "won" || nextStatus === "lost") {
+    revalidatePath("/contacts");
+  }
   return { ok: true };
 }
 
@@ -1355,6 +1361,104 @@ export async function retainAgencyProposal(
   await logLeadActivity(supabase, leadId, user.id, "agency_selected", agencyId);
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Auto-alloue un référent via round-robin (appel explicite, distinct du trigger). */
+export async function autoAllocateReferent(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: referentId, error: rpcErr } = await supabase.rpc("allocate_next_referent");
+  if (rpcErr) return { ok: false, error: rpcErr.message };
+  if (!referentId) return { ok: false, error: "Aucun opérateur disponible pour l'allocation." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ referent_id: referentId, referent_assigned_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "auto_round_robin_allocation", referentId);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** Remet un lead à zéro (admin uniquement). Snapshot complet dans activities.payload. */
+export async function resetLead(leadId: string, reason?: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: profile } = await supabase
+    .from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "admin") {
+    return { ok: false, error: "Seuls les administrateurs peuvent remettre un lead à zéro." };
+  }
+
+  const { data: lead, error: fetchErr } = await supabase
+    .from("leads").select("*").eq("id", leadId).maybeSingle();
+  if (fetchErr || !lead) return { ok: false, error: "Lead introuvable." };
+
+  // Snapshot complet dans activities pour récupération manuelle si besoin
+  const { error: actErr } = await supabase.from("activities").insert({
+    lead_id: leadId,
+    actor_id: user.id,
+    kind: "lead_reset",
+    detail: `Reset admin. Motif : ${reason?.trim() || "non renseigné"}`,
+    payload: lead,
+  });
+  if (actErr) return { ok: false, error: actErr.message };
+
+  // Remise à zéro des champs métier
+  const { error: updateErr } = await supabase.from("leads").update({
+    status: "new",
+    trip_summary: null,
+    travel_style: null,
+    travelers: null,
+    budget: null,
+    trip_dates: null,
+    qualification_summary: null,
+    internal_notes: null,
+    retained_agency_id: null,
+    preferred_channel: null,
+    preferred_channel_detected_at: null,
+    welcome_email_sent_at: null,
+    welcome_email_template_used: null,
+    generated_brief: null,
+    brief_generated_at: null,
+    brief_edited_at: null,
+    qualification_validated_at: null,
+    qualification_validation_status: "pending",
+    lead_score: null,
+    lead_score_override: null,
+  }).eq("id", leadId);
+  if (updateErr) return { ok: false, error: updateErr.message };
+
+  // Ré-allocation round-robin
+  const { data: newReferentId } = await supabase.rpc("allocate_next_referent");
+  if (newReferentId) {
+    await supabase.from("leads").update({
+      referent_id: newReferentId,
+      referent_assigned_at: new Date().toISOString(),
+    }).eq("id", leadId);
+  }
+
+  // Archiver les consultations agences
+  await supabase
+    .from("lead_circuit_proposals")
+    .update({ status: "reset_archived" })
+    .eq("lead_id", leadId)
+    .neq("status", "reset_archived");
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
