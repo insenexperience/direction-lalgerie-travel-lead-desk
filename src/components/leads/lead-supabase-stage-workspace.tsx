@@ -10,6 +10,7 @@ import { CoConstructionPanel } from "@/components/leads/co-construction-panel";
 import { LeadQualificationWorkspace } from "@/components/leads/qualification/lead-qualification-workspace";
 import { LeadQuotesPanel } from "@/components/leads/lead-quotes-panel";
 import { LeadStageDisplayWrapper } from "@/components/leads/lead-stage-display-wrapper";
+import { LeadResetButton } from "@/components/leads/lead-reset-button";
 import type {
   CoConstructionProposalRow,
   LeadQuoteListItem,
@@ -33,6 +34,7 @@ type LeadSupabaseStageWorkspaceProps = {
   retainedAgencyLabel: string | null;
   coProposals: CoConstructionProposalRow[];
   leadQuotes: LeadQuoteListItem[];
+  isAdmin?: boolean;
 };
 
 function stageIntro(status: LeadStatus): { title: string; body: string } {
@@ -88,6 +90,7 @@ export function LeadSupabaseStageWorkspace({
   retainedAgencyLabel,
   coProposals,
   leadQuotes,
+  isAdmin = false,
 }: LeadSupabaseStageWorkspaceProps) {
   const activeStatus = lead.status as LeadStatus;
   const activeIdx = LEAD_PIPELINE.indexOf(activeStatus);
@@ -100,7 +103,8 @@ export function LeadSupabaseStageWorkspace({
         ? "active"
         : "future";
 
-  const isEditable = mode === "active";
+  // past mode is editable too — LeadStageDisplayWrapper handles the visual lock via pointer-events-none until unlocked
+  const isEditable = mode === "active" || mode === "past";
   const intro = stageIntro(displayedStage);
   const stepHuman = displayedIdx >= 0 ? displayedIdx + 1 : 0;
   const stepTotal = LEAD_PIPELINE.length;
@@ -314,6 +318,16 @@ export function LeadSupabaseStageWorkspace({
                   <p className="mt-2 text-sm text-muted-foreground">
                     Synthèse finale et archivage.
                   </p>
+                </div>
+              )}
+
+              {/* Reset lead — admin only, étape new */}
+              {isNew && isAdmin && (
+                <div className="border-t border-dashed border-border/70 pt-6">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Zone admin
+                  </p>
+                  <LeadResetButton leadId={lead.id} isAdmin={isAdmin} />
                 </div>
               )}
             </div>

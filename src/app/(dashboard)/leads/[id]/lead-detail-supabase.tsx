@@ -79,6 +79,7 @@ export function LeadDetailSupabase({
             retainedAgencyLabel={retainedAgencyLabel}
             coProposals={coProposals}
             leadQuotes={leadQuotes}
+            isAdmin={isAdmin}
           />
         </div>
 
