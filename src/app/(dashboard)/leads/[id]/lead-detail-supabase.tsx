@@ -1,7 +1,6 @@
 import { LeadAiOpsPanel } from "@/components/leads/lead-ai-ops-panel";
 import { AiModuleDisabled } from "@/components/ai/ai-module-disabled";
 import { LeadCockpitShell } from "@/components/leads/lead-cockpit-shell";
-import { LeadCockpitPipeline } from "@/components/leads/lead-cockpit-pipeline";
 import { LeadPipelineStepNav } from "@/components/leads/lead-pipeline-step-nav";
 import { LeadSupabaseStageWorkspace } from "@/components/leads/lead-supabase-stage-workspace";
 import { LeadWorkflowPanel } from "@/components/leads/lead-workflow-panel";
@@ -59,13 +58,6 @@ export function LeadDetailSupabase({
       currentUserId={currentUserId}
     >
       <div className="scroll-mt-20 space-y-5">
-        {/* Pipeline navigation bar */}
-        <LeadCockpitPipeline
-          leadId={lead.id}
-          status={lead.status}
-          displayedStage={displayedStage}
-        />
-
         {/* L1 — Tâche / étape active */}
         <div className="space-y-3">
           {!lead.referent_id ? (

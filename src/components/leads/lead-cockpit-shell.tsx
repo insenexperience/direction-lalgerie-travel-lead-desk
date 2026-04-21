@@ -232,7 +232,7 @@ export function LeadCockpitShell({
 
       {/* ── Rail ── */}
       <div className="overflow-x-auto rounded-[8px] border border-[#e4e8eb] bg-white px-4 py-3">
-        <LeadRail status={lead.status} />
+        <LeadRail status={lead.status} leadId={lead.id} />
       </div>
 
       {/* ── Next action ── */}
