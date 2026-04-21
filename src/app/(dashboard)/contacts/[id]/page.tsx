@@ -14,21 +14,20 @@ export default async function ContactDetailPage({ params }: PageProps) {
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: contact, error } = await supabase
+  const { data: rawContact } = await supabase
     .from("contacts")
-    .select(
-      "id, type, full_name, email, phone, whatsapp_phone_number, source_lead_id, first_seen_at, last_interaction_at, won_at, trip_completed_at, traveler_notes, lost_at, lost_reason, tags, created_at, updated_at",
-    )
+    .select("*")
     .eq("id", id)
-    .single();
+    .maybeSingle();
 
-  if (error || !contact) {
+  if (!rawContact) {
     notFound();
   }
 
-  // Fetch activities from the source lead if linked
+  const contact = rawContact as unknown as ContactRow;
+
   let activities: ActivityRow[] = [];
-  let sourceLeadRef: string | null = null;
+  let sourceLead: SourceLeadRow | null = null;
 
   if (contact.source_lead_id) {
     const [activitiesRes, leadRes] = await Promise.all([
@@ -37,27 +36,30 @@ export default async function ContactDetailPage({ params }: PageProps) {
         .select("id, kind, detail, created_at, actor_id")
         .eq("lead_id", contact.source_lead_id)
         .order("created_at", { ascending: false })
-        .limit(50),
+        .limit(60),
       supabase
         .from("leads")
-        .select("reference, traveler_name")
+        .select(
+          "id, reference, traveler_name, trip_summary, travel_style, travelers, " +
+          "budget, trip_dates, retained_agency_id, status, source",
+        )
         .eq("id", contact.source_lead_id)
-        .single(),
+        .maybeSingle(),
     ]);
     activities = (activitiesRes.data ?? []) as ActivityRow[];
-    sourceLeadRef = leadRes.data?.reference ?? null;
+    sourceLead = leadRes.data as SourceLeadRow | null;
   }
 
   return (
     <ContactDetail
-      contact={contact as ContactRow}
+      contact={contact}
       activities={activities}
-      sourceLeadRef={sourceLeadRef}
+      sourceLead={sourceLead}
     />
   );
 }
 
-type ContactRow = {
+export type ContactRow = {
   id: string;
   type: "traveler" | "seeker";
   full_name: string;
@@ -73,11 +75,26 @@ type ContactRow = {
   lost_at: string | null;
   lost_reason: string | null;
   tags: string[] | null;
+  project_snapshot: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 };
 
-type ActivityRow = {
+export type SourceLeadRow = {
+  id: string;
+  reference: string | null;
+  traveler_name: string | null;
+  trip_summary: string | null;
+  travel_style: string | null;
+  travelers: string | null;
+  budget: string | null;
+  trip_dates: string | null;
+  retained_agency_id: string | null;
+  status: string;
+  source: string | null;
+};
+
+export type ActivityRow = {
   id: string;
   kind: string;
   detail: string | null;
