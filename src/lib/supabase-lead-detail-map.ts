@@ -57,6 +57,21 @@ export const LEAD_SELECT_V2 = [
   "generated_brief",
   "brief_generated_at",
   "brief_edited_at",
+  // PRD Refonte v1 — champs financiers structurés
+  "budget_min",
+  "budget_max",
+  "budget_unit",
+  "travelers_adults",
+  "travelers_children",
+  "currency",
+  "travel_period",
+  "travel_start_date",
+  "travel_end_date",
+  "project_description",
+  "contact_id",
+  "closed_at",
+  "deleted_at",
+  "channel",
 ].join(", ");
 
 export const LEAD_SELECT_LEGACY = [
@@ -157,6 +172,20 @@ export function mapRowToSupabaseLeadRow(
       generated_brief: null,
       brief_generated_at: null,
       brief_edited_at: null,
+      budget_min: null,
+      budget_max: null,
+      budget_unit: null,
+      travelers_adults: 1,
+      travelers_children: 0,
+      currency: "EUR",
+      travel_period: null,
+      travel_start_date: null,
+      travel_end_date: null,
+      project_description: null,
+      contact_id: null,
+      closed_at: null,
+      deleted_at: null,
+      channel: null,
     };
   }
 
@@ -252,5 +281,35 @@ export function mapRowToSupabaseLeadRow(
     brief_edited_at: row.brief_edited_at
       ? String(row.brief_edited_at)
       : null,
+    // PRD Refonte v1 — champs financiers structurés
+    budget_min:
+      row.budget_min != null && Number.isFinite(Number(row.budget_min))
+        ? Number(row.budget_min)
+        : null,
+    budget_max:
+      row.budget_max != null && Number.isFinite(Number(row.budget_max))
+        ? Number(row.budget_max)
+        : null,
+    budget_unit:
+      row.budget_unit === "per_person" || row.budget_unit === "total"
+        ? row.budget_unit
+        : null,
+    travelers_adults:
+      row.travelers_adults != null && Number.isFinite(Number(row.travelers_adults))
+        ? Math.max(0, Number(row.travelers_adults))
+        : 1,
+    travelers_children:
+      row.travelers_children != null && Number.isFinite(Number(row.travelers_children))
+        ? Math.max(0, Number(row.travelers_children))
+        : 0,
+    currency: row.currency ? String(row.currency) : "EUR",
+    travel_period: row.travel_period ? String(row.travel_period) : null,
+    travel_start_date: row.travel_start_date ? String(row.travel_start_date) : null,
+    travel_end_date: row.travel_end_date ? String(row.travel_end_date) : null,
+    project_description: row.project_description ? String(row.project_description) : null,
+    contact_id: row.contact_id ? String(row.contact_id) : null,
+    closed_at: row.closed_at ? String(row.closed_at) : null,
+    deleted_at: row.deleted_at ? String(row.deleted_at) : null,
+    channel: row.channel ? String(row.channel) : null,
   };
 }

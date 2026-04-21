@@ -1462,6 +1462,132 @@ export async function resetLead(leadId: string, reason?: string): Promise<Action
   return { ok: true };
 }
 
+// ─── PRD Refonte v1 — Nouvelles actions admin ────────────────────────────────
+
+/** Soft delete : masque le lead sans suppression physique. Admin only. */
+export async function softDeleteLead(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const isAdmin = await loadUserIsAdmin(supabase, user.id);
+  if (!isAdmin) return { ok: false, error: "Action réservée aux administrateurs." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "lead_soft_deleted", "Soft delete par admin.");
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** Réinitialise le lead à l'étape "new" et insère une entrée dans lead_history. Admin only. */
+export async function resetLeadToNew(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const isAdmin = await loadUserIsAdmin(supabase, user.id);
+  if (!isAdmin) return { ok: false, error: "Action réservée aux administrateurs." };
+
+  // Récupérer l'étape actuelle pour l'historique
+  const { data: current } = await supabase.from("leads").select("status").eq("id", leadId).single();
+  const fromStage = current?.status ?? "unknown";
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      status: "new",
+      closed_at: null,
+      workflow_launched_at: null,
+      workflow_launched_by: null,
+      workflow_mode: null,
+      workflow_run_ref: null,
+    })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  // Insère manuellement une entrée d'historique (le trigger le fera aussi, c'est ok)
+  await supabase.from("lead_history").insert({
+    lead_id: leadId,
+    from_stage: fromStage,
+    to_stage: "new",
+    changed_by: user.id,
+    note: "Réinitialisation manuelle par admin.",
+  });
+
+  // Purger les entrées d'historique antérieures à ce reset
+  await supabase.from("lead_history")
+    .delete()
+    .eq("lead_id", leadId)
+    .lt("changed_at", new Date().toISOString());
+
+  await logLeadActivity(supabase, leadId, user.id, "lead_reset", `Réinitialisé depuis ${fromStage} → new.`);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Crée ou rattache un Contact depuis les données du lead. Disponible à tous les référents. */
+export async function copyLeadToContact(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: lead, error: leadErr } = await supabase
+    .from("leads")
+    .select("id, traveler_name, email, phone, whatsapp_phone_number, created_at, status, contact_id")
+    .eq("id", leadId)
+    .single();
+  if (leadErr || !lead) return { ok: false, error: "Lead introuvable." };
+
+  const email = (lead.email as string | null)?.trim() || null;
+  if (!email) return { ok: false, error: "Impossible de créer un contact sans email." };
+
+  const nameParts = ((lead.traveler_name as string | null) ?? "").trim().split(" ");
+  const firstName = nameParts[0] ?? "";
+  const lastName = nameParts.slice(1).join(" ").trim() || null;
+
+  // Upsert contact par email
+  const { data: contact, error: upsertErr } = await supabase
+    .from("contacts")
+    .upsert({
+      email,
+      full_name: (lead.traveler_name as string | null) ?? "Inconnu",
+      first_name: firstName || null,
+      last_name: lastName,
+      phone: (lead.phone as string | null)?.trim() || null,
+      phone_e164: (lead.phone as string | null)?.trim() || null,
+      whatsapp_phone_number: (lead.whatsapp_phone_number as string | null)?.trim() || null,
+      first_seen_at: lead.created_at,
+      first_lead_at: lead.created_at,
+      last_activity_at: new Date().toISOString(),
+      type: lead.status === "won" ? "traveler" : "seeker",
+      source_lead_id: leadId,
+    }, { onConflict: "email" })
+    .select("id")
+    .single();
+
+  if (upsertErr || !contact) return { ok: false, error: upsertErr?.message ?? "Erreur création contact." };
+
+  // Rattacher le lead au contact si pas encore fait
+  if (!lead.contact_id) {
+    await supabase.from("leads").update({ contact_id: contact.id }).eq("id", leadId);
+  }
+
+  await logLeadActivity(supabase, leadId, user.id, "contact_linked", `Contact ${contact.id} créé/mis à jour.`);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/contacts");
+  return { ok: true };
+}
+
 /** Logge le déverrouillage d'une étape passée pour modification (traçabilité). */
 export async function unlockStepForEdit(
   leadId: string,

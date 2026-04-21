@@ -34,24 +34,41 @@ function baseStyles(): string {
   return `font-family:system-ui,-apple-system,sans-serif;line-height:1.5;color:#0f172a;max-width:560px;`;
 }
 
-/** Mode IA : double CTA WhatsApp + email (mailto). */
+/** Mode IA : CTA WhatsApp dominant (vert, grand) + email secondaire (discret). */
 export function buildWorkflowWelcomeEmailAiHtml(
   lead: WorkflowLeadEmailFields,
   opts: { whatsappHref: string; mailtoHref: string },
 ): string {
   const name = escapeHtml(firstName(lead.traveler_name));
+  const hasWhatsapp = opts.whatsappHref !== "#" && opts.whatsappHref.startsWith("https://wa.me/");
+
+  const whatsappBlock = hasWhatsapp
+    ? `
+  <table style="margin:28px auto;text-align:center;width:100%;">
+    <tr>
+      <td style="text-align:center;">
+        <p style="margin:0 0 10px;font-size:14px;color:#374151;">Pour un échange plus fluide et un suivi en temps réel, nous vous recommandons WhatsApp. Cliquez ci-dessous pour démarrer la conversation.</p>
+        <a href="${escapeHtml(opts.whatsappHref)}"
+           style="display:inline-block;background:#25D366;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:17px;letter-spacing:0.01em;">
+          💬 Continuer sur WhatsApp
+        </a>
+      </td>
+    </tr>
+  </table>`
+    : `<p style="margin:20px 0;font-size:14px;color:#6b7280;">(Aucun numéro WhatsApp disponible — répondez à cet email pour démarrer votre projet.)</p>`;
+
   return `
 <div style="${baseStyles()}">
   <p>Bonjour ${name},</p>
   <p>Nous avons bien reçu votre demande de voyage. <strong>Direction l'Algérie</strong> sélectionne pour vous les agents experts de notre réseau pour construire un voyage sur mesure.</p>
   <p>Voici le récapitulatif de votre projet&nbsp;:</p>
   <table style="border-collapse:collapse;width:100%;margin:16px 0;">${projectRecapRows(lead)}</table>
-  <p>Pour affiner votre projet avec nous, vous pouvez&nbsp;:</p>
-  <p style="margin:20px 0;">
-    <a href="${escapeHtml(opts.whatsappHref)}" style="display:inline-block;background:#0f766e;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600;margin-right:8px;margin-bottom:8px;">Co-construire par WhatsApp</a>
-    <a href="${escapeHtml(opts.mailtoHref)}" style="display:inline-block;background:#1e293b;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:600;margin-bottom:8px;">Poursuivre par email</a>
+  ${whatsappBlock}
+  <p style="font-size:13px;color:#9ca3af;text-align:center;margin-top:8px;">
+    Vous préférez l'email ?
+    <a href="${escapeHtml(opts.mailtoHref)}" style="color:#1e293b;text-decoration:underline;">Répondre par email</a>
   </p>
-  <p style="font-size:14px;color:#64748b;">Nous restons à votre disposition pour toute question.</p>
+  <p style="font-size:14px;color:#64748b;margin-top:24px;">Nous restons à votre disposition pour toute question.</p>
   <p>— L'équipe Direction l'Algérie</p>
 </div>`.trim();
 }

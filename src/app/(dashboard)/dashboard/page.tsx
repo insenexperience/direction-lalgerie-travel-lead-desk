@@ -9,6 +9,15 @@ import type { LeadStatus } from "@/lib/mock-leads";
 import { leadStatusLabelFr } from "@/lib/mock-leads";
 import { DashboardTeamLoad } from "@/components/dashboard/dashboard-team-load";
 import type { TeamLoadEntry } from "@/components/dashboard/dashboard-team-load";
+import {
+  calculatePipelineTotal,
+  calculateClosedRevenue,
+  calculateTravelVolume,
+  calculateLeadBudget,
+  formatEur as formatEurCalc,
+  type PipelineStages,
+  type LeadForCalc,
+} from "@/lib/pipeline-calculations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,16 +39,8 @@ function periodStart(key: PeriodKey): Date {
   return new Date(now.getFullYear(), 0, 1);
 }
 
-function parseBudget(raw: string | null): number {
-  if (!raw) return 0;
-  const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-  return isNaN(n) ? 0 : n;
-}
-
 function formatEur(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M€`;
-  if (n >= 1_000)     return `${Math.round(n / 1_000)} k€`;
-  return `${Math.round(n)} €`;
+  return formatEurCalc(n);
 }
 
 /** Bucket an array of { date: string } records into N equal time slices and return counts. */
@@ -51,24 +52,6 @@ function bucketByTime(dates: string[], from: Date, to: Date, buckets = 7): numbe
     const t = new Date(d).getTime();
     const idx = Math.min(buckets - 1, Math.floor((t - from.getTime()) / bucketSize));
     if (idx >= 0) result[idx]++;
-  }
-  return result;
-}
-
-/** Sum budget values bucketed over time. */
-function bucketBudgetByTime(
-  rows: { date: string; budget: string | null }[],
-  from: Date,
-  to: Date,
-  buckets = 7
-): number[] {
-  const span = to.getTime() - from.getTime();
-  const bucketSize = span / buckets;
-  const result = new Array<number>(buckets).fill(0);
-  for (const r of rows) {
-    const t = new Date(r.date).getTime();
-    const idx = Math.min(buckets - 1, Math.floor((t - from.getTime()) / bucketSize));
-    if (idx >= 0) result[idx] += parseBudget(r.budget);
   }
   return result;
 }
@@ -118,18 +101,18 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     todayLeadsRes,
     teamLeadsRes,
   ] = await Promise.all([
-    // Pipeline actif — open leads with budget (for sparkline: created_at needed)
-    supabase.from("leads").select("budget, created_at").not("status", "in", '("won","lost")'),
-    // Open count
-    supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")'),
+    // Pipeline actif — open leads avec champs financiers structurés
+    supabase.from("leads").select("budget_min, budget_unit, travelers_adults, travelers_children, status, deleted_at, created_at").not("status", "in", '("won","lost")').is("deleted_at", null),
+    // Open count (hors supprimés)
+    supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")').is("deleted_at", null),
     // Won in period
     supabase.from("leads").select("*", { count: "exact", head: true }).eq("status", "won").gte("updated_at", since.toISOString()),
     // Closed (won+lost) in period
     supabase.from("leads").select("*", { count: "exact", head: true }).in("status", ["won", "lost"]).gte("updated_at", since.toISOString()),
     // Avg first response (referent_assigned_at - created_at)
     supabase.from("leads").select("created_at, referent_assigned_at").not("referent_assigned_at", "is", null).gte("created_at", since.toISOString()).limit(500),
-    // All leads for funnel
-    supabase.from("leads").select("status, budget"),
+    // All leads for funnel (hors supprimés)
+    supabase.from("leads").select("status, budget_min, budget_unit, travelers_adults, travelers_children, deleted_at").is("deleted_at", null),
     // Leads created in period for open-count sparkline
     supabase.from("leads").select("created_at").gte("created_at", since.toISOString()),
     // Top agencies: consultations in last 90 days with agency info
@@ -137,22 +120,30 @@ export default async function PilotagePage({ searchParams }: PageProps) {
       .select("agency_id, status, agencies(id, legal_name, trade_name, logo_storage_path)")
       .gte("created_at", new Date(now.getTime() - 90 * 86400_000).toISOString()),
     // Won leads 12 months for revenue chart
-    supabase.from("leads").select("budget, updated_at").eq("status", "won").gte("updated_at", (() => {
+    supabase.from("leads").select("budget_min, budget_unit, travelers_adults, travelers_children, deleted_at, status, updated_at").eq("status", "won").is("deleted_at", null).gte("updated_at", (() => {
       const d = new Date(); d.setMonth(d.getMonth() - 11); d.setDate(1); return d.toISOString();
     })()),
     // New leads today
     supabase.from("leads").select("*", { count: "exact", head: true })
       .gte("created_at", new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()),
-    // Team load: active leads per referent
+    // Team load: active leads per referent (hors supprimés)
     supabase.from("leads")
       .select("referent_id, status, profiles!leads_referent_id_fkey(id, full_name, avatar_url)")
       .not("status", "in", '("won","lost")')
-      .not("referent_id", "is", null),
+      .not("referent_id", "is", null)
+      .is("deleted_at", null),
   ]);
 
+  // ── Pipeline stages (pour les calculs pondérés) ────────────────────────────
+  const { data: stagesData } = await supabase.from("pipeline_stages").select("code, weight, is_closed, is_won");
+  const stages: PipelineStages = Object.fromEntries(
+    (stagesData ?? []).map((s) => [s.code, { code: s.code, weight: Number(s.weight), is_closed: s.is_closed, is_won: s.is_won }])
+  );
+
   // ── KPI values ──────────────────────────────────────────────────────────────
-  const pipelineRows = pipelineRes.data ?? [];
-  const pipelineTotal = pipelineRows.reduce((sum, r) => sum + parseBudget(r.budget as string), 0);
+  const pipelineRows = (pipelineRes.data ?? []) as LeadForCalc[];
+  const pipelineTotal = calculatePipelineTotal(pipelineRows, stages);
+  const travelVolume = calculateTravelVolume(pipelineRows, stages);
   const openLeads = openLeadsRes.count ?? 0;
   const wonCount = wonRes.count ?? 0;
   const closedCount = closedRes.count ?? 0;
@@ -171,8 +162,8 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   })();
 
   // ── Sparkline data (7 buckets over the period) ─────────────────────────────
-  const sparkPipeline = bucketBudgetByTime(
-    pipelineRows.map((r) => ({ date: r.created_at as string, budget: r.budget as string })),
+  const sparkPipeline = bucketByTime(
+    pipelineRows.map((r) => (r as unknown as { created_at: string }).created_at),
     since, now
   );
   const sparkOpenLeads = bucketByTime(
@@ -190,15 +181,16 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   );
 
   // ── Funnel data ──────────────────────────────────────────────────────────────
-  const allLeads = allLeadsRes.data ?? [];
+  const allLeadsData = (allLeadsRes.data ?? []) as LeadForCalc[];
   const funnelData = FUNNEL_STEPS.map((status) => {
-    const rows = allLeads.filter((r) => r.status === status);
+    const rows = allLeadsData.filter((r) => r.status === status);
     return {
       status,
       count: rows.length,
-      budgetTotal: rows.reduce((sum, r) => sum + parseBudget(r.budget as string), 0),
+      budgetTotal: rows.reduce((sum, r) => sum + calculateLeadBudget(r), 0),
     };
   });
+  const allLeads = allLeadsData;
   const funnelMax = Math.max(1, ...funnelData.map((d) => d.count));
 
   // ── Top agencies ──────────────────────────────────────────────────────────────
@@ -230,10 +222,10 @@ export default async function PilotagePage({ searchParams }: PageProps) {
     monthBuckets[`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`] = 0;
   }
   (wonLeadsRes.data ?? []).forEach((lead) => {
-    const d = new Date(lead.updated_at as string);
+    const d = new Date((lead as unknown as { updated_at: string }).updated_at);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (key in monthBuckets) {
-      monthBuckets[key] += parseBudget(lead.budget as string);
+      monthBuckets[key] += calculateLeadBudget(lead as LeadForCalc);
     }
   });
   const monthData = Object.entries(monthBuckets).map(([key, val]) => ({
@@ -245,8 +237,11 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const todayLeads = todayLeadsRes.count ?? 0;
 
+  void allLeads; // utilisé dans le JSX via funnelData
+  void travelVolume; // disponible pour affichage futur
+
   // Delta strings
-  const deltaPipeline = pipelineTotal > 0 ? `${formatEur(pipelineTotal)} en pipeline actif` : undefined;
+  const deltaPipeline = pipelineTotal > 0 ? `${formatEur(pipelineTotal)} en pipeline actif (CA INSEN)` : undefined;
   const deltaOpenLeads = todayLeads > 0 ? `${todayLeads} nouveau${todayLeads > 1 ? "x" : ""} aujourd'hui` : undefined;
   const deltaConversion = conversionRate > 0 ? `sur ${closedCount} dossiers clôturés` : undefined;
   const SLA_MIN = 30;

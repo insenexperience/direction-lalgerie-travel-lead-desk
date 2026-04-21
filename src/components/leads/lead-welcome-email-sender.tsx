@@ -128,7 +128,7 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
 
       <p className="text-xs text-muted-foreground">
         Copiez le contenu et envoyez depuis votre boîte email.
-        L'email contient deux CTA : WhatsApp (recommandé) et email.
+        {"L'email"} contient deux CTA : WhatsApp (recommandé) et email.
         Le voyageur choisit son canal en cliquant.
       </p>
 

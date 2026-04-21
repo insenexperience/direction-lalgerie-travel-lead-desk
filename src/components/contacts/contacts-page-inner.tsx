@@ -214,12 +214,20 @@ export function ContactsPageInner({
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/contacts/${c.id}`}
-                      className="inline-flex items-center rounded border border-border bg-panel-muted px-2 py-1 text-xs font-medium text-foreground hover:bg-panel"
-                    >
-                      <ArrowRight className="size-3" aria-hidden />
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/leads/new?contact_id=${c.id}`}
+                        className="inline-flex items-center gap-1 rounded border border-[#1e5a8a]/30 bg-[#eaf3fb] px-2 py-1 text-[11px] font-semibold text-[#1e5a8a] hover:bg-[#dbeefa] whitespace-nowrap"
+                      >
+                        + Nouveau dossier
+                      </Link>
+                      <Link
+                        href={`/contacts/${c.id}`}
+                        className="inline-flex items-center rounded border border-border bg-panel-muted px-2 py-1 text-xs font-medium text-foreground hover:bg-panel"
+                      >
+                        <ArrowRight className="size-3" aria-hidden />
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               ))}
