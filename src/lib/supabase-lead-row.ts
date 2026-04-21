@@ -1,5 +1,6 @@
 import type { CrmConversionBand, CrmFollowUpStrategy } from "@/lib/crm-fields";
 import type { LeadStatus } from "@/lib/mock-leads";
+import type { QualificationBlocks } from "@/lib/qualification-blocks";
 
 /** Ligne `leads` telle qu’affichée / éditée sur la fiche Supabase. */
 export type SupabaseLeadRow = {
@@ -52,4 +53,6 @@ export type SupabaseLeadRow = {
   travel_desire_narrative: string | null;
   destination_main: string | null;
   qualification_notes: string | null;
+  // Qualification Workspace v2 — blocs thématiques structurés
+  qualification_blocks: QualificationBlocks;
 };
