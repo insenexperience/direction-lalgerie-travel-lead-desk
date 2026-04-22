@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Copy, Check, Send } from "lucide-react";
-import { markWelcomeEmailSent } from "@/app/(dashboard)/leads/actions";
+import { markWelcomeEmailSent, cancelWelcomeEmailSent } from "@/app/(dashboard)/leads/actions";
 import {
   buildWorkflowWelcomeEmailAiHtml,
   normalizeWhatsAppE164,
@@ -17,12 +17,13 @@ type LeadWelcomeEmailSenderProps = {
 export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [cancelPending, startCancel] = useTransition();
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(Boolean(lead.welcome_email_sent_at));
 
   const daNumber =
-    process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER ?? "";
+    process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER ?? "+213795274309";
   const daEmail =
     process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL ?? "";
   const ref = lead.reference ?? "";
@@ -84,6 +85,16 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
     });
   }
 
+  function handleCancel() {
+    setError(null);
+    startCancel(async () => {
+      const res = await cancelWelcomeEmailSent(lead.id);
+      if (!res.ok) { setError(res.error); return; }
+      setSent(false);
+      router.refresh();
+    });
+  }
+
   function handleSent() {
     setError(null);
     startTransition(async () => {
@@ -97,17 +108,12 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
     });
   }
 
-  if (sent) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-[var(--revenue-border)] bg-[var(--revenue-bg)] px-3 py-2.5 text-sm text-[var(--revenue)]">
-        <Check className="size-4 shrink-0" aria-hidden />
-        <span>
-          Email de bienvenue envoyé —{" "}
-          <span className="font-semibold">qualification débloquée.</span>
-        </span>
-      </div>
-    );
-  }
+  const sentAt = lead.welcome_email_sent_at
+    ? new Date(lead.welcome_email_sent_at).toLocaleString("fr-FR", {
+        day: "2-digit", month: "2-digit", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      })
+    : null;
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-panel p-4">
@@ -115,9 +121,16 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Email de bienvenue — aperçu
         </h4>
-        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-          À envoyer
-        </span>
+        {sent ? (
+          <span className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+            <Check className="size-3" aria-hidden />
+            Envoyé{sentAt ? ` le ${sentAt}` : ""}
+          </span>
+        ) : (
+          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+            À envoyer
+          </span>
+        )}
       </div>
 
       {/* Email preview */}
@@ -126,11 +139,13 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
         dangerouslySetInnerHTML={{ __html: html }}
       />
 
-      <p className="text-xs text-muted-foreground">
-        Copiez le contenu et envoyez depuis votre boîte email.
-        L'email contient deux CTA : WhatsApp (recommandé) et email.
-        Le voyageur choisit son canal en cliquant.
-      </p>
+      {!sent && (
+        <p className="text-xs text-muted-foreground">
+          Copiez le contenu et envoyez depuis votre boîte email.
+          {"L'email"} contient deux CTA : WhatsApp (recommandé) et email.
+          Le voyageur choisit son canal en cliquant.
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -146,16 +161,29 @@ export function LeadWelcomeEmailSender({ lead }: LeadWelcomeEmailSenderProps) {
           {copied ? "Copié !" : "Copier le contenu"}
         </button>
 
-        <button
-          type="button"
-          disabled={pending || !lead.referent_id}
-          onClick={handleSent}
-          title={!lead.referent_id ? "Allouez d'abord un opérateur travel desk." : undefined}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--steel)] bg-[var(--steel)] px-3 py-2 text-sm font-semibold text-[var(--steel-ink)] transition-colors hover:opacity-90 disabled:pointer-events-none disabled:opacity-45"
-        >
-          <Send className="size-4" aria-hidden />
-          {pending ? "Enregistrement…" : "J'ai envoyé l'email"}
-        </button>
+        {!sent && (
+          <button
+            type="button"
+            disabled={pending || !lead.referent_id}
+            onClick={handleSent}
+            title={!lead.referent_id ? "Allouez d'abord un opérateur travel desk." : undefined}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--steel)] bg-[var(--steel)] px-3 py-2 text-sm font-semibold text-[var(--steel-ink)] transition-colors hover:opacity-90 disabled:pointer-events-none disabled:opacity-45"
+          >
+            <Send className="size-4" aria-hidden />
+            {pending ? "Enregistrement…" : "J'ai envoyé l'email"}
+          </button>
+        )}
+
+        {sent && (
+          <button
+            type="button"
+            disabled={cancelPending}
+            onClick={handleCancel}
+            className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"
+          >
+            {cancelPending ? "Annulation…" : "Annuler l'envoi"}
+          </button>
+        )}
       </div>
 
       {error ? (

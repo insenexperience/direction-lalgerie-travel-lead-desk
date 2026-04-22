@@ -9,6 +9,15 @@ import { StageDot } from "@/components/ui/stage-dot";
 import { Pill } from "@/components/ui/pill";
 import { Avatar } from "@/components/ui/avatar";
 import { formatDistanceToNow } from "@/lib/format-relative-time";
+import {
+  calculateClosedRevenue,
+  calculateRawPipeline,
+  calculateRawDaRevenue,
+  calculateLeadBudget,
+  formatEur,
+  type PipelineStages,
+} from "@/lib/pipeline-calculations";
+import { displayLeadScore } from "@/lib/lead-score";
 
 const ALL_STATUSES: LeadStatus[] = [
   "new", "qualification", "agency_assignment", "co_construction",
@@ -20,18 +29,6 @@ type LeadsListServerProps = {
   referentMap: Record<string, string>;
 };
 
-function parseBudget(raw: string | null): number {
-  if (!raw) return 0;
-  const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-  return isNaN(n) ? 0 : n;
-}
-
-function formatEur(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M€`;
-  if (n >= 1_000)     return `${Math.round(n / 1_000)} k€`;
-  return `${Math.round(n)} €`;
-}
-
 const channelLabel: Record<string, string> = {
   web_form: "Formulaire",
   whatsapp: "WhatsApp",
@@ -42,7 +39,12 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
   const supabase = await createClient();
 
   let schemaV2 = true;
-  let q = supabase.from("leads").select(LEAD_SELECT_V2).order("created_at", { ascending: false }).limit(200);
+  let q = supabase
+    .from("leads")
+    .select(LEAD_SELECT_V2)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (status && status !== "all") {
     q = q.eq("status", status);
   }
@@ -59,29 +61,86 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
 
   const leads = (res.data ?? []).map((r) => mapRowToSupabaseLeadRow(r as unknown as Record<string, unknown>, schemaV2));
 
-  // Count per status
+  // Charger pipeline_stages pour les calculs pondérés
+  const { data: stagesData } = await supabase.from("pipeline_stages").select("code, weight, is_closed, is_won");
+  const stages: PipelineStages = Object.fromEntries(
+    (stagesData ?? []).map((s) => [s.code, s])
+  );
+
+  // KPIs calculés depuis le module centralisé
+  const allLeads = leads.map((l) => ({
+    budget_min: l.budget_min,
+    budget_unit: l.budget_unit,
+    travelers_adults: l.travelers_adults,
+    travelers_children: l.travelers_children,
+    status: l.status,
+    deleted_at: l.deleted_at,
+  }));
+
+  const closedRevenue = calculateClosedRevenue(allLeads, stages);
+  const travelVolume = calculateRawPipeline(allLeads, stages);
+  const daRevenue = calculateRawDaRevenue(allLeads, stages);
+
+  const totalOpen = allLeads.filter((l) => {
+    const stage = stages[l.status];
+    return stage ? !stage.is_closed : (l.status !== "won" && l.status !== "lost");
+  }).length;
+  const totalWon = allLeads.filter((l) => {
+    const stage = stages[l.status];
+    return stage ? stage.is_won : l.status === "won";
+  }).length;
+
+  // Diagnostic: leads without structured budget
+  const leadsWithoutBudget = allLeads.filter(
+    (l) => !l.deleted_at && l.budget_min == null
+  ).length;
+  const stagesOk = Object.keys(stages).length > 0;
+
+  // Count per status (pour les tabs) — inclut les leads non supprimés
   const { data: counts } = await supabase
     .from("leads")
-    .select("status");
+    .select("status")
+    .is("deleted_at", null);
   const countByStatus: Record<string, number> = {};
   (counts ?? []).forEach((r) => {
     const s = r.status as string;
     countByStatus[s] = (countByStatus[s] ?? 0) + 1;
   });
-  const totalOpen = leads.filter((l) => l.status !== "won" && l.status !== "lost").length;
-  const pipelineTotal = leads
-    .filter((l) => l.status !== "won" && l.status !== "lost")
-    .reduce((sum, l) => sum + parseBudget(l.budget), 0);
 
   const currentStatus = status ?? "all";
 
   return (
     <div className="space-y-4">
-      {/* Sub-header */}
-      <p className="text-[13px] text-[#6b7a85]">
-        {leads.length} dossier{leads.length !== 1 ? "s" : ""}
-        {pipelineTotal > 0 && ` · ${formatEur(pipelineTotal)} de pipeline visible`}
-      </p>
+      {/* KPIs — 3 indicateurs */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">Pipeline pondéré</p>
+          <p className="mt-1 font-mono text-[20px] font-bold text-[#0e1a21]">{formatEur(travelVolume)}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalOpen} dossier{totalOpen !== 1 ? "s" : ""} actif{totalOpen !== 1 ? "s" : ""} · CA du voyage</p>
+        </div>
+        <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">CA réalisé</p>
+          <p className="mt-1 font-mono text-[20px] font-bold text-[#0f6b4b]">{formatEur(closedRevenue)}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalWon} dossier{totalWon !== 1 ? "s" : ""} gagné{totalWon !== 1 ? "s" : ""} · 10 % du voyage</p>
+        </div>
+        <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">Volume Direction l&apos;Algérie</p>
+          <p className="mt-1 font-mono text-[20px] font-bold text-[#1e5a8a]">{formatEur(daRevenue)}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">10 % du CA voyage · prix du lead DA</p>
+        </div>
+      </div>
+
+      {/* Diagnostic — affiché seulement si problème détecté */}
+      {!stagesOk && (
+        <div className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          ⚠ Table <code>pipeline_stages</code> vide — exécuter <code>npm run db:push</code> pour appliquer la migration.
+        </div>
+      )}
+      {stagesOk && leadsWithoutBudget > 0 && (
+        <div className="rounded-[6px] border border-[#e4e8eb] bg-[#f8f9fa] px-3 py-2 text-[12px] text-[#6b7a85]">
+          ℹ {leadsWithoutBudget} dossier{leadsWithoutBudget > 1 ? "s" : ""} sans budget structuré — ouvrez chaque fiche et renseignez le montant + unité pour que le CA soit calculé.
+        </div>
+      )}
 
       {/* Status tabs */}
       <div className="flex flex-wrap gap-1 border-b border-[#e4e8eb] pb-0">
@@ -110,9 +169,9 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
             {currentStatus === "all" ? "Aucun lead trouvé." : "Aucun résultat. Essayez un autre filtre."}
           </p>
           {currentStatus !== "all" && (
-            <a href="/leads" className="text-[12px] text-[#1e5a8a] underline underline-offset-2">
+            <Link href="/leads" className="text-[12px] text-[#1e5a8a] underline underline-offset-2">
               Réinitialiser les filtres
-            </a>
+            </Link>
           )}
         </div>
       ) : (
@@ -120,7 +179,7 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
           <table className="w-full">
             <thead>
               <tr className="border-b border-[#e4e8eb]">
-                {["", "Voyageur", "Projet", "Étape", "Budget", "Dates", "Référent", "Canal", "Activité", ""].map((col, i) => (
+                {["", "Voyageur", "Projet", "Étape", "Budget", "Dates", "Référent", "Canal", "Score", "Activité", ""].map((col, i) => (
                   <th
                     key={i}
                     className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9aa7b0] first:w-1 last:w-20"
@@ -139,6 +198,39 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
         </div>
       )}
     </div>
+  );
+}
+
+function BudgetCell({ lead }: { lead: SupabaseLeadRow }) {
+  const budget = calculateLeadBudget({
+    budget_min: lead.budget_min,
+    budget_unit: lead.budget_unit,
+    travelers_adults: lead.travelers_adults,
+    travelers_children: lead.travelers_children,
+    status: lead.status,
+    deleted_at: lead.deleted_at,
+  });
+
+  let tooltip = "";
+  if (lead.budget_unit === "per_person" && lead.budget_min) {
+    const min = lead.budget_min;
+    const adults = lead.travelers_adults;
+    const children = lead.travelers_children;
+    const parts: string[] = [];
+    if (adults > 0) parts.push(`${adults} adulte${adults > 1 ? "s" : ""} × ${formatEur(min)}`);
+    if (children > 0) parts.push(`${children} enfant${children > 1 ? "s" : ""} × ${formatEur(min)} × 0,5`);
+    tooltip = parts.join(" + ") + ` = ${formatEur(budget)}`;
+  } else if (lead.budget_unit === "total") {
+    tooltip = `Budget total : ${formatEur(budget)}`;
+  }
+
+  return (
+    <span
+      className="font-mono text-[12px] font-medium text-[#0e1a21]"
+      title={tooltip || undefined}
+    >
+      {budget > 0 ? formatEur(budget) : "—"}
+    </span>
   );
 }
 
@@ -161,6 +253,21 @@ function TabLink({ href, active, label, count, status }: { href: string; active:
         </span>
       )}
     </Link>
+  );
+}
+
+function ScoreBadge({ lead }: { lead: SupabaseLeadRow }) {
+  const score = displayLeadScore(lead);
+  if (score === null) return <span className="text-[11px] text-[#c4cdd5]">—</span>;
+  const cls = score >= 70
+    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : score >= 40
+    ? "bg-amber-50 text-amber-700 border-amber-200"
+    : "bg-red-50 text-red-600 border-red-200";
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}>
+      {score}
+    </span>
   );
 }
 
@@ -205,9 +312,13 @@ function LeadRow({ lead, referentLabel }: { lead: SupabaseLeadRow; referentLabel
         </span>
       </td>
 
-      {/* Budget */}
+      {/* Budget calculé */}
       <td className="px-3 py-3 text-right">
-        <span className="font-mono text-[12px] font-medium text-[#0e1a21]">{lead.budget || "—"}</span>
+        {lead.budget_min != null && lead.budget_unit ? (
+          <BudgetCell lead={lead} />
+        ) : (
+          <span className="font-mono text-[12px] text-[#9aa7b0]">{lead.budget || "—"}</span>
+        )}
       </td>
 
       {/* Dates */}
@@ -232,6 +343,11 @@ function LeadRow({ lead, referentLabel }: { lead: SupabaseLeadRow; referentLabel
         <span className="text-[12px] text-[#6b7a85]">
           {channelLabel[lead.intake_channel ?? ""] ?? lead.intake_channel ?? "—"}
         </span>
+      </td>
+
+      {/* Score */}
+      <td className="px-3 py-3">
+        <ScoreBadge lead={lead} />
       </td>
 
       {/* Activité */}

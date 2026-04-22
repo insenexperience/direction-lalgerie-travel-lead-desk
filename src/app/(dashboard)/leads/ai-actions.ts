@@ -23,6 +23,7 @@ import {
   BLOCK_IDS,
   allBlocksValidated,
   safeQualificationBlocks,
+  EMPTY_QUALIFICATION_BLOCKS,
 } from "@/lib/qualification-blocks";
 import { getBlockOptionIds } from "@/components/leads/qualification/qualification-blocks-config";
 
@@ -921,6 +922,39 @@ export async function reopenQualificationBlock(params: {
   return { ok: true };
 }
 
+/** Remet la qualification à zéro (blocs + statut), sans toucher au reste du lead. */
+export async function resetQualification(leadId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!isUuid(leadId)) return { ok: false, error: "ID invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: current } = await supabase
+    .from("leads")
+    .select("status")
+    .eq("id", leadId)
+    .maybeSingle();
+
+  const patch: Record<string, unknown> = {
+    qualification_blocks: EMPTY_QUALIFICATION_BLOCKS,
+    qualification_validation_status: "pending",
+    qualification_validated_at: null,
+    qualification_validated_by: null,
+    qualification_summary: null,
+  };
+  // Si le lead était passé à agency_assignment suite à la qualification, on revient à qualification
+  if (current?.status === "agency_assignment") {
+    patch.status = "qualification";
+  }
+
+  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  await logActivity(supabase, leadId, user.id, "qualification_reset", "Qualification remise à zéro manuellement.");
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
 export async function finalizeQualification(params: {
   leadId: string;
 }): Promise<{ ok: boolean; error?: string }> {
@@ -947,12 +981,31 @@ export async function finalizeQualification(params: {
     return { ok: false, error: `Blocs non validés : ${missing.join(', ')}.` };
   }
 
+  // Extraire le budget qualifié et mettre à jour les champs structurés
+  const budgetSelections = blocks.budget?.op_selections ?? [];
+  const BUDGET_RANGE_MAP: Record<string, { min: number; max: number | null; label: string }> = {
+    budget_low:     { min: 0,    max: 1500, label: "Économique (< 1 500 €/pers.)" },
+    budget_mid:     { min: 1500, max: 2500, label: "Moyen (1 500–2 500 €/pers.)" },
+    budget_high:    { min: 2500, max: 4000, label: "Confort (2 500–4 000 €/pers.)" },
+    budget_premium: { min: 4000, max: 7000, label: "Premium (4 000–7 000 €/pers.)" },
+    budget_luxury:  { min: 7000, max: null, label: "Luxe (7 000 €+/pers.)" },
+  };
+  const rangeKey = budgetSelections.find((s) => s in BUDGET_RANGE_MAP);
+  const qualifiedBudget = rangeKey ? BUDGET_RANGE_MAP[rangeKey] : null;
+
   const { error } = await supabase
     .from("leads")
     .update({
       status: "agency_assignment",
       qualification_validation_status: "validated",
       qualification_validated_at: new Date().toISOString(),
+      // Écrase le budget intake avec le budget qualifié (si sélectionné)
+      ...(qualifiedBudget ? {
+        budget_min: qualifiedBudget.min,
+        budget_max: qualifiedBudget.max,
+        budget_unit: "per_person",
+        budget: qualifiedBudget.label,
+      } : {}),
       qualification_validated_by: user.id,
     })
     .eq("id", leadId);

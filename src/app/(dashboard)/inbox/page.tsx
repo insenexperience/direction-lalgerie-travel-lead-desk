@@ -12,15 +12,15 @@ export const revalidate = 30;
 type QueueKey = "all" | "to_assign" | "validate_ai" | "mine" | "sla_risk" | "whatsapp";
 
 const QUEUES: { key: QueueKey; label: string }[] = [
-  { key: "all",         label: "Tous" },
-  { key: "to_assign",   label: "À assigner" },
-  { key: "validate_ai", label: "Validation IA" },
   { key: "mine",        label: "Mes dossiers" },
+  { key: "to_assign",   label: "À assigner" },
+  { key: "all",         label: "Tous" },
+  { key: "validate_ai", label: "Validation IA" },
   { key: "sla_risk",    label: "SLA à risque" },
   { key: "whatsapp",    label: "WhatsApp" },
 ];
 
-async function loadInbox(queue: QueueKey, userId: string) {
+async function loadInbox(queue: QueueKey, userId: string, isAdmin: boolean) {
   await connection();
   const supabase = await createClient();
 
@@ -31,6 +31,8 @@ async function loadInbox(queue: QueueKey, userId: string) {
     .order("priority", { ascending: false })
     .order("created_at", { ascending: true });
 
+  // "all" for non-admins: only unassigned + own leads (hide other operators' leads)
+  if (queue === "all" && !isAdmin) q = q.or(`referent_id.is.null,referent_id.eq.${userId}`);
   if (queue === "to_assign")   q = q.is("referent_id", null);
   if (queue === "validate_ai") q = q.eq("qualification_validation_status", "pending");
   if (queue === "mine")        q = q.eq("referent_id", userId);
@@ -47,6 +49,7 @@ async function loadInbox(queue: QueueKey, userId: string) {
       .not("status", "in", '("won","lost")')
       .order("priority", { ascending: false })
       .order("created_at", { ascending: true });
+    if (queue === "all" && !isAdmin) q2 = q2.or(`referent_id.is.null,referent_id.eq.${userId}`);
     if (queue === "to_assign")   q2 = q2.is("referent_id", null);
     if (queue === "validate_ai") q2 = q2.eq("qualification_validation_status", "pending");
     if (queue === "mine")        q2 = q2.eq("referent_id", userId);
@@ -58,13 +61,15 @@ async function loadInbox(queue: QueueKey, userId: string) {
   return res.data.map((row) => mapRowToSupabaseLeadRow(row as unknown as Record<string, unknown>, schemaV2));
 }
 
-async function loadCounts(userId: string): Promise<Record<QueueKey, number>> {
+async function loadCounts(userId: string, isAdmin: boolean): Promise<Record<QueueKey, number>> {
   const supabase = await createClient();
 
-  const base = supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")');
+  const baseAll = isAdmin
+    ? supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")')
+    : supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")').or(`referent_id.is.null,referent_id.eq.${userId}`);
 
   const [all, toAssign, validateAi, mine, slaRisk, whatsapp] = await Promise.all([
-    base,
+    baseAll,
     supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")').is("referent_id", null),
     supabase.from("leads").select("*", { count: "exact", head: true }).eq("qualification_validation_status", "pending"),
     supabase.from("leads").select("*", { count: "exact", head: true }).not("status", "in", '("won","lost")').eq("referent_id", userId),
@@ -88,8 +93,8 @@ type InboxPageProps = {
 
 export default async function InboxPage({ searchParams }: InboxPageProps) {
   const params = await searchParams;
-  const queue = (params.queue ?? "all") as QueueKey;
-  const validQueue = QUEUES.some((q) => q.key === queue) ? queue : "all";
+  const queue = (params.queue ?? "mine") as QueueKey;
+  const validQueue = QUEUES.some((q) => q.key === queue) ? queue : "mine";
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -99,8 +104,8 @@ export default async function InboxPage({ searchParams }: InboxPageProps) {
   const isAdmin = (profileRes.data as { role?: string } | null)?.role === "admin";
 
   const [leads, counts] = await Promise.all([
-    loadInbox(validQueue, user.id),
-    loadCounts(user.id),
+    loadInbox(validQueue, user.id, isAdmin),
+    loadCounts(user.id, isAdmin),
   ]);
 
   return (

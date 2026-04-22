@@ -31,6 +31,7 @@ type LeadDetailSupabaseProps = {
   coProposals: CoConstructionProposalRow[];
   leadQuotes: LeadQuoteListItem[];
   displayedStage: LeadStatus;
+  activityKinds?: string[];
 };
 
 export function LeadDetailSupabase({
@@ -46,6 +47,7 @@ export function LeadDetailSupabase({
   coProposals,
   leadQuotes,
   displayedStage,
+  activityKinds = [],
 }: LeadDetailSupabaseProps) {
   const aiEnabled = process.env.NEXT_PUBLIC_AI_ENABLED === "true";
 
@@ -56,6 +58,7 @@ export function LeadDetailSupabase({
       qualificationValidatorLabel={qualificationValidatorLabel}
       isAdmin={isAdmin}
       currentUserId={currentUserId}
+      activityKinds={activityKinds}
     >
       <div className="scroll-mt-20 space-y-5">
         {/* L1 — Tâche / étape active */}
@@ -79,6 +82,7 @@ export function LeadDetailSupabase({
             retainedAgencyLabel={retainedAgencyLabel}
             coProposals={coProposals}
             leadQuotes={leadQuotes}
+            isAdmin={isAdmin}
           />
         </div>
 

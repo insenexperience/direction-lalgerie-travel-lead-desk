@@ -280,24 +280,115 @@ export async function updateLeadDetails(
 
   const wa = fdStr(formData, "whatsapp_phone_number");
 
+  // ── New site-aligned fields ────────────────────────────────────────────────
+  const groupe        = fdStr(formData, "groupe");         // Seul(e) / En couple / En famille / Entre amis / groupe
+  const peopleRaw     = fdStr(formData, "people");         // total voyageurs
+  const datesMode     = fdStr(formData, "dates_mode");     // "Dates précises" | "Période flexible"
+  const dateStart     = fdStr(formData, "date_start");     // YYYY-MM-DD
+  const dateEnd       = fdStr(formData, "date_end");       // YYYY-MM-DD
+  const flexMonth     = fdStr(formData, "flex_month");     // e.g. "Printemps"
+  const flexDuration  = fdStr(formData, "flex_duration"); // e.g. "1 semaine"
+  const hebergements  = fdStr(formData, "hebergements");  // comma-separated
+  const vision        = fdStr(formData, "vision");         // dot-separated
+  const notes         = fdStr(formData, "notes");          // project description
+
+  const budgetIdealRaw  = fdStr(formData, "budget_ideal");
+  const budgetMaxRaw    = fdStr(formData, "budget_max_field");
+  const budgetCurrency  = fdStr(formData, "budget_currency"); // EUR | USD | DZD
+
+  // Currency conversion helper (all stored as EUR)
+  function toEur(raw: string): number | null {
+    const v = parseFloat(raw);
+    if (!raw || !isFinite(v) || v <= 0) return null;
+    if (budgetCurrency === "DZD") return Math.round((v / 276) * 100) / 100;
+    if (budgetCurrency === "USD") return Math.round(v * 0.92 * 100) / 100;
+    return v;
+  }
+
+  const budgetMinEur = toEur(budgetIdealRaw);
+  const budgetMaxEur = toEur(budgetMaxRaw);
+  const peopleCount  = peopleRaw ? (parseInt(peopleRaw, 10) || 1) : null;
+
+  // Build human-readable trip_dates string
+  let tripDates = "";
+  if (datesMode === "Dates précises" || datesMode === "exact") {
+    const parts: string[] = [];
+    if (dateStart) parts.push(`du ${dateStart}`);
+    if (dateEnd)   parts.push(`au ${dateEnd}`);
+    tripDates = parts.join(" ");
+  } else if (datesMode === "Période flexible" || datesMode === "flex") {
+    const parts: string[] = [];
+    if (flexMonth)    parts.push(flexMonth);
+    if (flexDuration) parts.push(flexDuration);
+    tripDates = parts.join(" · ");
+  }
+
+  // Build travelers text: "groupe — X voyageur(s)"
+  let travelersText = "";
+  if (groupe) travelersText += groupe;
+  if (peopleCount) {
+    const suffix = peopleCount > 1 ? "voyageurs" : "voyageur";
+    travelersText += travelersText ? ` — ${peopleCount} ${suffix}` : `${peopleCount} ${suffix}`;
+  }
+
+  // Build human-readable budget text
+  let budgetText = "";
+  if (budgetMinEur !== null) {
+    const idealStr = Math.round(budgetMinEur).toLocaleString("fr-FR");
+    budgetText = `${idealStr} € / pers.`;
+    if (budgetMaxEur !== null) {
+      const maxStr = Math.round(budgetMaxEur).toLocaleString("fr-FR");
+      budgetText = `${idealStr}–${maxStr} € / pers.`;
+    }
+  }
+
   const patch: Record<string, unknown> = {
     traveler_name: travelerName,
     email: fdStr(formData, "email"),
     phone: fdStr(formData, "phone"),
-    trip_summary: fdStr(formData, "trip_summary"),
-    travel_style: fdStr(formData, "travel_style"),
-    travelers: fdStr(formData, "travelers"),
-    budget: fdStr(formData, "budget"),
-    trip_dates: fdStr(formData, "trip_dates"),
-    qualification_summary: fdStr(formData, "qualification_summary"),
-    internal_notes: fdStr(formData, "internal_notes"),
-    quote_status: fdStr(formData, "quote_status"),
-    source: fdStr(formData, "source"),
     priority,
     whatsapp_phone_number: wa.length ? wa : null,
   };
-  if (intakeChannel) {
-    patch.intake_channel = intakeChannel;
+
+  if (intakeChannel) patch.intake_channel = intakeChannel;
+
+  // Travelers
+  if (groupe || peopleCount !== null) {
+    if (travelersText) patch.travelers = travelersText;
+    if (peopleCount !== null) {
+      patch.travelers_adults   = peopleCount;
+      patch.travelers_children = 0;
+    }
+  }
+
+  // Dates
+  if (tripDates) patch.trip_dates = tripDates;
+  if (datesMode === "Dates précises" || datesMode === "exact") {
+    if (dateStart) patch.travel_start_date = dateStart;
+    if (dateEnd)   patch.travel_end_date   = dateEnd;
+  }
+
+  // Style & projet
+  if (vision)        patch.travel_style = vision;
+  if (notes)         patch.trip_summary = notes;
+  if (hebergements) {
+    patch.qualification_summary = `Hébergements : ${hebergements}`;
+  }
+
+  // Budget (always per_person for site-aligned form)
+  if (budgetMinEur !== null) {
+    patch.budget_min  = budgetMinEur;
+    patch.budget_unit = "per_person";
+    if (budgetText)   patch.budget = budgetText;
+  }
+  if (budgetMaxEur !== null) {
+    patch.budget_max = budgetMaxEur;
+  }
+
+  // Planning stage
+  const planningStageRaw = fdStr(formData, "planning_stage");
+  if (planningStageRaw === "ideas" || planningStageRaw === "planning" || planningStageRaw === "ready") {
+    patch.planning_stage = planningStageRaw;
   }
 
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
@@ -567,6 +658,9 @@ export async function updateLeadStatus(
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
+  if (nextStatus === "won" || nextStatus === "lost") {
+    revalidatePath("/contacts");
+  }
   return { ok: true };
 }
 
@@ -696,6 +790,9 @@ export async function moveLeadPipelineStep(
   revalidatePath(`/leads/${leadId}/workflow`);
   revalidatePath("/leads");
   revalidatePath("/metrics");
+  if (nextStatus === "won" || nextStatus === "lost") {
+    revalidatePath("/contacts");
+  }
   return { ok: true };
 }
 
@@ -1127,6 +1224,23 @@ export async function markWelcomeEmailSent(leadId: string): Promise<ActionResult
   return { ok: true };
 }
 
+/** Annule le statut "email de bienvenue envoyé" (correction manuelle). */
+export async function cancelWelcomeEmailSent(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ welcome_email_sent_at: null, welcome_email_template_used: null })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
 /** Enregistre le canal préféré détecté à la première réponse du voyageur. */
 export async function setPreferredChannel(
   leadId: string,
@@ -1158,7 +1272,7 @@ export async function generateAndSaveBrief(leadId: string): Promise<ActionResult
   const { data: row, error: fetchErr } = await supabase
     .from("leads")
     .select(
-      "reference, traveler_name, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks",
+      "reference, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks, budget_min, budget_max, budget_unit, travelers_adults, travelers_children",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -1355,6 +1469,231 @@ export async function retainAgencyProposal(
   await logLeadActivity(supabase, leadId, user.id, "agency_selected", agencyId);
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Auto-alloue un référent via round-robin (appel explicite, distinct du trigger). */
+export async function autoAllocateReferent(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: referentId, error: rpcErr } = await supabase.rpc("allocate_next_referent");
+  if (rpcErr) return { ok: false, error: rpcErr.message };
+  if (!referentId) return { ok: false, error: "Aucun opérateur disponible pour l'allocation." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ referent_id: referentId, referent_assigned_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "auto_round_robin_allocation", referentId);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** Remet un lead à zéro (admin uniquement). Snapshot complet dans activities.payload. */
+export async function resetLead(leadId: string, reason?: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: profile } = await supabase
+    .from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "admin") {
+    return { ok: false, error: "Seuls les administrateurs peuvent remettre un lead à zéro." };
+  }
+
+  const { data: lead, error: fetchErr } = await supabase
+    .from("leads").select("*").eq("id", leadId).maybeSingle();
+  if (fetchErr || !lead) return { ok: false, error: "Lead introuvable." };
+
+  // Snapshot complet dans activities pour récupération manuelle si besoin
+  const { error: actErr } = await supabase.from("activities").insert({
+    lead_id: leadId,
+    actor_id: user.id,
+    kind: "lead_reset",
+    detail: `Reset admin. Motif : ${reason?.trim() || "non renseigné"}`,
+    payload: lead,
+  });
+  if (actErr) return { ok: false, error: actErr.message };
+
+  // Remise à zéro des champs métier (les colonnes NOT NULL reçoivent "" au lieu de null)
+  const { error: updateErr } = await supabase.from("leads").update({
+    status: "new",
+    trip_summary: "",
+    travel_style: "",
+    travelers: "",
+    budget: "",
+    trip_dates: "",
+    qualification_summary: null,
+    internal_notes: null,
+    retained_agency_id: null,
+    preferred_channel: null,
+    preferred_channel_detected_at: null,
+    welcome_email_sent_at: null,
+    welcome_email_template_used: null,
+    generated_brief: null,
+    brief_generated_at: null,
+    brief_edited_at: null,
+    qualification_validated_at: null,
+    qualification_validation_status: "pending",
+    lead_score: null,
+    lead_score_override: null,
+  }).eq("id", leadId);
+  if (updateErr) return { ok: false, error: updateErr.message };
+
+  // Ré-allocation round-robin
+  const { data: newReferentId } = await supabase.rpc("allocate_next_referent");
+  if (newReferentId) {
+    await supabase.from("leads").update({
+      referent_id: newReferentId,
+      referent_assigned_at: new Date().toISOString(),
+    }).eq("id", leadId);
+  }
+
+  // Archiver les consultations agences
+  await supabase
+    .from("lead_circuit_proposals")
+    .update({ status: "reset_archived" })
+    .eq("lead_id", leadId)
+    .neq("status", "reset_archived");
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+// ─── PRD Refonte v1 — Nouvelles actions admin ────────────────────────────────
+
+/** Soft delete : masque le lead sans suppression physique. Admin only. */
+export async function softDeleteLead(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const isAdmin = await loadUserIsAdmin(supabase, user.id);
+  if (!isAdmin) return { ok: false, error: "Action réservée aux administrateurs." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  await logLeadActivity(supabase, leadId, user.id, "lead_soft_deleted", "Soft delete par admin.");
+  revalidatePath("/leads");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** Réinitialise le lead à l'étape "new" et insère une entrée dans lead_history. Admin only. */
+export async function resetLeadToNew(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const isAdmin = await loadUserIsAdmin(supabase, user.id);
+  if (!isAdmin) return { ok: false, error: "Action réservée aux administrateurs." };
+
+  // Récupérer l'étape actuelle pour l'historique
+  const { data: current } = await supabase.from("leads").select("status").eq("id", leadId).single();
+  const fromStage = current?.status ?? "unknown";
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      status: "new",
+      closed_at: null,
+      welcome_email_sent_at: null,
+      workflow_launched_at: null,
+      workflow_launched_by: null,
+      workflow_mode: null,
+      workflow_run_ref: null,
+    })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  // Insère manuellement une entrée d'historique (le trigger le fera aussi, c'est ok)
+  await supabase.from("lead_history").insert({
+    lead_id: leadId,
+    from_stage: fromStage,
+    to_stage: "new",
+    changed_by: user.id,
+    note: "Réinitialisation manuelle par admin.",
+  });
+
+  // Purger les entrées d'historique antérieures à ce reset
+  await supabase.from("lead_history")
+    .delete()
+    .eq("lead_id", leadId)
+    .lt("changed_at", new Date().toISOString());
+
+  await logLeadActivity(supabase, leadId, user.id, "lead_reset", `Réinitialisé depuis ${fromStage} → new.`);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+/** Crée ou rattache un Contact depuis les données du lead. Disponible à tous les référents. */
+export async function copyLeadToContact(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { data: lead, error: leadErr } = await supabase
+    .from("leads")
+    .select("id, traveler_name, email, phone, whatsapp_phone_number, created_at, status, contact_id")
+    .eq("id", leadId)
+    .single();
+  if (leadErr || !lead) return { ok: false, error: "Lead introuvable." };
+
+  const email = (lead.email as string | null)?.trim() || null;
+  if (!email) return { ok: false, error: "Impossible de créer un contact sans email." };
+
+  const nameParts = ((lead.traveler_name as string | null) ?? "").trim().split(" ");
+  const firstName = nameParts[0] ?? "";
+  const lastName = nameParts.slice(1).join(" ").trim() || null;
+
+  // Upsert contact par email
+  const { data: contact, error: upsertErr } = await supabase
+    .from("contacts")
+    .upsert({
+      email,
+      full_name: (lead.traveler_name as string | null) ?? "Inconnu",
+      first_name: firstName || null,
+      last_name: lastName,
+      phone: (lead.phone as string | null)?.trim() || null,
+      phone_e164: (lead.phone as string | null)?.trim() || null,
+      whatsapp_phone_number: (lead.whatsapp_phone_number as string | null)?.trim() || null,
+      first_seen_at: lead.created_at,
+      first_lead_at: lead.created_at,
+      last_activity_at: new Date().toISOString(),
+      type: lead.status === "won" ? "traveler" : "seeker",
+      source_lead_id: leadId,
+    }, { onConflict: "email" })
+    .select("id")
+    .single();
+
+  if (upsertErr || !contact) return { ok: false, error: upsertErr?.message ?? "Erreur création contact." };
+
+  // Rattacher le lead au contact si pas encore fait
+  if (!lead.contact_id) {
+    await supabase.from("leads").update({ contact_id: contact.id }).eq("id", leadId);
+  }
+
+  await logLeadActivity(supabase, leadId, user.id, "contact_linked", `Contact ${contact.id} créé/mis à jour.`);
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/contacts");
   return { ok: true };
 }
 

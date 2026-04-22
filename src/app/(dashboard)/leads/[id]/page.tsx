@@ -180,6 +180,13 @@ export default async function LeadDetailPage({ params, searchParams }: PageProps
       ? (stageParam as LeadStatus)
       : lead.status;
 
+  // Fetch des kinds d'activités pour la chronologie SLA
+  const { data: activityRows } = await supabase
+    .from("activities")
+    .select("kind")
+    .eq("lead_id", id);
+  const activityKinds = (activityRows ?? []).map((r) => String(r.kind));
+
   return (
     <LeadDetailSupabase
       lead={lead}
@@ -194,6 +201,7 @@ export default async function LeadDetailPage({ params, searchParams }: PageProps
       coProposals={coProposals}
       leadQuotes={leadQuotes}
       displayedStage={displayedStage}
+      activityKinds={activityKinds}
     />
   );
 }

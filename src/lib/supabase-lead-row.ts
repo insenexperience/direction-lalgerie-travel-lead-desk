@@ -65,4 +65,22 @@ export type SupabaseLeadRow = {
   generated_brief: string | null;
   brief_generated_at: string | null;
   brief_edited_at: string | null;
+  // PRD Refonte v1 — champs financiers structurés
+  budget_min: number | null;
+  budget_max: number | null;
+  budget_unit: "per_person" | "total" | null;
+  travelers_adults: number;
+  travelers_children: number;
+  currency: string;
+  travel_period: string | null;
+  travel_start_date: string | null;
+  travel_end_date: string | null;
+  project_description: string | null;
+  // PRD Refonte v1 — lien Contact + cycle de vie
+  contact_id: string | null;
+  closed_at: string | null;
+  deleted_at: string | null;
+  channel: string | null;
+  // Maturité du projet (form site étape 1)
+  planning_stage: "ideas" | "planning" | "ready" | null;
 };

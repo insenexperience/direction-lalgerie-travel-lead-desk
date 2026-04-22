@@ -9,15 +9,17 @@ export type ScoringWeights = {
   adn: number;
   engagement: number;
   conversation: number;
+  planning: number;
 };
 
 export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
-  budget: 25,
-  dates: 20,
-  travelers: 10,
-  adn: 20,
-  engagement: 15,
+  budget: 20,
+  dates: 18,
+  travelers: 8,
+  adn: 17,
+  engagement: 12,
   conversation: 10,
+  planning: 15,
 };
 
 function mergeWeights(raw: unknown): ScoringWeights {
@@ -34,6 +36,7 @@ function mergeWeights(raw: unknown): ScoringWeights {
     adn: n("adn", DEFAULT_SCORING_WEIGHTS.adn),
     engagement: n("engagement", DEFAULT_SCORING_WEIGHTS.engagement),
     conversation: n("conversation", DEFAULT_SCORING_WEIGHTS.conversation),
+    planning: n("planning", DEFAULT_SCORING_WEIGHTS.planning),
   };
 }
 
@@ -62,6 +65,7 @@ export function computeScoreFromWeights(
     | "ai_qualification_payload"
     | "ai_qualification_confidence"
     | "scoring_weights"
+    | "planning_stage"
   >,
 ): number {
   const w = mergeWeights(lead.scoring_weights);
@@ -109,18 +113,23 @@ export function computeScoreFromWeights(
       : 0;
   add(w.conversation, confFrac);
 
+  // Maturité du projet (planning_stage)
+  const planningFrac =
+    lead.planning_stage === "ready"   ? 1.0 :
+    lead.planning_stage === "planning" ? 0.6 :
+    lead.planning_stage === "ideas"    ? 0.2 : null;
+  add(w.planning, planningFrac);
+
   if (wsum <= 0) return 0;
   return Math.round(Math.min(100, Math.max(0, (acc / wsum) * 100)));
 }
 
 export function displayLeadScore(lead: SupabaseLeadRow): number | null {
-  const v =
-    lead.lead_score_override != null
-      ? lead.lead_score_override
-      : lead.lead_score != null
-        ? lead.lead_score
-        : null;
-  return v;
+  if (lead.lead_score_override != null) return lead.lead_score_override;
+  if (lead.lead_score != null) return lead.lead_score;
+  // Calcul à la volée : au moins une dimension doit avoir de la donnée
+  const computed = computeScoreFromWeights(lead);
+  return computed > 0 ? computed : null;
 }
 
 export type ScoreTier = "cold" | "tepid" | "warm" | "hot";

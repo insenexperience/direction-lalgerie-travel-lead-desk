@@ -4,14 +4,15 @@ import { useState } from "react";
 import { Bell, Plus } from "lucide-react";
 import { GlobalSearch } from "@/components/global-search";
 import { LeadIntakeModal } from "@/components/leads/lead-intake-modal";
-import { Avatar } from "@/components/ui/avatar";
+import { UserAvatarMenu } from "@/components/user-avatar-menu";
 
 type TopbarProps = {
   userEmail?: string;
   userName?: string;
+  avatarUrl?: string | null;
 };
 
-export function Topbar({ userEmail, userName }: TopbarProps) {
+export function Topbar({ userEmail, userName, avatarUrl }: TopbarProps) {
   const [intakeOpen, setIntakeOpen] = useState(false);
   const displayName = userName || userEmail || "Utilisateur";
 
@@ -44,7 +45,7 @@ export function Topbar({ userEmail, userName }: TopbarProps) {
             Nouveau lead
           </button>
 
-          <Avatar name={displayName} size={30} className="ml-1" />
+          <UserAvatarMenu userName={displayName} avatarUrl={avatarUrl ?? null} />
         </div>
       </header>
 
