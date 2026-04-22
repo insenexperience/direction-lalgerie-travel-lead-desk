@@ -10,9 +10,9 @@ import { leadStatusLabelFr } from "@/lib/mock-leads";
 import { DashboardTeamLoad } from "@/components/dashboard/dashboard-team-load";
 import type { TeamLoadEntry } from "@/components/dashboard/dashboard-team-load";
 import {
-  calculatePipelineTotal,
+  calculateRawPipeline,
+  calculateRawDaRevenue,
   calculateClosedRevenue,
-  calculateTravelVolume,
   calculateLeadBudget,
   formatEur as formatEurCalc,
   type PipelineStages,
@@ -142,8 +142,8 @@ export default async function PilotagePage({ searchParams }: PageProps) {
 
   // ── KPI values ──────────────────────────────────────────────────────────────
   const pipelineRows = (pipelineRes.data ?? []) as LeadForCalc[];
-  const pipelineTotal = calculatePipelineTotal(pipelineRows, stages);
-  const travelVolume = calculateTravelVolume(pipelineRows, stages);
+  const pipelineTotal = calculateRawPipeline(pipelineRows, stages);
+  const daRevenue = calculateRawDaRevenue(pipelineRows, stages);
   const openLeads = openLeadsRes.count ?? 0;
   const wonCount = wonRes.count ?? 0;
   const closedCount = closedRes.count ?? 0;
@@ -238,10 +238,9 @@ export default async function PilotagePage({ searchParams }: PageProps) {
   const todayLeads = todayLeadsRes.count ?? 0;
 
   void allLeads; // utilisé dans le JSX via funnelData
-  void travelVolume; // disponible pour affichage futur
 
   // Delta strings
-  const deltaPipeline = pipelineTotal > 0 ? `${formatEur(pipelineTotal)} en pipeline actif (CA INSEN)` : undefined;
+  const deltaPipeline = pipelineTotal > 0 ? `${formatEur(pipelineTotal)} · CA du voyage (budget total)` : undefined;
   const deltaOpenLeads = todayLeads > 0 ? `${todayLeads} nouveau${todayLeads > 1 ? "x" : ""} aujourd'hui` : undefined;
   const deltaConversion = conversionRate > 0 ? `sur ${closedCount} dossiers clôturés` : undefined;
   const SLA_MIN = 30;
@@ -341,14 +340,14 @@ export default async function PilotagePage({ searchParams }: PageProps) {
           sparkColor="#0f6b4b"
         />
         <KpiCard
-          label="Délai 1ʳᵉ réponse"
-          value={avgMinutes != null ? `${avgMinutes} min` : "—"}
-          deltaText={deltaResponse}
-          deltaWarn={responseWarn}
-          deltaUp={!responseWarn && avgMinutes != null}
+          label="CA Direction l'Algérie"
+          value={formatEur(daRevenue)}
+          deltaText={daRevenue > 0 ? "Commission 10 % · pipeline actif" : undefined}
+          deltaUp={daRevenue > 0}
+          href="/leads"
           mono
-          sparkData={sparkResponseTime}
-          sparkColor="#a8710b"
+          sparkData={sparkPipeline}
+          sparkColor="#1e5a8a"
         />
       </div>
 

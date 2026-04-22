@@ -72,6 +72,7 @@ export const LEAD_SELECT_V2 = [
   "closed_at",
   "deleted_at",
   "channel",
+  "planning_stage",
 ].join(", ");
 
 export const LEAD_SELECT_LEGACY = [
@@ -186,6 +187,7 @@ export function mapRowToSupabaseLeadRow(
       closed_at: null,
       deleted_at: null,
       channel: null,
+      planning_stage: null,
     };
   }
 
@@ -311,5 +313,11 @@ export function mapRowToSupabaseLeadRow(
     closed_at: row.closed_at ? String(row.closed_at) : null,
     deleted_at: row.deleted_at ? String(row.deleted_at) : null,
     channel: row.channel ? String(row.channel) : null,
+    planning_stage:
+      row.planning_stage === "ideas" ||
+      row.planning_stage === "planning" ||
+      row.planning_stage === "ready"
+        ? row.planning_stage
+        : null,
   };
 }

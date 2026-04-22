@@ -280,24 +280,115 @@ export async function updateLeadDetails(
 
   const wa = fdStr(formData, "whatsapp_phone_number");
 
+  // ── New site-aligned fields ────────────────────────────────────────────────
+  const groupe        = fdStr(formData, "groupe");         // Seul(e) / En couple / En famille / Entre amis / groupe
+  const peopleRaw     = fdStr(formData, "people");         // total voyageurs
+  const datesMode     = fdStr(formData, "dates_mode");     // "Dates précises" | "Période flexible"
+  const dateStart     = fdStr(formData, "date_start");     // YYYY-MM-DD
+  const dateEnd       = fdStr(formData, "date_end");       // YYYY-MM-DD
+  const flexMonth     = fdStr(formData, "flex_month");     // e.g. "Printemps"
+  const flexDuration  = fdStr(formData, "flex_duration"); // e.g. "1 semaine"
+  const hebergements  = fdStr(formData, "hebergements");  // comma-separated
+  const vision        = fdStr(formData, "vision");         // dot-separated
+  const notes         = fdStr(formData, "notes");          // project description
+
+  const budgetIdealRaw  = fdStr(formData, "budget_ideal");
+  const budgetMaxRaw    = fdStr(formData, "budget_max_field");
+  const budgetCurrency  = fdStr(formData, "budget_currency"); // EUR | USD | DZD
+
+  // Currency conversion helper (all stored as EUR)
+  function toEur(raw: string): number | null {
+    const v = parseFloat(raw);
+    if (!raw || !isFinite(v) || v <= 0) return null;
+    if (budgetCurrency === "DZD") return Math.round((v / 276) * 100) / 100;
+    if (budgetCurrency === "USD") return Math.round(v * 0.92 * 100) / 100;
+    return v;
+  }
+
+  const budgetMinEur = toEur(budgetIdealRaw);
+  const budgetMaxEur = toEur(budgetMaxRaw);
+  const peopleCount  = peopleRaw ? (parseInt(peopleRaw, 10) || 1) : null;
+
+  // Build human-readable trip_dates string
+  let tripDates = "";
+  if (datesMode === "Dates précises" || datesMode === "exact") {
+    const parts: string[] = [];
+    if (dateStart) parts.push(`du ${dateStart}`);
+    if (dateEnd)   parts.push(`au ${dateEnd}`);
+    tripDates = parts.join(" ");
+  } else if (datesMode === "Période flexible" || datesMode === "flex") {
+    const parts: string[] = [];
+    if (flexMonth)    parts.push(flexMonth);
+    if (flexDuration) parts.push(flexDuration);
+    tripDates = parts.join(" · ");
+  }
+
+  // Build travelers text: "groupe — X voyageur(s)"
+  let travelersText = "";
+  if (groupe) travelersText += groupe;
+  if (peopleCount) {
+    const suffix = peopleCount > 1 ? "voyageurs" : "voyageur";
+    travelersText += travelersText ? ` — ${peopleCount} ${suffix}` : `${peopleCount} ${suffix}`;
+  }
+
+  // Build human-readable budget text
+  let budgetText = "";
+  if (budgetMinEur !== null) {
+    const idealStr = Math.round(budgetMinEur).toLocaleString("fr-FR");
+    budgetText = `${idealStr} € / pers.`;
+    if (budgetMaxEur !== null) {
+      const maxStr = Math.round(budgetMaxEur).toLocaleString("fr-FR");
+      budgetText = `${idealStr}–${maxStr} € / pers.`;
+    }
+  }
+
   const patch: Record<string, unknown> = {
     traveler_name: travelerName,
     email: fdStr(formData, "email"),
     phone: fdStr(formData, "phone"),
-    trip_summary: fdStr(formData, "trip_summary"),
-    travel_style: fdStr(formData, "travel_style"),
-    travelers: fdStr(formData, "travelers"),
-    budget: fdStr(formData, "budget"),
-    trip_dates: fdStr(formData, "trip_dates"),
-    qualification_summary: fdStr(formData, "qualification_summary"),
-    internal_notes: fdStr(formData, "internal_notes"),
-    quote_status: fdStr(formData, "quote_status"),
-    source: fdStr(formData, "source"),
     priority,
     whatsapp_phone_number: wa.length ? wa : null,
   };
-  if (intakeChannel) {
-    patch.intake_channel = intakeChannel;
+
+  if (intakeChannel) patch.intake_channel = intakeChannel;
+
+  // Travelers
+  if (groupe || peopleCount !== null) {
+    if (travelersText) patch.travelers = travelersText;
+    if (peopleCount !== null) {
+      patch.travelers_adults   = peopleCount;
+      patch.travelers_children = 0;
+    }
+  }
+
+  // Dates
+  if (tripDates) patch.trip_dates = tripDates;
+  if (datesMode === "Dates précises" || datesMode === "exact") {
+    if (dateStart) patch.travel_start_date = dateStart;
+    if (dateEnd)   patch.travel_end_date   = dateEnd;
+  }
+
+  // Style & projet
+  if (vision)        patch.travel_style = vision;
+  if (notes)         patch.trip_summary = notes;
+  if (hebergements) {
+    patch.qualification_summary = `Hébergements : ${hebergements}`;
+  }
+
+  // Budget (always per_person for site-aligned form)
+  if (budgetMinEur !== null) {
+    patch.budget_min  = budgetMinEur;
+    patch.budget_unit = "per_person";
+    if (budgetText)   patch.budget = budgetText;
+  }
+  if (budgetMaxEur !== null) {
+    patch.budget_max = budgetMaxEur;
+  }
+
+  // Planning stage
+  const planningStageRaw = fdStr(formData, "planning_stage");
+  if (planningStageRaw === "ideas" || planningStageRaw === "planning" || planningStageRaw === "ready") {
+    patch.planning_stage = planningStageRaw;
   }
 
   const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
@@ -1133,6 +1224,23 @@ export async function markWelcomeEmailSent(leadId: string): Promise<ActionResult
   return { ok: true };
 }
 
+/** Annule le statut "email de bienvenue envoyé" (correction manuelle). */
+export async function cancelWelcomeEmailSent(leadId: string): Promise<ActionResult> {
+  if (!isUuid(leadId)) return { ok: false, error: "Identifiant invalide." };
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Non authentifié." };
+
+  const { error } = await supabase
+    .from("leads")
+    .update({ welcome_email_sent_at: null, welcome_email_template_used: null })
+    .eq("id", leadId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true };
+}
+
 /** Enregistre le canal préféré détecté à la première réponse du voyageur. */
 export async function setPreferredChannel(
   leadId: string,
@@ -1164,7 +1272,7 @@ export async function generateAndSaveBrief(leadId: string): Promise<ActionResult
   const { data: row, error: fetchErr } = await supabase
     .from("leads")
     .select(
-      "reference, traveler_name, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks",
+      "reference, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks, budget_min, budget_max, budget_unit, travelers_adults, travelers_children",
     )
     .eq("id", leadId)
     .maybeSingle();
@@ -1415,14 +1523,14 @@ export async function resetLead(leadId: string, reason?: string): Promise<Action
   });
   if (actErr) return { ok: false, error: actErr.message };
 
-  // Remise à zéro des champs métier
+  // Remise à zéro des champs métier (les colonnes NOT NULL reçoivent "" au lieu de null)
   const { error: updateErr } = await supabase.from("leads").update({
     status: "new",
-    trip_summary: null,
-    travel_style: null,
-    travelers: null,
-    budget: null,
-    trip_dates: null,
+    trip_summary: "",
+    travel_style: "",
+    travelers: "",
+    budget: "",
+    trip_dates: "",
     qualification_summary: null,
     internal_notes: null,
     retained_agency_id: null,
@@ -1505,6 +1613,7 @@ export async function resetLeadToNew(leadId: string): Promise<ActionResult> {
     .update({
       status: "new",
       closed_at: null,
+      welcome_email_sent_at: null,
       workflow_launched_at: null,
       workflow_launched_by: null,
       workflow_mode: null,

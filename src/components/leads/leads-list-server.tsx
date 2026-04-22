@@ -10,13 +10,14 @@ import { Pill } from "@/components/ui/pill";
 import { Avatar } from "@/components/ui/avatar";
 import { formatDistanceToNow } from "@/lib/format-relative-time";
 import {
-  calculatePipelineTotal,
   calculateClosedRevenue,
-  calculateTravelVolume,
+  calculateRawPipeline,
+  calculateRawDaRevenue,
   calculateLeadBudget,
   formatEur,
   type PipelineStages,
 } from "@/lib/pipeline-calculations";
+import { displayLeadScore } from "@/lib/lead-score";
 
 const ALL_STATUSES: LeadStatus[] = [
   "new", "qualification", "agency_assignment", "co_construction",
@@ -76,9 +77,9 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
     deleted_at: l.deleted_at,
   }));
 
-  const pipelineWeighted = calculatePipelineTotal(allLeads, stages);
   const closedRevenue = calculateClosedRevenue(allLeads, stages);
-  const travelVolume = calculateTravelVolume(allLeads, stages);
+  const travelVolume = calculateRawPipeline(allLeads, stages);
+  const daRevenue = calculateRawDaRevenue(allLeads, stages);
 
   const totalOpen = allLeads.filter((l) => {
     const stage = stages[l.status];
@@ -88,6 +89,12 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
     const stage = stages[l.status];
     return stage ? stage.is_won : l.status === "won";
   }).length;
+
+  // Diagnostic: leads without structured budget
+  const leadsWithoutBudget = allLeads.filter(
+    (l) => !l.deleted_at && l.budget_min == null
+  ).length;
+  const stagesOk = Object.keys(stages).length > 0;
 
   // Count per status (pour les tabs) — inclut les leads non supprimés
   const { data: counts } = await supabase
@@ -104,24 +111,36 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
 
   return (
     <div className="space-y-4">
-      {/* KPIs — 3 indicateurs pondérés */}
+      {/* KPIs — 3 indicateurs */}
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">Pipeline pondéré</p>
-          <p className="mt-1 font-mono text-[20px] font-bold text-[#0e1a21]">{formatEur(pipelineWeighted)}</p>
-          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalOpen} dossier{totalOpen !== 1 ? "s" : ""} actif{totalOpen !== 1 ? "s" : ""} · CA INSEN</p>
+          <p className="mt-1 font-mono text-[20px] font-bold text-[#0e1a21]">{formatEur(travelVolume)}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalOpen} dossier{totalOpen !== 1 ? "s" : ""} actif{totalOpen !== 1 ? "s" : ""} · CA du voyage</p>
         </div>
         <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">CA réalisé</p>
           <p className="mt-1 font-mono text-[20px] font-bold text-[#0f6b4b]">{formatEur(closedRevenue)}</p>
-          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalWon} dossier{totalWon !== 1 ? "s" : ""} gagné{totalWon !== 1 ? "s" : ""}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">{totalWon} dossier{totalWon !== 1 ? "s" : ""} gagné{totalWon !== 1 ? "s" : ""} · 10 % du voyage</p>
         </div>
         <div className="rounded-[8px] border border-[#e4e8eb] bg-white p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">Volume voyages</p>
-          <p className="mt-1 font-mono text-[20px] font-bold text-[#1e5a8a]">{formatEur(travelVolume)}</p>
-          <p className="mt-0.5 text-[11px] text-[#6b7a85]">Pondéré · Direction Algérie</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9aa7b0]">Volume Direction l&apos;Algérie</p>
+          <p className="mt-1 font-mono text-[20px] font-bold text-[#1e5a8a]">{formatEur(daRevenue)}</p>
+          <p className="mt-0.5 text-[11px] text-[#6b7a85]">10 % du CA voyage · prix du lead DA</p>
         </div>
       </div>
+
+      {/* Diagnostic — affiché seulement si problème détecté */}
+      {!stagesOk && (
+        <div className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          ⚠ Table <code>pipeline_stages</code> vide — exécuter <code>npm run db:push</code> pour appliquer la migration.
+        </div>
+      )}
+      {stagesOk && leadsWithoutBudget > 0 && (
+        <div className="rounded-[6px] border border-[#e4e8eb] bg-[#f8f9fa] px-3 py-2 text-[12px] text-[#6b7a85]">
+          ℹ {leadsWithoutBudget} dossier{leadsWithoutBudget > 1 ? "s" : ""} sans budget structuré — ouvrez chaque fiche et renseignez le montant + unité pour que le CA soit calculé.
+        </div>
+      )}
 
       {/* Status tabs */}
       <div className="flex flex-wrap gap-1 border-b border-[#e4e8eb] pb-0">
@@ -160,7 +179,7 @@ export async function LeadsListServer({ status, referentMap }: LeadsListServerPr
           <table className="w-full">
             <thead>
               <tr className="border-b border-[#e4e8eb]">
-                {["", "Voyageur", "Projet", "Étape", "Budget", "Dates", "Référent", "Canal", "Activité", ""].map((col, i) => (
+                {["", "Voyageur", "Projet", "Étape", "Budget", "Dates", "Référent", "Canal", "Score", "Activité", ""].map((col, i) => (
                   <th
                     key={i}
                     className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#9aa7b0] first:w-1 last:w-20"
@@ -237,6 +256,21 @@ function TabLink({ href, active, label, count, status }: { href: string; active:
   );
 }
 
+function ScoreBadge({ lead }: { lead: SupabaseLeadRow }) {
+  const score = displayLeadScore(lead);
+  if (score === null) return <span className="text-[11px] text-[#c4cdd5]">—</span>;
+  const cls = score >= 70
+    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : score >= 40
+    ? "bg-amber-50 text-amber-700 border-amber-200"
+    : "bg-red-50 text-red-600 border-red-200";
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}>
+      {score}
+    </span>
+  );
+}
+
 function LeadRow({ lead, referentLabel }: { lead: SupabaseLeadRow; referentLabel: string | null }) {
   const isHot = lead.priority === "high";
 
@@ -309,6 +343,11 @@ function LeadRow({ lead, referentLabel }: { lead: SupabaseLeadRow; referentLabel
         <span className="text-[12px] text-[#6b7a85]">
           {channelLabel[lead.intake_channel ?? ""] ?? lead.intake_channel ?? "—"}
         </span>
+      </td>
+
+      {/* Score */}
+      <td className="px-3 py-3">
+        <ScoreBadge lead={lead} />
       </td>
 
       {/* Activité */}

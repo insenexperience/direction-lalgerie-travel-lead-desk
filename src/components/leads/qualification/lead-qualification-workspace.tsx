@@ -21,15 +21,11 @@ export function LeadQualificationWorkspace({ lead }: Props) {
           Qualification du voyage
         </h2>
         <p className="text-[12px] text-[#6b7a85]">
-          Co-construite avec l&apos;IA, validée par le référent
+          Renseignez chaque bloc, puis validez pour passer à l&apos;assignation agence.
         </p>
       </header>
 
       <QualificationStatusBar
-        leadId={lead.id}
-        travelerName={lead.traveler_name}
-        workflowMode={lead.workflow_mode}
-        manualTakeover={lead.manual_takeover}
         validatedCount={validatedBlocksCount(blocks)}
         totalCount={BLOCK_IDS.length}
       />

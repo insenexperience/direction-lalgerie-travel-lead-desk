@@ -67,6 +67,14 @@ type BuildLeadInsertOptions = {
 };
 
 /** Ligne à passer à `supabase.from("leads").insert(...)` (schéma Travel Lead Desk). */
+function normalizePlanningStage(raw: string): "ideas" | "planning" | "ready" | null {
+  const v = raw.toLowerCase();
+  if (v.includes("idée") || v.includes("ide") || v.includes("inspiration")) return "ideas";
+  if (v.includes("planif") || v.includes("construi") || v.includes("concret")) return "planning";
+  if (v.includes("réserv") || v.includes("reserv") || v.includes("prêt") || v.includes("pret")) return "ready";
+  return null;
+}
+
 export function buildLeadInsertFromIntake(
   intake: Record<string, unknown>,
   opts?: BuildLeadInsertOptions,
@@ -144,6 +152,7 @@ export function buildLeadInsertFromIntake(
     submission_id: String(intake.submission_id),
     page_origin: (intake.page_origin as string) || null,
     referent_id: null,
+    planning_stage: normalizePlanningStage(intakeStr(intake.planning_stage)),
   };
 }
 

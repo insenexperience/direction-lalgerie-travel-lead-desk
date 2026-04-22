@@ -81,4 +81,6 @@ export type SupabaseLeadRow = {
   closed_at: string | null;
   deleted_at: string | null;
   channel: string | null;
+  // Maturité du projet (form site étape 1)
+  planning_stage: "ideas" | "planning" | "ready" | null;
 };

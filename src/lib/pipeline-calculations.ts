@@ -2,11 +2,16 @@
  * Module centralisé pour tous les calculs financiers du pipeline.
  * Aucun calcul financier ne doit exister en dehors de ce fichier.
  *
- * Modèle business : INSEN vend un lead à Direction Algérie = 10% du CA voyage.
+ * Modèle business : Direction l'Algérie perçoit 10 % du CA voyage.
+ * KPI 1 — Pipeline pondéré : Σ(budget voyage × poids étape) → CA voyage potentiel
+ * KPI 2 — CA réalisé       : Σ(commission DA) sur leads won → 10 % du voyage gagné
+ * KPI 3 — Volume DA        : Σ(commission DA × poids étape) → prix du lead pondéré
  */
 
 export const CHILD_COEFFICIENT = 0.5;
-export const INSEN_COMMISSION_RATE = 0.10;
+export const DA_COMMISSION_RATE = 0.10;
+/** @deprecated Utiliser DA_COMMISSION_RATE */
+export const INSEN_COMMISSION_RATE = DA_COMMISSION_RATE;
 
 export type PipelineStage = {
   code: string;
@@ -24,6 +29,7 @@ export type LeadForCalc = {
   travelers_children: number;
   status: string;
   deleted_at: string | null;
+  referent_id?: string | null;
 };
 
 /**
@@ -49,10 +55,12 @@ export function calculateLeadBudget(lead: LeadForCalc): number {
   return 0;
 }
 
-/** Commission INSEN = 10 % du budget voyage. */
+/** Commission Direction l'Algérie = 10 % du budget voyage. */
 export function calculateLeadCommission(lead: LeadForCalc): number {
-  return calculateLeadBudget(lead) * INSEN_COMMISSION_RATE;
+  return calculateLeadBudget(lead) * DA_COMMISSION_RATE;
 }
+/** @alias calculateLeadCommission */
+export const calculateDaCommission = calculateLeadCommission;
 
 /**
  * Revenu INSEN pondéré par la probabilité de closing de l'étape.
@@ -68,7 +76,43 @@ export function calculateWeightedRevenue(
 }
 
 /**
- * Pipeline pondéré INSEN : somme des revenus pondérés des leads actifs.
+ * CA Voyage brut : somme des budgets réels des leads actifs (sans pondération).
+ * Utilisé pour le KPI "Pipeline pondéré (CA du voyage)".
+ * Exclut : leads clos (won/lost) + leads soft-deleted.
+ */
+export function calculateRawPipeline(
+  leads: LeadForCalc[],
+  stages: PipelineStages
+): number {
+  return leads
+    .filter((l) => {
+      if (l.deleted_at) return false;
+      const stage = stages[l.status];
+      return stage ? !stage.is_closed : (l.status !== "won" && l.status !== "lost");
+    })
+    .reduce((sum, l) => sum + calculateLeadBudget(l), 0);
+}
+
+/**
+ * Volume DA brut : Σ(commission 10 %) sur leads actifs, sans pondération.
+ * Utilisé pour le KPI "Volume Direction l'Algérie".
+ * Exclut : leads clos (won/lost) + leads soft-deleted.
+ */
+export function calculateRawDaRevenue(
+  leads: LeadForCalc[],
+  stages: PipelineStages
+): number {
+  return leads
+    .filter((l) => {
+      if (l.deleted_at) return false;
+      const stage = stages[l.status];
+      return stage ? !stage.is_closed : (l.status !== "won" && l.status !== "lost");
+    })
+    .reduce((sum, l) => sum + calculateLeadCommission(l), 0);
+}
+
+/**
+ * Pipeline pondéré DA : somme des revenus pondérés des leads actifs.
  * Exclut : leads clos (won/lost) + leads soft-deleted.
  */
 export function calculatePipelineTotal(
@@ -123,9 +167,9 @@ export function calculateTravelVolume(
     }, 0);
 }
 
-/** Formate un montant EUR pour l'affichage. */
+/** Formate un montant EUR pour l'affichage. Abrège seulement à partir de 10 000 €. */
 export function formatEur(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} M€`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)} k€`;
-  return `${Math.round(n)} €`;
+  if (n >= 10_000) return `${Math.round(n / 1_000)} k€`;
+  return `${Math.round(n).toLocaleString("fr-FR")} €`;
 }
