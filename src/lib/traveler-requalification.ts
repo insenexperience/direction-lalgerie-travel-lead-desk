@@ -182,3 +182,145 @@ export function isTokenExpired(expiresAt: string | null): boolean {
   const t = Date.parse(expiresAt);
   return Number.isNaN(t) || t < Date.now();
 }
+
+/** Libellés FR partagés (panneau cockpit + email de qualification). */
+export const TRAVELER_LABELS: Record<string, string> = {
+  // Chambres
+  two_rooms: "Deux chambres",
+  triple: "Une chambre triple",
+  suite: "Suite familiale",
+  advise: "Conseillez-nous",
+  // Passeports
+  algerian: "Algérien",
+  french: "Français",
+  both: "Les deux",
+  other: "Autre",
+  // Vols
+  include: "À intégrer au dossier",
+  already_booked: "Déjà réservés",
+  self_managed: "Le voyageur s'en occupe",
+  // Rythme
+  intense: "On bouge beaucoup",
+  balanced: "Équilibré",
+  slow: "Tranquille, on savoure",
+  // Structure
+  fixed: "Itinéraire précis",
+  flexible: "Trame souple",
+  full_trust: "Confiance totale",
+  // Business
+  none: "Pas un sujet",
+  curiosity: "Curiosité au fil du voyage",
+  meetings: "Rencontres pro à organiser",
+  // Accompagnement
+  full_guide: "Chauffeur-guide tout le séjour",
+  partial: "Ponctuel selon les étapes",
+  // Pension
+  breakfast: "Petits-déjeuners",
+  half_board: "Demi-pension",
+  mixed: "Mixte selon les étapes",
+  // Incontournables (ids grille)
+  casbah: "Casbah d'Alger",
+  tipaza: "Tipaza",
+  constantine: "Constantine",
+  kabylie: "Kabylie",
+  bejaia: "Béjaïa & la côte",
+  ghardaia: "Ghardaïa / M'Zab",
+  sahara: "Sahara / dunes",
+  hoggar: "Hoggar / Tamanrasset",
+  tassili: "Tassili n'Ajjer",
+  // Contraintes (ids grille)
+  halal: "Halal strict",
+  vegetarian: "Végétarien / végétalien",
+  allergies: "Allergies alimentaires",
+  no_alcohol: "Sans alcool",
+  mobility: "Mobilité réduite",
+  child_friendly: "Jeunes enfants",
+};
+
+export function travelerLabel(id: string): string {
+  return TRAVELER_LABELS[id] ?? id;
+}
+
+export interface TravelerLine {
+  label: string;
+  value: string;
+  /** Champ libre affiché pleine largeur. */
+  wide?: boolean;
+}
+
+/** Aplati les réponses en lignes label/valeur (partagé cockpit + email). */
+export function travelerResponseLines(r: TravelerResponses): TravelerLine[] {
+  const lines: TravelerLine[] = [
+    { label: "Âges des voyageurs", value: r.travelers.map((t) => t.age).join(", ") },
+    { label: "Chambres", value: travelerLabel(r.rooms) },
+    {
+      label: "Passeports",
+      value: r.passports.map((p, i) => `V${i + 1} : ${travelerLabel(p)}`).join(" · "),
+    },
+    {
+      label: "Vols",
+      value:
+        travelerLabel(r.flights.mode) +
+        (r.flights.departure_city ? ` — départ ${r.flights.departure_city}` : ""),
+    },
+    {
+      label: "Incontournables",
+      value: r.wishes.must_see.map(travelerLabel).join(", ") || "—",
+    },
+    {
+      label: "Rythme & structure",
+      value: `${travelerLabel(r.wishes.rhythm)} · ${travelerLabel(r.wishes.structure)}`,
+    },
+    { label: "Algérie business", value: travelerLabel(r.business.mode) },
+    { label: "Accompagnement", value: travelerLabel(r.constraints.accompaniment) },
+    { label: "Pension", value: travelerLabel(r.constraints.board) },
+    {
+      label: "Contraintes",
+      value: r.constraints.diet.map(travelerLabel).join(", ") || "—",
+    },
+  ];
+  if (r.wishes.family_days)
+    lines.push({ label: "Famille à visiter / jours libres", value: r.wishes.family_days, wide: true });
+  if (r.business.details)
+    lines.push({ label: "Précisions business", value: r.business.details, wide: true });
+  if (r.wishes.notes)
+    lines.push({ label: "Autre (envies)", value: r.wishes.notes, wide: true });
+  if (r.constraints.notes)
+    lines.push({ label: "Santé / précisions", value: r.constraints.notes, wide: true });
+  return lines;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Email complet des réponses de qualification, envoyé à l'équipe DA. */
+export function buildTravelerResponsesEmailHtml(
+  responses: TravelerResponses,
+  summary: TravelerSummary,
+): string {
+  const rows = travelerResponseLines(responses)
+    .map(
+      (l) =>
+        `<tr>` +
+        `<td style="padding:7px 12px;border-top:1px solid #e4e8eb;color:#6b7a85;font-size:11px;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;vertical-align:top">${escapeHtml(l.label)}</td>` +
+        `<td style="padding:7px 12px;border-top:1px solid #e4e8eb;color:#0e1a21;font-size:14px">${escapeHtml(l.value)}</td>` +
+        `</tr>`,
+    )
+    .join("");
+  return (
+    `<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#0e1a21">` +
+    `<div style="background:#15323f;color:#fff;padding:18px 20px;border-radius:8px 8px 0 0">` +
+    `<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.7">Qualification voyageur · ${escapeHtml(summary.reference)}</div>` +
+    `<div style="font-size:20px;font-weight:600;margin-top:4px">${escapeHtml(summary.travelerName)}</div>` +
+    `</div>` +
+    `<div style="border:1px solid #e4e8eb;border-top:none;border-radius:0 0 8px 8px;padding:8px 8px 16px">` +
+    `<p style="color:#3a4a55;font-size:14px;padding:8px 12px 0;margin:0">Le voyageur a complété son parcours de qualification. Détail ci-dessous ; dossier également accessible dans le Travel Lead Desk.</p>` +
+    `<table style="border-collapse:collapse;width:100%;margin-top:8px">${rows}</table>` +
+    `</div>` +
+    `</div>`
+  );
+}

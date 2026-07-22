@@ -3,11 +3,15 @@ import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendTransactionalHtmlEmail } from "@/lib/email/resend-client";
 import {
+  buildTravelerResponsesEmailHtml,
   buildTravelerSummary,
   isTokenExpired,
   parseTravelerResponses,
 } from "@/lib/traveler-requalification";
 import { isUuid } from "@/lib/is-uuid";
+
+/** Destinataire du récapitulatif de qualification (équipe DA). */
+const DA_QUALIFICATION_INBOX = "contact@directionlalgerie.com";
 
 export const runtime = "nodejs";
 
@@ -101,21 +105,17 @@ export async function POST(
     revalidatePath("/leads");
     revalidatePath("/dashboard");
 
-    // Notification interne best-effort (dégradé silencieux sans Resend).
+    // Récapitulatif complet des réponses vers l'équipe DA (best-effort ;
+    // dégradé silencieux si Resend non configuré — la base + le desk suffisent).
     const to =
-      process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL?.trim() ||
-      process.env.RESEND_FROM_EMAIL?.trim();
-    if (to) {
-      const reference = String(
-        lead.reference ?? String(lead.id).slice(0, 8),
-      );
-      const result = await sendTransactionalHtmlEmail({
-        to,
-        subject: `Réponses voyageur reçues — ${reference}`,
-        html: `<p>Le voyageur du dossier <strong>${reference}</strong> a complété sa qualification.</p><p>Ouvrez le desk pour consulter ses réponses.</p>`,
-      });
-      if (!result.ok) console.warn("[api/q] notif email:", result.error);
-    }
+      process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL?.trim() || DA_QUALIFICATION_INBOX;
+    const summary = buildTravelerSummary(lead);
+    const result = await sendTransactionalHtmlEmail({
+      to,
+      subject: `Qualification voyageur — ${summary.reference} (${summary.travelerName})`,
+      html: buildTravelerResponsesEmailHtml(responses, summary),
+    });
+    if (!result.ok) console.warn("[api/q] email récap:", result.error);
 
     return NextResponse.json({ ok: true });
   } catch (e) {
