@@ -84,6 +84,34 @@ export default async function LeadDetailPage({ params, searchParams }: PageProps
     }
   }
 
+  // Colonnes page voyageur (/q/<token>) — requête isolée pour ne pas fragiliser
+  // le select V2 : si la migration n'est pas appliquée, dégradé silencieux.
+  try {
+    const { data: tr, error: trErr } = await supabase
+      .from("leads")
+      .select(
+        "public_token, public_token_expires_at, traveler_responses, traveler_responses_submitted_at",
+      )
+      .eq("id", id)
+      .maybeSingle();
+    if (!trErr && tr) {
+      lead = {
+        ...lead,
+        public_token: tr.public_token != null ? String(tr.public_token) : null,
+        public_token_expires_at: tr.public_token_expires_at
+          ? String(tr.public_token_expires_at)
+          : null,
+        traveler_responses:
+          (tr.traveler_responses as Record<string, unknown> | null) ?? null,
+        traveler_responses_submitted_at: tr.traveler_responses_submitted_at
+          ? String(tr.traveler_responses_submitted_at)
+          : null,
+      };
+    }
+  } catch {
+    /* migration page voyageur non appliquée : pas de lien voyageur */
+  }
+
   const { data: referentRows } = await supabase
     .from("profiles")
     .select("id, full_name, email")
