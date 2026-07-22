@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Votre projet de voyage — Direction l'Algérie (maquette)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Poppins:wght@400;500;600&family=JetBrains+Mono:wght@600&display=swap" rel="stylesheet">
+<style>body { margin: 0; }</style>
+</head>
+<body>
+<style>
+  :root {
+    --night: #0f1c24;
+    --steel: #15323f;
+    --steel-2: #182b35;
+    --ink: #0e1a21;
+    --ink-2: #3a4a55;
+    --ink-3: #6b7a85;
+    --ink-4: #9aa7b0;
+    --bg: #f6f7f8;
+    --card: #ffffff;
+    --muted: #f4f7fa;
+    --line: #e4e8eb;
+    --gold: #b68d3d;
+    --gold-soft: #f4ecdd;
+    --font-display: "Cormorant Garamond", Georgia, "Noto Serif", "Times New Roman", serif;
+    --font-ui: Poppins, "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, Consolas, "Courier New", monospace;
+  }
+
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------- Progression sticky ---------- */
+  .progress-wrap {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(246, 247, 248, 0.92);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+  }
+  .progress-inner {
+    max-width: 640px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+  }
+  .progress-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .progress-count { font-family: var(--font-mono); font-size: 11px; color: var(--steel); font-weight: 600; }
+  .progress-track { height: 3px; background: var(--line); }
+  .progress-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--steel), var(--gold));
+    transition: width 0.45s ease;
+  }
+
+  /* ---------- Header nuit ---------- */
+  .hero {
+    background: linear-gradient(180deg, var(--night) 0%, var(--steel-2) 100%);
+    color: #f3f7fa;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: "";
+    position: absolute; top: -120px; right: -80px;
+    width: 340px; height: 340px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(182, 141, 61, 0.16) 0%, rgba(182, 141, 61, 0) 70%);
+    pointer-events: none;
+  }
+  .hero-inner {
+    max-width: 640px; margin: 0 auto;
+    padding: 40px 20px 44px;
+    position: relative;
+    animation: heroIn 0.7s ease both;
+  }
+  @keyframes heroIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  .brand {
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .brand-name {
+    font-family: var(--font-display);
+    font-size: 21px; font-weight: 600; letter-spacing: 0.02em;
+    color: #ffffff;
+  }
+  .brand-rule { flex: 1; height: 1px; background: linear-gradient(90deg, rgba(182,141,61,0.75), rgba(182,141,61,0)); }
+  .hero-eyebrow {
+    margin-top: 34px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.2em;
+    text-transform: uppercase; color: rgba(243, 247, 250, 0.62);
+  }
+  .hero-ref {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: none;
+    color: #f3f7fa; background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 4px; padding: 3px 8px;
+  }
+  .hero h1 {
+    margin-top: 14px;
+    font-family: var(--font-display);
+    font-style: italic; font-weight: 500;
+    font-size: clamp(30px, 7.5vw, 40px);
+    line-height: 1.12; letter-spacing: 0.005em;
+    text-wrap: balance;
+  }
+  .hero h1 em { font-style: normal; color: var(--gold); }
+  .hero-sub {
+    margin-top: 14px; max-width: 46ch;
+    font-size: 14px; line-height: 1.65;
+    color: rgba(243, 247, 250, 0.85);
+  }
+
+  /* ---------- Corps ---------- */
+  .page {
+    max-width: 640px; margin: 0 auto;
+    padding: 20px 16px 72px;
+    display: flex; flex-direction: column; gap: 18px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 18px;
+  }
+
+  .card-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--ink-4);
+  }
+  .card-title {
+    margin-top: 4px;
+    font-family: var(--font-display);
+    font-size: 24px; font-weight: 600; line-height: 1.2;
+    color: var(--ink);
+    text-wrap: balance;
+  }
+
+  /* ---------- Synthèse : rail d'itinéraire ---------- */
+  .rail { margin-top: 16px; display: flex; flex-direction: column; }
+  .rail-item {
+    position: relative;
+    padding: 0 0 18px 26px;
+  }
+  .rail-item:last-child { padding-bottom: 0; }
+  .rail-item::before {
+    content: "";
+    position: absolute; left: 5px; top: 14px; bottom: -2px;
+    width: 1px; background: var(--line);
+  }
+  .rail-item:last-child::before { display: none; }
+  .rail-dot {
+    position: absolute; left: 0; top: 5px;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--card);
+    border: 2px solid var(--gold);
+  }
+  .rail-key {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-4);
+  }
+  .rail-val {
+    margin-top: 2px; font-size: 14px; font-weight: 500; color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .quote {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+    font-family: var(--font-display);
+    font-style: italic; font-size: 19px; line-height: 1.45;
+    color: var(--steel);
+  }
+  .quote span { color: var(--gold); }
+
+  /* ---------- Encart saison ---------- */
+  .season {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--gold);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .season .card-label { color: var(--gold); }
+  .season p { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); line-height: 1.6; }
+
+  /* ---------- Sections formulaire ---------- */
+  .section-head { display: flex; align-items: baseline; gap: 12px; }
+  .section-num {
+    font-family: var(--font-display);
+    font-size: 26px; font-weight: 600; line-height: 1;
+    color: var(--gold);
+    min-width: 22px;
+  }
+  .section-title { font-size: 15.5px; font-weight: 600; color: var(--ink); }
+  .section-hint { margin-top: 4px; font-size: 12.5px; color: var(--ink-3); line-height: 1.55; }
+  .section-body { margin-top: 14px; display: flex; flex-direction: column; gap: 14px; }
+
+  .field-label {
+    display: block;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-4);
+    margin-bottom: 7px;
+  }
+
+  /* Widgets */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    appearance: none; cursor: pointer;
+    font-family: var(--font-ui); font-size: 13px; font-weight: 500;
+    color: var(--ink-2); background: var(--card);
+    border: 1px solid #cfd6db; border-radius: 999px;
+    padding: 8px 14px;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .chip:hover { border-color: rgba(21, 50, 63, 0.45); }
+  .chip[aria-pressed="true"] {
+    background: var(--steel); color: #f3f7fa; border-color: var(--steel);
+  }
+  .chip .hint { font-size: 11px; opacity: 0.65; margin-left: 4px; }
+
+  .cards-choice { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  @media (min-width: 480px) { .cards-choice { grid-template-columns: 1fr 1fr; } }
+  .choice {
+    appearance: none; cursor: pointer; text-align: left;
+    font-family: var(--font-ui); font-size: 13.5px; font-weight: 500;
+    color: var(--ink-2); background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+  .choice:hover { border-color: rgba(21, 50, 63, 0.35); }
+  .choice[aria-pressed="true"] {
+    border-color: var(--steel);
+    background: rgba(21, 50, 63, 0.05);
+    color: var(--steel);
+    font-weight: 600;
+  }
+  .choice .sub { display: block; font-size: 11.5px; font-weight: 400; color: var(--ink-3); margin-top: 2px; }
+
+  .input, .textarea {
+    width: 100%;
+    font-family: var(--font-ui); font-size: 14px; color: var(--ink);
+    background: var(--muted);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .input:focus, .textarea:focus {
+    border-color: var(--steel);
+    box-shadow: 0 0 0 3px rgba(21, 50, 63, 0.14);
+  }
+  .textarea { min-height: 76px; resize: vertical; }
+  .input::placeholder, .textarea::placeholder { color: var(--ink-4); }
+
+  .traveler-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .traveler-tag {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    color: var(--steel); background: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 8px; white-space: nowrap;
+  }
+  .traveler-row .input { max-width: 130px; }
+  .row-remove {
+    appearance: none; border: none; background: none; cursor: pointer;
+    color: var(--ink-4); font-size: 16px; line-height: 1; padding: 6px;
+  }
+  .row-remove:hover { color: #c1411f; }
+  .add-traveler {
+    appearance: none; cursor: pointer;
+    align-self: flex-start;
+    font-family: var(--font-ui); font-size: 12.5px; font-weight: 600;
+    color: var(--steel); background: none;
+    border: 1px dashed #b9c3ca; border-radius: 8px;
+    padding: 8px 14px;
+  }
+  .add-traveler:hover { border-color: var(--steel); background: var(--muted); }
+
+  .passport-block { display: flex; flex-direction: column; gap: 10px; }
+  .passport-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+  /* ---------- Envoi ---------- */
+  .submit-zone { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .submit {
+    appearance: none; cursor: pointer;
+    width: 100%;
+    font-family: var(--font-ui); font-size: 15px; font-weight: 600;
+    color: #f3f7fa; background: var(--steel);
+    border: none; border-radius: 10px;
+    padding: 15px 18px;
+    transition: opacity 0.15s ease, transform 0.1s ease;
+  }
+  .submit:hover { opacity: 0.92; }
+  .submit:active { transform: translateY(1px); }
+  .submit:focus-visible, .chip:focus-visible, .choice:focus-visible, .add-traveler:focus-visible {
+    outline: 2px solid var(--gold); outline-offset: 2px;
+  }
+  .reassure {
+    text-align: center;
+    font-size: 12px; color: var(--ink-3);
+  }
+
+  /* ---------- Écran merci ---------- */
+  .thanks { display: none; }
+  .thanks.visible { display: block; }
+  .form-flow.hidden { display: none; }
+  .thanks-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 40px 24px;
+    text-align: center;
+  }
+  .thanks-dot {
+    width: 52px; height: 52px; margin: 0 auto;
+    border-radius: 50%;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--gold); font-size: 22px;
+  }
+  .thanks-title {
+    margin-top: 18px;
+    font-family: var(--font-display);
+    font-style: italic; font-size: 30px; font-weight: 500;
+    color: var(--ink);
+  }
+  .thanks-text {
+    margin: 12px auto 0; max-width: 40ch;
+    font-size: 14px; color: var(--ink-2); line-height: 1.65;
+  }
+  .thanks-steps {
+    margin: 24px auto 0; max-width: 380px;
+    text-align: left;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .step { display: flex; gap: 10px; align-items: baseline; font-size: 13px; color: var(--ink-2); }
+  .step b { color: var(--steel); font-weight: 600; }
+  .step-dot { color: var(--gold); font-size: 15px; }
+
+  /* ---------- Footer ---------- */
+  .foot {
+    border-top: 1px solid var(--line);
+    padding: 26px 16px 34px;
+  }
+  .foot-inner {
+    max-width: 640px; margin: 0 auto;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    text-align: center;
+  }
+  .foot-brand { font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--steel); }
+  .foot-tag { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4); }
+  .foot-link { font-size: 12.5px; color: var(--ink-3); }
+</style>
+
+<div class="progress-wrap">
+  <div class="progress-inner">
+    <span class="progress-label">Votre projet — 2 minutes</span>
+    <span class="progress-count"><span id="doneCount">0</span>/6</span>
+  </div>
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+</div>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="brand">
+      <span class="brand-name">Direction l'Algérie</span>
+      <span class="brand-rule"></span>
+    </div>
+    <div class="hero-eyebrow">
+      <span>Votre projet de voyage</span>
+      <span class="hero-ref">DA-2026-0001</span>
+    </div>
+    <h1>L'Algérie, votre <em>pays de cœur</em>.</h1>
+    <p class="hero-sub">
+      Monsieur Lafreche, voici votre voyage tel que nous l'avons compris.
+      Encore six petites questions, et nous dessinons votre itinéraire.
+    </p>
+  </div>
+</header>
+
+<div class="page">
+
+  <div class="form-flow" id="formFlow" style="display: flex; flex-direction: column; gap: 18px;">
+
+    <!-- Synthèse -->
+    <section class="card">
+      <span class="card-label">Votre projet, en l'état</span>
+      <h2 class="card-title">Ce que nous avons noté</h2>
+      <div class="rail">
+        <div class="rail-item">
+          <span class="rail-dot"></span>
+          <div class="rail-key">Dates</div>
+          <div class="rail-val">Du jeudi 20 août au jeudi 3 septembre 2026 — 15 jours, dates fixes</div>
+        </div>
+        <div class="rail-item">
+          <span class="rail-dot"></span>
+          <div class="rail-key">Voyageurs</div>
+          <div class="rail-val">3 personnes, en famille</div>
+        </div>
+        <div class="rail-item">
+          <span class="rail-dot"></span>
+          <div class="rail-key">Formule</div>
+          <div class="rail-val">Roadtrip à plusieurs étapes — première découverte, en profondeur, hors des sentiers battus</div>
+        </div>
+        <div class="rail-item">
+          <span class="rail-dot"></span>
+          <div class="rail-key">Hébergements</div>
+          <div class="rail-val">Mixtes selon les étapes : 5 étoiles, boutique de charme, adresses d'exception</div>
+        </div>
+        <div class="rail-item">
+          <span class="rail-dot"></span>
+          <div class="rail-key">Budget</div>
+          <div class="rail-val">Autour de 3 000 € par personne — 4 000 € maximum</div>
+        </div>
+      </div>
+      <p class="quote">« L'Algérie de tous les jours, l'Algérie antique, l'Algérie comme on ne la connaît pas. <span>L'Algérie, mon pays de cœur.</span> »</p>
+    </section>
+
+    <!-- Saison -->
+    <aside class="season">
+      <span class="card-label">Le bon moment</span>
+      <p>
+        Fin août, cap sur le Nord : Alger et sa Casbah, les sites antiques de Tipaza,
+        Djémila ou Timgad, Constantine la suspendue, la Kabylie et la côte.
+        Le Grand Sud — Djanet, le Hoggar — se vit d'octobre à avril :
+        nous vous le garderons pour un prochain voyage.
+      </p>
+    </aside>
+
+    <!-- 1. Voyageurs -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">1</span>
+        <div>
+          <div class="section-title">Qui voyage ?</div>
+          <p class="section-hint">Les âges guident le rythme, les activités et les chambres.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div>
+          <span class="field-label">Les voyageurs</span>
+          <div id="travelers" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          <button type="button" class="add-traveler" id="addTraveler" style="margin-top: 8px;">+ Ajouter un voyageur</button>
+        </div>
+        <div>
+          <span class="field-label">Les chambres</span>
+          <div class="cards-choice" data-radio="rooms">
+            <button type="button" class="choice" data-val="two_rooms">Deux chambres</button>
+            <button type="button" class="choice" data-val="triple">Une chambre triple</button>
+            <button type="button" class="choice" data-val="suite">Suite familiale</button>
+            <button type="button" class="choice" data-val="advise">Conseillez-nous</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Passeports -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">2</span>
+        <div>
+          <div class="section-title">Vos passeports</div>
+          <p class="section-hint">C'est ce qui règle les formalités d'entrée — selon votre réponse, nous vous guidons précisément, sans stress.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div class="passport-block" id="passports"></div>
+      </div>
+    </section>
+
+    <!-- 3. Vols -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">3</span>
+        <div>
+          <div class="section-title">Les vols</div>
+          <p class="section-hint">Pour savoir si votre budget les inclut, et d'où vous partez.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div>
+          <span class="field-label">Vos billets</span>
+          <div class="cards-choice" data-radio="flights">
+            <button type="button" class="choice" data-val="include">À intégrer au dossier</button>
+            <button type="button" class="choice" data-val="already_booked">Déjà réservés</button>
+            <button type="button" class="choice" data-val="self_managed">Je m'en occupe</button>
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="departureCity">Ville de départ</label>
+          <input class="input" id="departureCity" type="text" placeholder="Paris, Lyon, Marseille…" />
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Envies & rythme -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">4</span>
+        <div>
+          <div class="section-title">Vos envies, votre rythme</div>
+          <p class="section-hint">Cochez ce qui vous attire — nous composons le reste.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div>
+          <span class="field-label">Ce qui vous attire déjà</span>
+          <div class="chips" data-multi="must_see">
+            <button type="button" class="chip" data-val="casbah">Casbah d'Alger</button>
+            <button type="button" class="chip" data-val="tipaza">Tipaza</button>
+            <button type="button" class="chip" data-val="constantine">Constantine</button>
+            <button type="button" class="chip" data-val="kabylie">Kabylie</button>
+            <button type="button" class="chip" data-val="bejaia">Béjaïa &amp; la côte</button>
+            <button type="button" class="chip" data-val="ghardaia">Ghardaïa <span class="hint">chaud en août</span></button>
+            <button type="button" class="chip" data-val="sahara">Sahara <span class="hint">oct–avril</span></button>
+            <button type="button" class="chip" data-val="hoggar">Hoggar <span class="hint">oct–avril</span></button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">Le rythme</span>
+          <div class="cards-choice" data-radio="rhythm">
+            <button type="button" class="choice" data-val="intense">On bouge beaucoup</button>
+            <button type="button" class="choice" data-val="balanced">Équilibré</button>
+            <button type="button" class="choice" data-val="slow">Tranquille, on savoure</button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">L'itinéraire</span>
+          <div class="cards-choice" data-radio="structure">
+            <button type="button" class="choice" data-val="fixed">Précis, réglé d'avance</button>
+            <button type="button" class="choice" data-val="flexible">Une trame souple</button>
+            <button type="button" class="choice" data-val="full_trust">On vous fait confiance</button>
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="familyDays">De la famille à visiter, des jours à garder libres ?</label>
+          <textarea class="textarea" id="familyDays" placeholder="Ex. : 3 jours en Kabylie chez la famille, sans programme."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Business -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">5</span>
+        <div>
+          <div class="section-title">L'Algérie qui entreprend</div>
+          <p class="section-hint">Vous évoquiez l'Algérie business — dites-nous en plus.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div class="cards-choice" data-radio="business">
+          <button type="button" class="choice" data-val="curiosity">Simple curiosité, au fil du voyage</button>
+          <button type="button" class="choice" data-val="meetings">Organiser des rencontres pro</button>
+          <button type="button" class="choice" data-val="none">Pas un sujet</button>
+        </div>
+        <div id="businessDetails" style="display: none;">
+          <label class="field-label" for="businessInput">Précisez — secteur, type de rencontres</label>
+          <input class="input" id="businessInput" type="text" placeholder="Ex. : immobilier, agroalimentaire, rencontres d'entrepreneurs…" />
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Confort & détails -->
+    <section class="card" data-section>
+      <div class="section-head">
+        <span class="section-num">6</span>
+        <div>
+          <div class="section-title">Confort &amp; détails</div>
+          <p class="section-hint">Ce qui rendra le voyage vraiment confortable, pour vous trois.</p>
+        </div>
+      </div>
+      <div class="section-body">
+        <div>
+          <span class="field-label">À prendre en compte</span>
+          <div class="chips" data-multi="diet">
+            <button type="button" class="chip" data-val="halal">Halal strict</button>
+            <button type="button" class="chip" data-val="vegetarian">Végétarien</button>
+            <button type="button" class="chip" data-val="allergies">Allergies</button>
+            <button type="button" class="chip" data-val="no_alcohol">Sans alcool</button>
+            <button type="button" class="chip" data-val="mobility">Mobilité réduite</button>
+            <button type="button" class="chip" data-val="child_friendly">Jeunes enfants</button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">L'accompagnement</span>
+          <div class="cards-choice" data-radio="accompaniment">
+            <button type="button" class="choice" data-val="full_guide">Chauffeur-guide tout le séjour</button>
+            <button type="button" class="choice" data-val="partial">Ponctuel, selon les étapes</button>
+            <button type="button" class="choice" data-val="advise">Conseillez-nous</button>
+          </div>
+        </div>
+        <div>
+          <span class="field-label">Les repas</span>
+          <div class="cards-choice" data-radio="board">
+            <button type="button" class="choice" data-val="breakfast">Petits-déjeuners</button>
+            <button type="button" class="choice" data-val="half_board">Demi-pension</button>
+            <button type="button" class="choice" data-val="mixed">Mixte selon les étapes</button>
+            <button type="button" class="choice" data-val="advise">Conseillez-nous</button>
+          </div>
+        </div>
+        <div>
+          <label class="field-label" for="healthNotes">Santé, précisions, dernières envies</label>
+          <textarea class="textarea" id="healthNotes" placeholder="Tout ce qui nous aidera à bien faire."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <div class="submit-zone">
+      <button type="button" class="submit" id="submitBtn">Envoyer mes réponses</button>
+      <p class="reassure">Lues uniquement par l'équipe Direction l'Algérie — jamais partagées.</p>
+    </div>
+
+  </div>
+
+  <!-- Merci -->
+  <div class="thanks" id="thanks">
+    <div class="thanks-card">
+      <div class="thanks-dot">✓</div>
+      <div class="thanks-title">C'est bien reçu.</div>
+      <p class="thanks-text">
+        Merci, Monsieur Lafreche. Votre projet est entre de bonnes mains —
+        voici ce qui se passe maintenant.
+      </p>
+      <div class="thanks-steps">
+        <div class="step"><span class="step-dot">●</span><span><b>Sous quelques jours :</b> votre première proposition d'itinéraire, par email.</span></div>
+        <div class="step"><span class="step-dot">●</span><span><b>Ensuite :</b> on ajuste ensemble, jusqu'à ce que ce soit exactement votre voyage.</span></div>
+        <div class="step"><span class="step-dot">●</span><span><b>Une question d'ici là ?</b> Répondez à notre email, ou écrivez-nous sur WhatsApp.</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="foot">
+  <div class="foot-inner">
+    <span class="foot-brand">Direction l'Algérie</span>
+    <span class="foot-tag">Voyages sur mesure en Algérie</span>
+    <span class="foot-link">www.directionlalgerie.com</span>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var state = { travelers: [{ age: "" }, { age: "" }, { age: "" }], passports: [null, null, null] };
+    var touched = {};
+    var sections = document.querySelectorAll("[data-section]");
+
+    function markTouched(el) {
+      var section = el.closest("[data-section]");
+      if (!section) return;
+      var idx = Array.prototype.indexOf.call(sections, section);
+      if (idx >= 0 && !touched[idx]) {
+        touched[idx] = true;
+        var count = Object.keys(touched).length;
+        document.getElementById("doneCount").textContent = count;
+        document.getElementById("progressFill").style.width = (count / sections.length) * 100 + "%";
+      }
+    }
+
+    // Radios génériques
+    document.querySelectorAll("[data-radio]").forEach(function (group) {
+      group.querySelectorAll(".choice").forEach(function (btn) {
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", function () {
+          group.querySelectorAll(".choice").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+          btn.setAttribute("aria-pressed", "true");
+          markTouched(btn);
+          if (group.getAttribute("data-radio") === "business") {
+            document.getElementById("businessDetails").style.display =
+              btn.getAttribute("data-val") === "meetings" ? "block" : "none";
+          }
+        });
+      });
+    });
+
+    // Chips multi génériques
+    document.querySelectorAll("[data-multi]").forEach(function (group) {
+      group.querySelectorAll(".chip").forEach(function (btn) {
+        btn.setAttribute("aria-pressed", "false");
+        btn.addEventListener("click", function () {
+          btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+          markTouched(btn);
+        });
+      });
+    });
+
+    // Inputs / textareas
+    document.querySelectorAll(".input, .textarea").forEach(function (el) {
+      el.addEventListener("input", function () { markTouched(el); });
+    });
+
+    // Voyageurs dynamiques
+    function renderTravelers() {
+      var wrap = document.getElementById("travelers");
+      wrap.innerHTML = "";
+      state.travelers.forEach(function (t, i) {
+        var row = document.createElement("div");
+        row.className = "traveler-row";
+        var tag = document.createElement("span");
+        tag.className = "traveler-tag";
+        tag.textContent = "Voyageur " + (i + 1);
+        var input = document.createElement("input");
+        input.className = "input";
+        input.type = "number";
+        input.min = "0"; input.max = "110";
+        input.placeholder = "Âge";
+        input.setAttribute("inputmode", "numeric");
+        input.value = t.age;
+        input.addEventListener("input", function () { t.age = input.value; markTouched(input); });
+        row.appendChild(tag);
+        row.appendChild(input);
+        if (state.travelers.length > 1) {
+          var rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "row-remove";
+          rm.setAttribute("aria-label", "Retirer le voyageur " + (i + 1));
+          rm.textContent = "×";
+          rm.addEventListener("click", function () {
+            state.travelers.splice(i, 1);
+            state.passports.splice(i, 1);
+            renderTravelers(); renderPassports();
+          });
+          row.appendChild(rm);
+        }
+        wrap.appendChild(row);
+      });
+    }
+
+    function renderPassports() {
+      var wrap = document.getElementById("passports");
+      wrap.innerHTML = "";
+      var options = [
+        { val: "algerian", label: "Algérien" },
+        { val: "french", label: "Français" },
+        { val: "both", label: "Les deux" },
+        { val: "other", label: "Autre" }
+      ];
+      state.passports.forEach(function (p, i) {
+        var block = document.createElement("div");
+        var label = document.createElement("span");
+        label.className = "field-label";
+        label.textContent = "Voyageur " + (i + 1);
+        var row = document.createElement("div");
+        row.className = "passport-row";
+        options.forEach(function (o) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "chip";
+          b.textContent = o.label;
+          b.setAttribute("aria-pressed", p === o.val ? "true" : "false");
+          b.addEventListener("click", function () {
+            state.passports[i] = o.val;
+            renderPassports();
+            markTouched(wrap);
+          });
+          row.appendChild(b);
+        });
+        block.appendChild(label);
+        block.appendChild(row);
+        wrap.appendChild(block);
+      });
+    }
+
+    document.getElementById("addTraveler").addEventListener("click", function () {
+      if (state.travelers.length >= 8) return;
+      state.travelers.push({ age: "" });
+      state.passports.push(null);
+      renderTravelers(); renderPassports();
+    });
+
+    renderTravelers();
+    renderPassports();
+
+    // Envoi (simulé — maquette)
+    document.getElementById("submitBtn").addEventListener("click", function () {
+      document.getElementById("formFlow").classList.add("hidden");
+      document.getElementById("formFlow").style.display = "none";
+      var thanks = document.getElementById("thanks");
+      thanks.classList.add("visible");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      document.getElementById("doneCount").textContent = "6";
+      document.getElementById("progressFill").style.width = "100%";
+    });
+  })();
+</script>
+</body>
+</html>

@@ -750,6 +750,8 @@ git commit -m "feat: page publique voyageur /q/[token] (RSC + écrans dégradés
 
 ### Task 6: Formulaire client `traveler-form.tsx`
 
+> **Référence visuelle validée :** `docs/mockups/traveler-page-mockup.html` (maquette approuvée le 2026-07-22 — ouvrir dans un navigateur). Reproduire sa hiérarchie, ses widgets (chips, radio-cartes, rail synthèse gold) et sa copy. Polices réelles à charger via `next/font/google` dans `src/app/q/layout.tsx` : Cormorant Garamond (500/600 + italic 500) et Poppins (400/500/600) — le layout racine ne charge qu'Inter/JetBrains Mono.
+
 **Files:**
 - Create: `src/app/q/[token]/traveler-form.tsx`
 
