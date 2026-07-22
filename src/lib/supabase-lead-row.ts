@@ -45,6 +45,12 @@ export type SupabaseLeadRow = {
   workflow_run_ref: string | null;
   /** Référence cockpit `DA-YYYY-NNNN` (nullable avant backfill / allocation). */
   reference: string | null;
+  // Page voyageur de requalification (/q/<token>) — peuplé par une requête isolée
+  // (tolère l'absence de migration : voir src/app/(dashboard)/leads/[id]/page.tsx).
+  public_token: string | null;
+  public_token_expires_at: string | null;
+  traveler_responses: Record<string, unknown> | null;
+  traveler_responses_submitted_at: string | null;
   lead_score: number | null;
   lead_score_override: number | null;
   lead_score_computed_at: string | null;

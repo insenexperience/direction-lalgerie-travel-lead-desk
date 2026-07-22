@@ -15,6 +15,7 @@ import {
   type LeadBriefGateRow,
 } from "@/lib/lead-brief-gate";
 import { generateBrief } from "@/lib/brief/generate-brief";
+import { TOKEN_TTL_DAYS } from "@/lib/traveler-requalification";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -1715,4 +1716,61 @@ export async function unlockStepForEdit(
   );
   revalidatePath(`/leads/${leadId}`);
   return { ok: true };
+}
+
+export type GenerateTravelerLinkResult =
+  | { ok: true; url: string }
+  | { ok: false; error: string };
+
+/**
+ * Génère (ou régénère) le token public du lead et retourne l'URL voyageur
+ * `<base>/q/<token>`. Régénérer réouvre la soumission
+ * (`traveler_responses_submitted_at` → null) tout en conservant les réponses
+ * existantes comme pré-remplissage (spec §4).
+ */
+export async function generateTravelerLink(
+  leadId: string,
+): Promise<GenerateTravelerLinkResult> {
+  if (!isUuid(leadId)) {
+    return { ok: false, error: "Identifiant de lead invalide." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { ok: false, error: "Non authentifié." };
+  }
+
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(
+    Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const { error } = await supabase
+    .from("leads")
+    .update({
+      public_token: token,
+      public_token_expires_at: expiresAt,
+      traveler_responses_submitted_at: null,
+    })
+    .eq("id", leadId);
+
+  if (error) {
+    return {
+      ok: false,
+      error:
+        "Impossible de générer le lien. Vérifiez que la migration page voyageur est appliquée (colonnes public_token…).",
+    };
+  }
+
+  const { headers } = await import("next/headers");
+  const h = await headers();
+  const base =
+    process.env.NEXT_PUBLIC_TRAVELER_BASE_URL?.trim().replace(/\/$/, "") ||
+    `https://${h.get("host") ?? "localhost:3000"}`;
+
+  revalidatePath(`/leads/${leadId}`);
+  return { ok: true, url: `${base}/q/${token}` };
 }

@@ -130,6 +130,17 @@ export function mapRowToSupabaseLeadRow(
       parseCrmConversionBand(String(row.crm_conversion_band ?? "")) ?? "medium",
     crm_follow_up_strategy:
       parseCrmFollowUpStrategy(String(row.crm_follow_up_strategy ?? "")) ?? "none",
+    // Page voyageur — non inclus dans LEAD_SELECT_* (requête isolée dans la page) :
+    // null par défaut ici, surchargé après coup si la migration est appliquée.
+    public_token: row.public_token != null ? String(row.public_token) : null,
+    public_token_expires_at: row.public_token_expires_at
+      ? String(row.public_token_expires_at)
+      : null,
+    traveler_responses:
+      (row.traveler_responses as Record<string, unknown> | null) ?? null,
+    traveler_responses_submitted_at: row.traveler_responses_submitted_at
+      ? String(row.traveler_responses_submitted_at)
+      : null,
   };
 
   if (!schemaV2) {

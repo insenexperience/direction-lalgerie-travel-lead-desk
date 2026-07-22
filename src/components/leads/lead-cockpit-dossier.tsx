@@ -10,6 +10,8 @@ import type { LeadStatus } from "@/lib/mock-leads";
 import { leadStatusLabelFr, LEAD_PIPELINE } from "@/lib/mock-leads";
 import { LeadEditForm } from "@/components/leads/lead-edit-form";
 import { LeadScorePill } from "./lead-score-pill";
+import { TravelerLinkButton } from "./traveler-link-button";
+import { TravelerResponsesPanel } from "./traveler-responses-panel";
 
 const tierLabel: Record<string, string> = {
   cold: "Froid",
@@ -372,6 +374,14 @@ export function LeadCockpitDossier({
             {err}
           </p>
         ) : null}
+      </div>
+
+      <div className="mt-3 border-t border-border pt-3">
+        <TravelerLinkButton leadId={lead.id} hasToken={Boolean(lead.public_token)} />
+        <TravelerResponsesPanel
+          responses={lead.traveler_responses}
+          submittedAt={lead.traveler_responses_submitted_at}
+        />
       </div>
     </section>
   );
