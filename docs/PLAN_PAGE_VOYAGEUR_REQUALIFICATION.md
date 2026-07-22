@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Une page publique `voyage.directionlalgerie.com/q/<token>` où le voyageur complète la qualification de son lead, avec génération du lien et lecture des réponses dans le cockpit.
+**Goal:** Une page publique `app.directionlalgerie.com/q/<token>` où le voyageur complète la qualification de son lead, avec génération du lien et lecture des réponses dans le cockpit.
 
-**Architecture:** 4 colonnes sur `leads` + route publique Next.js App Router (`/q/[token]`, RSC + formulaire client) + API `GET/POST /api/q/[token]` en service role (pattern `/api/intake`) + middleware host-based pour le sous-domaine. Aucun changement à la mécanique `qualification_blocks` existante.
+**Architecture:** 4 colonnes sur `leads` + route publique Next.js App Router (`/q/[token]`, RSC + formulaire client) + API `GET/POST /api/q/[token]` en service role (pattern `/api/intake`). Les pages voyageur cohabitent avec le desk sur `app.directionlalgerie.com` (déjà connecté à Vercel) : hors de `(dashboard)`, elles sont publiques par construction ; le middleware court-circuite simplement `updateSession` sur `/q/*`. Aucun changement à la mécanique `qualification_blocks` existante.
 
 **Tech Stack:** Next.js 16 (App Router, params async), React 19, TypeScript 5, Supabase (service role), Tailwind CSS 4, Resend (optionnel).
 
@@ -72,8 +72,8 @@ Si le fichier construit une liste de colonnes sélectionnées (`select("...")`),
 Ajouter :
 
 ```bash
-# Page voyageur de requalification (lien affiché à l'opérateur)
-NEXT_PUBLIC_TRAVELER_BASE_URL=https://voyage.directionlalgerie.com
+# Page voyageur de requalification (lien affiché à l'opérateur ; même host que le desk)
+NEXT_PUBLIC_TRAVELER_BASE_URL=https://app.directionlalgerie.com
 ```
 
 - [ ] **Step 4: Appliquer en local et vérifier**
@@ -970,22 +970,22 @@ git commit -m "feat: formulaire voyageur 6 sections (mobile-first, design DA)"
 
 ---
 
-### Task 7: Middleware — sous-domaine voyage.*
+### Task 7: Middleware — routes publiques /q sur le host du desk
+
+Contexte : les pages voyageur sont sur `app.directionlalgerie.com`, le même host que le desk (décision 2026-07-22). Il n'y a donc **pas** d'isolation host-based ni de redirection à faire — `/q/*` est déjà public car hors de `(dashboard)`. On ajoute seulement un court-circuit de `updateSession` sur ces chemins : un visiteur anonyme n'a pas de cookie Supabase à rafraîchir, et ça évite un aller-retour auth inutile sur la page publique.
 
 **Files:**
 - Modify: `middleware.ts` (racine)
 
 **Interfaces:**
 - Consumes: `updateSession` existant (inchangé).
-- Produces: isolation host `voyage.*` → uniquement `/q/*` + `/api/q/*` ; bypass session sur ces chemins.
+- Produces: bypass de `updateSession` sur `/q/*` + `/api/q/*` ; tout le reste inchangé.
 
 - [ ] **Step 1: Remplacer le corps du middleware**
 
 ```ts
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
-
-const PUBLIC_SITE_URL = "https://www.directionlalgerie.com";
 
 function isTravelerPath(pathname: string): boolean {
   return (
@@ -996,19 +996,10 @@ function isTravelerPath(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const host = request.headers.get("host")?.toLowerCase() ?? "";
-  const { pathname } = request.nextUrl;
-
-  // Sous-domaine voyageur : ne servir que la page publique.
-  if (host.startsWith("voyage.") && !isTravelerPath(pathname)) {
-    return NextResponse.redirect(PUBLIC_SITE_URL, 308);
-  }
-
-  // Routes publiques voyageur : aucune session requise.
-  if (isTravelerPath(pathname)) {
+  // Routes publiques voyageur : aucune session Supabase à rafraîchir.
+  if (isTravelerPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
-
   return updateSession(request);
 }
 
@@ -1019,19 +1010,19 @@ export const config = {
 };
 ```
 
-- [ ] **Step 2: Vérifier les deux hosts en local**
+- [ ] **Step 2: Vérifier en local (desk intact + /q public)**
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" -H "Host: voyage.directionlalgerie.com" http://localhost:3000/login      # → 308
-curl -s -o /dev/null -w "%{http_code}\n" -H "Host: voyage.directionlalgerie.com" http://localhost:3000/q/<token>  # → 200
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/login                                              # → 200 (desk intact)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/q/<token-généré>   # → 200 (page publique)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/login              # → 200 (desk intact)
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/dashboard          # → redirige /login si non authentifié (inchangé)
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add middleware.ts
-git commit -m "feat: isolation du sous-domaine voyage.* sur les routes publiques /q"
+git commit -m "feat: routes publiques /q hors du refresh de session middleware"
 ```
 
 ---
@@ -1062,7 +1053,7 @@ Composant serveur simple : prop `responses: Record<string, unknown> | null`, `su
 - [ ] **Step 3: Docs**
 
 - `docs/USER_JOURNEYS.md` : section « Lien voyageur & requalification » — génération, envoi manuel, soumission unique, régénération = réouverture, lecture cockpit (obligatoire : CONTRIBUTING exige la mise à jour de ce doc pour tout changement lead/workflow).
-- `CLAUDE.md` : dans Architecture, mentionner routes publiques `/q/[token]` + `/api/q/[token]` (service role, host voyage.*) et l'env `NEXT_PUBLIC_TRAVELER_BASE_URL`.
+- `CLAUDE.md` : dans Architecture, mentionner routes publiques `/q/[token]` + `/api/q/[token]` (service role, hébergées sur `app.directionlalgerie.com` avec le desk) et l'env `NEXT_PUBLIC_TRAVELER_BASE_URL`.
 
 - [ ] **Step 4: Vérification finale Phase A**
 
@@ -1082,28 +1073,29 @@ git commit -m "feat: panneau réponses voyageur au cockpit + docs parcours"
 
 ### Task 9: Rebrancher le Travel Lead Desk (Vercel + Supabase)
 
-Contexte : Vercel n'est pas connecté au domaine ; l'état prod n'a pas été vérifié récemment ; l'intake Squarespace a raté un lead le 2026-07-22 (diagnostic séparé).
+Contexte : Vercel est connecté à `app.directionlalgerie.com` ; l'état prod n'a pas été vérifié récemment ; l'intake Squarespace a raté un lead le 2026-07-22 (diagnostic séparé). Projet Supabase prod : `gfftkoxpjovnwtmkcxgi`.
 
-- [ ] Vercel → projet desk : vérifier que le dernier deploy `main` est vert ; sinon relancer et lire les logs.
-- [ ] Vercel → Settings → Environment Variables : vérifier présence (Production) de `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, et noter l'état de `RESEND_API_KEY`/`RESEND_FROM_EMAIL`/`NEXT_PUBLIC_DA_CONTACT_EMAIL` (notification soumission), `ALLOWED_ORIGIN`/`INTAKE_SHARED_SECRET` (bug intake).
+- [ ] Vercel → projet desk : vérifier que le dernier deploy `main` est vert et servi sur `app.directionlalgerie.com` ; sinon relancer et lire les logs.
+- [ ] Vercel → Settings → Environment Variables : vérifier présence (Production) de `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (indispensable aux routes `/api/q` et `/api/intake`), et noter l'état de `RESEND_API_KEY`/`RESEND_FROM_EMAIL`/`NEXT_PUBLIC_DA_CONTACT_EMAIL` (notification soumission), `ALLOWED_ORIGIN`/`INTAKE_SHARED_SECRET` (bug intake).
 - [ ] Supabase prod : vérifier que TOUTES les migrations sont appliquées, y compris la nouvelle :
 
 ```sql
 select column_name from information_schema.columns
 where table_name = 'leads' and column_name in
   ('public_token','public_token_expires_at','traveler_responses','traveler_responses_submitted_at');
--- attendu : 4 lignes. Sinon : npm run db:push (projet lié) ou SQL Editor dans l'ordre des fichiers.
+-- attendu : 4 lignes. Sinon : npm run db:push (requiert `supabase login` + mot de passe DB) ou SQL Editor dans l'ordre des fichiers.
 ```
 
-- [ ] Supabase Auth → URL configuration : Site URL + Redirect URLs conformes à `docs/DEPLOY_VERCEL.md` §2.2.
+- [ ] Supabase Auth → URL configuration : Site URL + Redirect URLs conformes à `docs/DEPLOY_VERCEL.md` §2.2 (inclure `https://app.directionlalgerie.com/**`).
 
-### Task 10: Domaine `voyage.directionlalgerie.com`
+### Task 10: Env + déploiement (domaine déjà connecté)
 
-- [ ] Vercel → projet desk → Settings → Domains → Add `voyage.directionlalgerie.com`.
-- [ ] Chez le gestionnaire DNS du domaine (Squarespace Domains ou registrar) : créer le CNAME indiqué par l'assistant Vercel (généralement `voyage` → `cname.vercel-dns.com`).
-- [ ] Vercel env : ajouter `NEXT_PUBLIC_TRAVELER_BASE_URL=https://voyage.directionlalgerie.com` (Production) puis **Redeploy**.
-- [ ] Option (recommandé, séparé) : ajouter aussi `desk.directionlalgerie.com` pour l'outil interne — sinon il reste sur `*.vercel.app`, fonctionnel.
-- [ ] Vérifier : `https://voyage.directionlalgerie.com/q/<token-test>` s'ouvre ; `https://voyage.directionlalgerie.com/login` redirige vers `www`.
+Pas de domaine ni de CNAME à créer : `app.directionlalgerie.com` est déjà le host du projet. Les pages `/q/*` partent avec le déploiement du code (Phase A).
+
+- [ ] Vercel env (Production) : ajouter `NEXT_PUBLIC_TRAVELER_BASE_URL=https://app.directionlalgerie.com`.
+- [ ] Merger la branche `feat/traveler-requalification-page` → `main` (PR) : Vercel redéploie automatiquement.
+- [ ] Vérifier : `https://app.directionlalgerie.com/q/<token-test>` s'ouvre en public ; `https://app.directionlalgerie.com/login` répond normalement (desk intact).
+- [ ] (Optionnel, futur) Si un lien client plus « parlant » est souhaité un jour : ajouter `voyage.directionlalgerie.com` en domaine Vercel + CNAME et pointer l'env dessus — aucun changement de code.
 
 ### Task 11: Recette prod
 

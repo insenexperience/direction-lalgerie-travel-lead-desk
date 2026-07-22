@@ -8,11 +8,11 @@
 
 ## 1. Objectif
 
-Permettre à un voyageur de compléter la qualification de son projet via une page personnelle `https://voyage.directionlalgerie.com/q/<token>`, au lieu de répondre à un long email. Les réponses alimentent le lead dans le desk ; l'opérateur les valide ensuite bloc par bloc (mécanique `qualification_blocks` existante, inchangée).
+Permettre à un voyageur de compléter la qualification de son projet via une page personnelle `https://app.directionlalgerie.com/q/<token>`, au lieu de répondre à un long email. Les réponses alimentent le lead dans le desk ; l'opérateur les valide ensuite bloc par bloc (mécanique `qualification_blocks` existante, inchangée).
 
 ## 2. Parcours
 
-1. **Opérateur** (cockpit lead) : clique « Lien voyageur » → token généré → copie `https://voyage.directionlalgerie.com/q/<token>` dans son email au client (envoi manuel depuis la boîte DA).
+1. **Opérateur** (cockpit lead) : clique « Lien voyageur » → token généré → copie `https://app.directionlalgerie.com/q/<token>` dans son email au client (envoi manuel depuis la boîte DA).
 2. **Voyageur** : ouvre la page (mobile-first) → voit SA page projet : logo DA, référence (`DA-YYYY-NNNN`), synthèse du projet, note de saison, formulaire 6 sections → envoie → écran de remerciement (« première proposition sous quelques jours » + WhatsApp DA).
 3. **Desk** : réponses stockées sur le lead, horodatées ; panneau lecture seule « Réponses voyageur » dans le cockpit ; notification email interne si Resend configuré (dégradé silencieux sinon).
 
@@ -93,11 +93,14 @@ La page RSC `/q/[token]` lit directement en service role côté serveur (pas d'a
 - **Bouton « Lien voyageur »** (`traveler-link-button.tsx`, monté dans `LeadCockpitDossier`) : appelle la server action `generateTravelerLink(leadId)` → affiche l'URL + bouton copier ; si un lien existe : le montre + « Régénérer ».
 - **Panneau « Réponses voyageur »** (`traveler-responses-panel.tsx`, monté dans `LeadCockpitDossier` sous la fiche) : lecture seule, horodatage, rendu par section avec les labels FR ; visible seulement si `traveler_responses` non null. Pas d'auto-application aux blocs en v1.
 
-## 9. Middleware & domaine
+## 9. Hébergement & middleware
 
-- `voyage.directionlalgerie.com` ajouté comme domaine du projet Vercel existant (CNAME chez le registrar/Squarespace DNS).
-- `middleware.ts` : si host commence par `voyage.` → seuls `/q/*` et `/api/q/*` sont servis, tout le reste redirige `308` vers `https://www.directionlalgerie.com`. Les chemins `/q/*` et `/api/q/*` bypassent `updateSession` (aucune session requise). Le reste du comportement est inchangé.
-- Env : `NEXT_PUBLIC_TRAVELER_BASE_URL=https://voyage.directionlalgerie.com` (utilisée pour construire le lien affiché à l'opérateur ; fallback = host de la requête).
+**Décision 2026-07-22 (Mehdi) : les pages voyageur sont hébergées sur `app.directionlalgerie.com`**, le sous-domaine déjà connecté à Vercel où tourne le desk. Pas de nouveau sous-domaine, pas de CNAME à créer : les pages `/q/*` partent avec le prochain déploiement du projet.
+
+- **Cohabitation desk / page publique sur le même host.** Les routes `/q/*` et `/api/q/*` ne sont pas sous `src/app/(dashboard)/` : elles échappent donc au gate d'auth (`force-dynamic` layout dashboard) et sont publiques par construction. Le desk reste sur `/dashboard`, `/login`, etc.
+- **`middleware.ts`** : court-circuiter `/q/*` et `/api/q/*` **avant** `updateSession()` — un visiteur anonyme n'a pas de session Supabase à rafraîchir, et on évite un aller-retour auth inutile sur la page publique. Aucune redirection host-based (le host est le même que le desk). Le reste du comportement middleware est inchangé.
+- Env : `NEXT_PUBLIC_TRAVELER_BASE_URL=https://app.directionlalgerie.com` (construit le lien affiché à l'opérateur ; fallback = host de la requête, donc fonctionne aussi en preview `*.vercel.app` et en local).
+- **Note branding (optionnelle, hors périmètre)** : si un jour un lien client plus « parlant » est souhaité (`voyage.directionlalgerie.com`), il suffira d'ajouter cet alias en domaine Vercel + un CNAME et de pointer l'env dessus — sans changement de code. `app.` reste parfaitement valable et professionnel.
 
 ## 10. Sécurité & vie privée
 
@@ -108,16 +111,16 @@ La page RSC `/q/[token]` lit directement en service role côté serveur (pas d'a
 ## 11. Hors périmètre v1 (volontaire)
 
 - Auto-application des réponses aux `qualification_blocks` (v2 — les ids sont déjà alignés).
-- Multi-langue, édition post-soumission côté voyageur, page racine du sous-domaine, insert dans `activities`, rate-limiting dédié.
+- Multi-langue, édition post-soumission côté voyageur, sous-domaine client dédié (`voyage.`), insert dans `activities`, rate-limiting dédié.
 
 ## 12. Remise en route infra (contexte au 2026-07-22)
 
 À faire avant/avec le déploiement de cette feature (détail en Phase B du plan) :
 
-- Vercel n'est **pas** connecté au domaine `directionlalgerie.com` (aucun domaine custom configuré sur le projet desk).
-- « Rebrancher » le Travel Lead Desk : vérifier build GitHub→Vercel, variables d'env prod, Auth URLs Supabase.
-- Vérifier que les 26 migrations `supabase/migrations/` sont appliquées sur le projet Supabase de prod.
-- Bug connexe connu : l'intake Squarespace `POST /api/intake` n'a pas créé le lead du 2026-07-22 (diagnostic séparé ; probablement lié aux env `INTAKE_SHARED_SECRET`/`ALLOWED_ORIGIN` ou au branchement du formulaire).
+- **Vercel est connecté à `app.directionlalgerie.com`** (confirmé par Mehdi 2026-07-22) — c'est le host des pages voyageur. Aucun domaine/CNAME à ajouter ; il reste seulement à poser l'env `NEXT_PUBLIC_TRAVELER_BASE_URL` et à redéployer.
+- « Rebrancher » le Travel Lead Desk : vérifier build GitHub→Vercel, variables d'env prod (dont `SUPABASE_SERVICE_ROLE_KEY`, indispensable aux routes `/api/q` et `/api/intake`), Auth URLs Supabase.
+- **Projet Supabase de prod : `gfftkoxpjovnwtmkcxgi`** (« Direction-lAlgerie-Travel-Lead-Desk », org `ditkhznulbrwfvcpnxxr`), lié via la CLI dans `supabase/.temp/`. Vérifier que toutes les migrations `supabase/migrations/` y sont appliquées, **y compris la nouvelle** (Task 1) — via `npm run db:push` (requiert `supabase login` + mot de passe DB) ou le SQL Editor. Le `.env.local` du repo ne contient que l'URL + l'anon key (RLS) : pas de service role en local.
+- Bug connexe connu : l'intake Squarespace `POST /api/intake` n'a pas créé le lead du 2026-07-22 (diagnostic séparé en cours ; probablement lié aux env `INTAKE_SHARED_SECRET`/`ALLOWED_ORIGIN` ou au branchement du formulaire).
 
 ## 13. Critères d'acceptation
 
@@ -125,5 +128,5 @@ La page RSC `/q/[token]` lit directement en service role côté serveur (pas d'a
 2. Le lien s'ouvre sur mobile sans authentification, affiche la synthèse du bon lead, jamais ses coordonnées.
 3. La soumission écrit les réponses sur le lead, horodatées, visibles dans le cockpit ; une deuxième soumission est refusée ; la régénération du lien réouvre la soumission avec pré-remplissage.
 4. Token inconnu/expiré → page dégradée propre, sans fuite d'information.
-5. Sur `voyage.directionlalgerie.com`, seules les routes `/q/*` répondent ; le desk reste inaccessible depuis ce host.
+5. Sur `app.directionlalgerie.com`, `/q/<token>` répond en public (sans session) et le middleware ne déclenche pas `updateSession` sur ces chemins ; le desk (`/dashboard`, `/login`) continue de fonctionner normalement sur le même host.
 6. `npm run build` et `npm run lint` passent ; parcours complet vérifié en navigateur (génération → soumission → cockpit).
