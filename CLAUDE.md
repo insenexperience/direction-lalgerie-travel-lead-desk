@@ -71,6 +71,8 @@ won / lost / negotiation
 
 **PDF**: `GET /api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` → `@react-pdf/renderer` → buffer → optional storage in `quote_pdfs` bucket. PDF packages are listed in `next.config.ts` as `serverExternalPackages`.
 
+**Traveler requalification page**: public, client-facing page `GET /q/[token]` (hosted on `app.directionlalgerie.com` alongside the desk) where the traveler completes qualification instead of replying to a long email. Operator generates a per-lead token from the cockpit (`generateTravelerLink` in `leads/actions.ts`); the page + `POST /api/q/[token]` use the **service role** (public, no session — `middleware.ts` skips `updateSession` on `/q/*`). Responses land on `leads.traveler_responses` (JSONB) and show read-only in the cockpit dossier. Validation/typing in `src/lib/traveler-requalification.ts`; option ids reuse `qualification-blocks-config.ts`. Env: `NEXT_PUBLIC_TRAVELER_BASE_URL`. Docs: `docs/SPEC_PAGE_VOYAGEUR_REQUALIFICATION.md`.
+
 ### Key Tables
 
 | Table | Purpose |
