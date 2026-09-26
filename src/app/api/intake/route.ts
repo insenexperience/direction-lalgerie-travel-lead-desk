@@ -10,6 +10,7 @@ import {
   resolveFullNameFromIntakeBody,
   verifyIntakeSharedSecret,
 } from "@/lib/intake-lead-insert";
+import { notifierNouveauLead } from "@/lib/email/lead-notification";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -110,12 +111,24 @@ export async function POST(request: Request) {
 
     console.info("[api/intake] created lead", String(created.id), "submission_id", submissionId);
 
+    // Le lead est enregistré : l'alerte ne doit plus pouvoir faire échouer la
+    // requête. Elle est attendue malgré tout — une promesse laissée en
+    // suspens serait interrompue à la fin de la fonction serverless, et
+    // personne ne serait prévenu.
+    const alerte = await notifierNouveauLead({
+      leadId: String(created.id),
+      intake,
+    }).catch((e) => {
+      console.error("[api/intake] alerte lead", e);
+      return { ok: false as const, error: String(e) };
+    });
+
     revalidatePath("/leads");
     revalidatePath("/dashboard");
     revalidatePath("/metrics");
 
     return NextResponse.json(
-      { status: "created", id: String(created.id) },
+      { status: "created", id: String(created.id), notified: alerte.ok },
       { status: 201, headers: jsonHeaders },
     );
   } catch (e) {

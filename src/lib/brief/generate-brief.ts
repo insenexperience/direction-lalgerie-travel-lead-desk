@@ -112,7 +112,9 @@ export function generateBrief(lead: BriefInput): string {
 
   sections.push("## Question à l'agence");
   sections.push(
-    "Merci de nous retourner une proposition de circuit (itinéraire + prix indicatif) dans les **5 jours ouvrés**. En cas d'indisponibilité ou de circuit non adapté, merci de le signaler sous 48h.",
+    // Le site promet au voyageur une première réponse sous 48 h. Demander
+    // cinq jours ouvrés ici rendrait cette promesse intenable.
+    "Merci de nous retourner une proposition de circuit (itinéraire + prix indicatif) **sous 48 h** : c'est le délai annoncé au voyageur sur le site. En cas d'indisponibilité ou de circuit non adapté, merci de le signaler sans attendre ce délai.",
   );
   sections.push("");
   sections.push("_Pour toute question, contactez Direction l'Algérie — ne contacter pas directement le voyageur._");

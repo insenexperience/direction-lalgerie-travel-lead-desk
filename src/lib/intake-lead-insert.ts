@@ -79,7 +79,9 @@ export function buildLeadInsertFromIntake(
   intake: Record<string, unknown>,
   opts?: BuildLeadInsertOptions,
 ) {
-  const sourceDefault = opts?.sourceFallback ?? "Formulaire site (Squarespace)";
+  // Le site n'est plus sur Squarespace depuis septembre 2026 : la plateforme
+  // envoie sa `page_origin`, et ce repli ne sert qu'aux appels qui n'en ont pas.
+  const sourceDefault = opts?.sourceFallback ?? "Formulaire site";
   const priority = opts?.priority === "high" ? "high" : "normal";
   const travelerName = intakeStr(intake.full_name) || intakeStr(intake.email);
   const email = intakeStr(intake.email);
