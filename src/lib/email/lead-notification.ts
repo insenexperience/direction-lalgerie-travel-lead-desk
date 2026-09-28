@@ -31,6 +31,11 @@ function lienDossier(leadId: string): string {
   return `${base}/leads/${encodeURIComponent(leadId)}`;
 }
 
+/** Échéance de la première réponse (48 h), à l'heure d'Alger. */
+function echeance(): string {
+  return new Intl.DateTimeFormat("fr-FR", { timeZone: "Africa/Algiers", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(Date.now() + 48 * 36e5));
+}
+
 const LIGNES: Array<[string, string]> = [
   ["Email", "email"],
   ["Téléphone", "phone"],
@@ -74,7 +79,7 @@ export async function notifierNouveauLead(input: {
     <p style="margin:24px 0 0">
       <a href="${lienDossier(leadId)}" style="background:#182b35;color:#fff;padding:11px 18px;text-decoration:none;border-radius:4px;display:inline-block">Ouvrir le dossier</a>
     </p>
-    <p style="margin:18px 0 0;color:#6b7780;font-size:12px">Réponse attendue sous 48 h.</p>
+    <p style="margin:18px 0 0;color:#6b7780;font-size:12px">Première réponse au voyageur attendue avant le ${echeance()}.</p>
   </div>`;
 
   // L'objet est du texte brut : le nom n'y est pas échappé comme dans le HTML.

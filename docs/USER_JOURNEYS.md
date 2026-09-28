@@ -3,8 +3,30 @@
 | Champ | Valeur |
 |-------|--------|
 | **Périmètre** | Cockpit lead (`/leads/[id]`), liste leads, workflow voyageur (`/leads/[id]/workflow`), statuts pipeline Supabase, gates brief, intake, webhooks ; effets **côté opérateur** des politiques RLS. |
-| **Dernière revue** | 2026-05-01 — Qualification Workspace v2 : 6 blocs thématiques structurés remplacent les champs libres + statut global. Gate brief refactorée sur `allBlocksValidated`. Archive précédent : [`CODE_PATCHES_P0_FROM_PLAN.md`](./CODE_PATCHES_P0_FROM_PLAN.md). |
+| **Dernière revue** | 2026-09-27 — Back office v3 : parcours piloté par la trame du site, 7 étapes affichées, deux horloges de 48 h, proposition Direction l'Algérie. Voir la section « Parcours v3 » ci-dessous et [`REFONTE_V3.md`](./REFONTE_V3.md). Les sections v2 plus bas décrivent les écrans conservés sous `/leads/[id]/workflow` (redirigé) et `/agencies/gestion`. |
 | **Sources de vérité** | Runtime : code dans `src/app/(dashboard)/leads/actions.ts`, `workflow-actions.ts`, `lead-brief-gate.ts`. Spec produit : [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md). |
+
+## Parcours v3 — de la trame du site au dossier gagné (depuis le 27/09/2026)
+
+Le voyageur compose son voyage sur www (Composer, « Mon projet ») ; le site envoie une **trame** structurée à `POST /api/intake`. Le back office part de cette trame au lieu de la requalifier. Détail des données : [`REFONTE_V3.md`](./REFONTE_V3.md).
+
+```mermaid
+flowchart LR
+  A[À compléter] -->|lien voyageur raccourci, WhatsApp ou qualification guidée| R[Reçu]
+  R -->|genererBrief| B[Brief prêt]
+  B -->|envoyerBrief| E[Envoyé aux agences]
+  E -->|saisirProposition / retenirProposition| P[Proposition]
+  P -->|convertirProposition puis envoyerProposition| PR[Proposée]
+  PR -->|marquerGagne / marquerPerdu| C[Clos]
+```
+
+- **Étapes affichées** : dérivées de `leads.status` et du contenu du dossier (`statutDe()` dans `src/lib/bo3/load.ts`). L'enum de la base ne change pas.
+- **Première réponse sous 48 h** : `premiereReponse` ou `demanderManque` (le lien voyageur vaut première réponse). L'accusé de réception automatique (`TRAVELER_ACK_ENABLED`) ne compte pas comme première réponse.
+- **Garde-fou « Reçu → Brief prêt »** : la trame doit contenir dates, groupe, budget et lieux (`manqueDe()`), sinon le dossier reste « À compléter ». Le budget peut être « À définir avec l'agence ».
+- **Brief anonyme** : `envoyerBrief` refuse l'envoi si le brief contient le prénom, le nom complet, l'e-mail ou le téléphone du voyageur (`fuitesBrief()`).
+- **Réponse agence sous 48 h** : horloge par agence depuis `brief_sent_at` ; accusé, relances et refus sont datés.
+- **Proposition Direction l'Algérie** : le devis d'une agence est converti (titre, lignes, prix par personne, validité, mention du partenariat), puis envoyé au voyageur. Le voyageur ne reçoit jamais le devis de l'agence tel quel.
+- **Écritures** : les actions de `projet-actions.ts` écrivent le statut directement, **conditionné au statut de départ** (jamais de retour en arrière). Elles ne passent pas par `updateLeadStatus` / `assertLeadStatusTransition`. La RLS s'applique toujours : un dossier sans référent est pris par l'opérateur qui agit (`prendreDossier`).
 
 ## Carte des zones code (à re-vérifier quand le flux change)
 
@@ -197,6 +219,7 @@ flowchart TB
 | 2026-04-20 | Refonte UI/UX complète : inbox, cockpit 3 colonnes, dashboard pilotage, liste leads. |
 | 2026-04-20 | Workspace qualification unifié : `LeadQualificationWorkspace` + agent Claude Haiku + 3 server actions. Migration `destination_main`, `travel_desire_narrative`, `qualification_notes`. |
 | 2026-04-21 | Back Office v2 : fix sidebar sticky (layout), sparklines + top agencies réels dans Pilotage business, module Gestion agences v1 (CRUD, contacts, logos, détail 5 sections). |
+| 2026-09-27 | Back office v3 : file de travail `/inbox`, fiche projet `/leads/[id]` pilotée par la trame, 7 étapes affichées, horloges 48 h voyageur et agence, brief anonyme, proposition Direction l'Algérie (PDF v3), lien voyageur raccourci `/q/<token>?champs=`. `/metrics` → `/dashboard`, `/leads/[id]/workflow` → `/leads/[id]`, ancienne liste des agences sous `/agencies/gestion`. Suppression du déclencheur en double `leads_sync_contact`, qui empêchait tout passage en gagné ou perdu. |
 
 ---
 
@@ -254,6 +277,8 @@ Alternative à la qualification par email long : une page publique où le voyage
 1. **Génération** (opérateur, cockpit → dossier) : bouton « Lien voyageur » → `generateTravelerLink(leadId)` alloue `public_token` (uuid, 30 j) et retourne `https://app.directionlalgerie.com/q/<token>`. L'opérateur le colle dans son email au client (envoi manuel, boîte DA).
 2. **Complétion** (voyageur) : `/q/<token>` (mobile-first, hors auth) affiche la synthèse du projet (jamais email/téléphone) + 6 sections → `POST /api/q/<token>` écrit `traveler_responses` (JSONB) + `traveler_responses_submitted_at`.
 3. **Lecture** (opérateur) : panneau « Réponses voyageur » (lecture seule) dans le dossier. Pas d'auto-application aux blocs `qualification_blocks` en v1.
+
+**Variante v3, lien raccourci** : `demanderManque` produit `/q/<token>?champs=dates,groupe,budget,lieux` limité à ce qui manque à la trame. La page affiche alors un formulaire court, posté sur `POST /api/q/<token>/champs`, qui complète `ai_qualification_payload.trame_v3` et ajoute une activité `traveler_answers` au fil du dossier. Sans `champs`, le questionnaire long ci-dessus reste en place.
 
 Règles : soumission **unique** (`409` si déjà soumis) ; **régénérer** le lien réouvre la soumission (`submitted_at → null`) en conservant les réponses comme pré-remplissage ; token invalide/expiré → page « lien expiré » sans fuite d'info. Service role uniquement (page RSC + route API) ; le middleware ne rafraîchit pas la session sur `/q/*`. Colonnes ajoutées au lead via une requête isolée (tolère l'absence de migration). Spec complète : [`SPEC_PAGE_VOYAGEUR_REQUALIFICATION.md`](./SPEC_PAGE_VOYAGEUR_REQUALIFICATION.md).
 

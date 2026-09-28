@@ -20,6 +20,15 @@ export function resolveFullNameFromIntakeBody(body: Record<string, unknown>): st
   return [first, last].filter(Boolean).join(" ").trim();
 }
 
+function trameBornee(v: unknown): Record<string, unknown> | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  try {
+    return JSON.stringify(v).length <= 60_000 ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Normalise le body JSON (champs optionnels → chaînes, dates flex, etc.). */
 export function buildIntakeRecordFromBody(body: Record<string, unknown>): Record<string, unknown> {
   const flexPeriod = intakeStr(body.flex_period);
@@ -53,6 +62,8 @@ export function buildIntakeRecordFromBody(body: Record<string, unknown>): Record
     notes_longues: notesLong,
     submission_id: intakeStr(body.submission_id),
     page_origin: intakeStr(body.page_origin),
+    // Trame structurée du site (contrat v1, docs refonte v3 §7) : gardée telle quelle, bornée à 60 Ko.
+    trame: trameBornee(body.trame),
     submitted_at:
       typeof body.submitted_at === "string" && body.submitted_at
         ? body.submitted_at
@@ -95,6 +106,9 @@ export function buildLeadInsertFromIntake(
     tripDates = parts.length ? parts.join(" · ") : "Période flexible";
   } else if (intake.date_start || intake.date_end) {
     tripDates = `${intake.date_start || "—"} → ${intake.date_end || "—"}`;
+  } else if (intakeStr(intake.flex_period)) {
+    // Le site envoie mois et durée sans `dates_mode` : sans ce repli, la période était perdue.
+    tripDates = intakeStr(intake.flex_period);
   }
 
   const cur = String(intake.currency || "EUR");
@@ -103,7 +117,7 @@ export function buildLeadInsertFromIntake(
   const budgetLine =
     ideal || max
       ? `${ideal ? `${ideal} ${cur}` : "?"} → ${max ? `${max} ${cur}` : "?"} / pers.`
-      : "";
+      : intakeStr(intake.budget_total);
 
   const travelersLine = [
     intake.group_type,
@@ -122,14 +136,11 @@ export function buildLeadInsertFromIntake(
     .filter(Boolean)
     .join("\n");
 
-  const internalBits = [
-    intake.follow_prefs && `Préférences suivi : ${intake.follow_prefs}`,
-    intake.notes_longues,
-    intake.page_origin && `Page d'origine : ${intake.page_origin}`,
-    `submission_id : ${intake.submission_id}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  // Les notes internes restent à l'opérateur : le récapitulatif du voyageur va dans la description
+  // du projet ; la page d'origine et l'identifiant d'envoi restent dans `intake_payload`.
+  const internalBits = intake.follow_prefs ? `Préférences de suivi : ${intake.follow_prefs}` : "";
+  const trame = (intake.trame ?? null) as Record<string, unknown> | null;
+  const titreTrame = trame && typeof trame.nom === "string" ? trame.nom.trim() : "";
 
   return {
     traveler_name: travelerName,
@@ -139,14 +150,17 @@ export function buildLeadInsertFromIntake(
     status: "new" as const,
     source: (intake.page_origin as string) || sourceDefault,
     trip_summary:
+      titreTrame ||
+      intakeStr(intake.project_notes_short) ||
       (intake.planning_stage as string) ||
       `Demande web — ${travelerName}`,
+    project_description: intakeStr(intake.notes_longues) || intakeStr(intake.project_notes_short) || null,
     travel_style: (intake.vision as string) || "—",
     travelers: travelersLine || "—",
     budget: budgetLine || "—",
     trip_dates: tripDates,
     qualification_summary: qualification || "—",
-    internal_notes: internalBits || "—",
+    internal_notes: internalBits,
     quote_status: "Nouveau",
     starred: false,
     priority,

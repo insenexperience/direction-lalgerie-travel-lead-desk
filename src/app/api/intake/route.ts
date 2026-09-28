@@ -11,6 +11,7 @@ import {
   verifyIntakeSharedSecret,
 } from "@/lib/intake-lead-insert";
 import { notifierNouveauLead } from "@/lib/email/lead-notification";
+import { accuseReceptionActif, envoyerAccuseReception } from "@/lib/email/traveler-ack";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -123,6 +124,22 @@ export async function POST(request: Request) {
       return { ok: false as const, error: String(e) };
     });
 
+    // Accusé de réception au voyageur (D6) : seulement si activé, et jamais bloquant.
+    if (accuseReceptionActif() && email) {
+      const accuse = await envoyerAccuseReception({ email, nom: fullName }).catch((e) => ({ ok: false, texte: "", error: String(e) }));
+      if (accuse.ok) {
+        await supabase.from("activities").insert({
+          lead_id: String(created.id),
+          kind: "ack_sent",
+          detail: "Accusé de réception envoyé",
+          payload: { k: "auto", s: "Accusé de réception envoyé", b: accuse.texte },
+        });
+      } else {
+        console.error("[api/intake] accusé de réception", accuse.error);
+      }
+    }
+
+    revalidatePath("/inbox");
     revalidatePath("/leads");
     revalidatePath("/dashboard");
     revalidatePath("/metrics");

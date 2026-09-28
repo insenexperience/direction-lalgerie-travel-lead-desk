@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import { buildQuoteDevisPdfBuffer } from "@/lib/pdf/build-quote-devis-buffer";
+import { agenceDeLaProposition, buildQuoteDevisPdfBuffer } from "@/lib/pdf/build-quote-devis-buffer";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import type { QuoteWorkflowStatus } from "@/lib/quote-workflow";
 import {
@@ -107,7 +107,7 @@ export async function sendQuoteDevisViaWhatsApp(
 
   const { data: leadRow, error: leadErr } = await supabase
     .from("leads")
-    .select("id, traveler_name, email, phone, whatsapp_phone_number, trip_summary")
+    .select("id, reference, traveler_name, email, phone, whatsapp_phone_number, trip_summary, intake_payload, ai_qualification_payload")
     .eq("id", leadId)
     .maybeSingle();
 
@@ -166,11 +166,16 @@ export async function sendQuoteDevisViaWhatsApp(
       created_at: quote.created_at,
     },
     lead: {
+      id: leadId,
+      reference: String(leadRow.reference ?? ""),
       traveler_name: String(leadRow.traveler_name ?? ""),
       email: String(leadRow.email ?? ""),
       phone: String(leadRow.phone ?? ""),
       trip_summary: String(leadRow.trip_summary ?? ""),
+      intake_payload: leadRow.intake_payload,
+      ai_qualification_payload: leadRow.ai_qualification_payload,
     },
+    agence: await agenceDeLaProposition(supabase, quote.items),
   });
 
   const storagePath = `${leadId}/${quoteId}.pdf`;

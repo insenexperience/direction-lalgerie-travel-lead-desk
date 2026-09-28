@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import { buildQuoteDevisPdfBuffer } from "@/lib/pdf/build-quote-devis-buffer";
+import { agenceDeLaProposition, buildQuoteDevisPdfBuffer } from "@/lib/pdf/build-quote-devis-buffer";
 
 export const runtime = "nodejs";
 
@@ -46,7 +46,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const { data: lead, error: lErr } = await supabase
     .from("leads")
-    .select("traveler_name, email, phone, trip_summary")
+    .select("reference, traveler_name, email, phone, trip_summary, intake_payload, ai_qualification_payload")
     .eq("id", leadId)
     .maybeSingle();
 
@@ -62,14 +62,20 @@ export async function GET(_req: Request, { params }: RouteParams) {
       created_at: quote.created_at,
     },
     lead: {
+      id: leadId,
+      reference: String(lead.reference ?? ""),
       traveler_name: String(lead.traveler_name ?? ""),
       email: String(lead.email ?? ""),
       phone: String(lead.phone ?? ""),
       trip_summary: String(lead.trip_summary ?? ""),
+      intake_payload: lead.intake_payload,
+      ai_qualification_payload: lead.ai_qualification_payload,
     },
+    agence: await agenceDeLaProposition(supabase, quote.items),
   });
 
-  const safeName = `devis-${quoteId.slice(0, 8)}.pdf`;
+  const v3 = !Array.isArray(quote.items) && (quote.items as { v?: unknown } | null)?.v === 3;
+  const safeName = `${v3 ? "proposition" : "devis"}-${quoteId.slice(0, 8)}.pdf`;
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,

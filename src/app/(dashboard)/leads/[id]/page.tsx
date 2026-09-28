@@ -1,235 +1,25 @@
-import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { isUuid } from "@/lib/is-uuid";
-import {
-  mapProposalRowFromDb,
-  mapQuoteRowFromDb,
-} from "@/lib/co-construction-proposal";
-import { getWorkflowEmailDeliveryHints } from "@/lib/email/workflow-email-config";
-import { allocateLeadReferenceIfMissing } from "@/lib/lead-reference";
-import { referentDisplayLabel } from "@/lib/referent-display";
-import {
-  LEAD_SELECT_LEGACY,
-  LEAD_SELECT_V2,
-  mapRowToSupabaseLeadRow,
-} from "@/lib/supabase-lead-detail-map";
-import { isPostgresUndefinedColumnError } from "@/lib/supabase-schema-fallback";
-import { LEAD_PIPELINE } from "@/lib/mock-leads";
-import type { LeadStatus } from "@/lib/mock-leads";
-import { LeadDetailSupabase } from "./lead-detail-supabase";
+import { Suspense } from "react";
+import { notFound, redirect } from "next/navigation";
+import { FicheView } from "@/components/bo3/fiche";
+import { donneesBo3 } from "@/lib/bo3/donnees";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 30;
 
-type PageProps = {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+type Props = { params: Promise<{ id: string }> };
 
-const QUOTE_SELECT_V2 =
-  "id, kind, status, workflow_status, items, summary, created_at, sent_at, sent_via, pdf_storage_path";
-
-const QUOTE_SELECT_LEGACY =
-  "id, kind, status, workflow_status, items, summary, created_at";
-
-export default async function LeadDetailPage({ params, searchParams }: PageProps) {
+export async function generateMetadata({ params }: Props) {
   const { id } = await params;
-  const sp = await searchParams;
-  const stageParam = typeof sp.stage === "string" ? sp.stage : null;
+  const d = await donneesBo3();
+  const p = d?.projets.find((x) => x.id === id);
+  return { title: p ? `${p.nom} · ${p.ref}` : "Projet" };
+}
 
-  if (!isUuid(id)) {
-    notFound();
-  }
-
-  const supabase = await createClient();
-
-  let schemaV2 = true;
-  let leadRes = await supabase
-    .from("leads")
-    .select(LEAD_SELECT_V2)
-    .eq("id", id)
-    .maybeSingle();
-
-  if (leadRes.error && isPostgresUndefinedColumnError(leadRes.error)) {
-    schemaV2 = false;
-    leadRes = await supabase
-      .from("leads")
-      .select(LEAD_SELECT_LEGACY)
-      .eq("id", id)
-      .maybeSingle();
-  }
-
-  const { data: leadRow, error: leadError } = leadRes;
-
-  if (leadError) {
-    throw new Error(
-      `Chargement du lead impossible (${leadError.code ?? "?"}) : ${leadError.message}. ` +
-        "Vérifiez les migrations Supabase (`npm run db:push` ou SQL Editor — voir docs/DEPLOY_VERCEL.md §2).",
-    );
-  }
-
-  if (!leadRow) {
-    notFound();
-  }
-
-  const row = leadRow as unknown as Record<string, unknown>;
-  let lead = mapRowToSupabaseLeadRow(row, schemaV2);
-
-  if (schemaV2) {
-    try {
-      const ref = await allocateLeadReferenceIfMissing(supabase, id);
-      if (ref) lead = { ...lead, reference: ref };
-    } catch {
-      /* colonnes cockpit absentes (migration non appliquée) */
-    }
-  }
-
-  // Colonnes page voyageur (/q/<token>) — requête isolée pour ne pas fragiliser
-  // le select V2 : si la migration n'est pas appliquée, dégradé silencieux.
-  try {
-    const { data: tr, error: trErr } = await supabase
-      .from("leads")
-      .select(
-        "public_token, public_token_expires_at, traveler_responses, traveler_responses_submitted_at",
-      )
-      .eq("id", id)
-      .maybeSingle();
-    if (!trErr && tr) {
-      lead = {
-        ...lead,
-        public_token: tr.public_token != null ? String(tr.public_token) : null,
-        public_token_expires_at: tr.public_token_expires_at
-          ? String(tr.public_token_expires_at)
-          : null,
-        traveler_responses:
-          (tr.traveler_responses as Record<string, unknown> | null) ?? null,
-        traveler_responses_submitted_at: tr.traveler_responses_submitted_at
-          ? String(tr.traveler_responses_submitted_at)
-          : null,
-      };
-    }
-  } catch {
-    /* migration page voyageur non appliquée : pas de lien voyageur */
-  }
-
-  const { data: referentRows } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .order("full_name", { ascending: true });
-
-  const referents = referentRows ?? [];
-
-  let referentLabel: string | null = null;
-  if (lead.referent_id) {
-    const match = referents.find((r) => r.id === lead.referent_id);
-    referentLabel = match ? referentDisplayLabel(match) : null;
-  }
-
-  const { data: agencyRows } = await supabase
-    .from("agencies")
-    .select("id, legal_name, trade_name")
-    .order("legal_name", { ascending: true });
-
-  const agencies =
-    agencyRows?.map((a) => ({
-      id: String(a.id),
-      label: (a.trade_name as string | null)?.trim()
-        ? String(a.trade_name)
-        : String(a.legal_name ?? ""),
-    })) ?? [];
-
-  let retainedAgencyLabel: string | null = null;
-  if (lead.retained_agency_id) {
-    const ag = agencies.find((x) => x.id === lead.retained_agency_id);
-    retainedAgencyLabel = ag?.label ?? `Agence ${lead.retained_agency_id.slice(0, 8)}…`;
-  }
-
-  const { data: proposalRows, error: proposalsError } = await supabase
-    .from("lead_circuit_proposals")
-    .select("*")
-    .eq("lead_id", id)
-    .order("created_at", { ascending: false });
-
-  const coProposals =
-    !proposalsError && proposalRows
-      ? proposalRows.map((r) =>
-          mapProposalRowFromDb(r as unknown as Record<string, unknown>),
-        )
-      : [];
-
-  const quotesPrimary = await supabase
-    .from("quotes")
-    .select(schemaV2 ? QUOTE_SELECT_V2 : QUOTE_SELECT_LEGACY)
-    .eq("lead_id", id)
-    .order("created_at", { ascending: false });
-
-  const quotesFinal =
-    quotesPrimary.error &&
-    schemaV2 &&
-    isPostgresUndefinedColumnError(quotesPrimary.error)
-      ? await supabase
-          .from("quotes")
-          .select(QUOTE_SELECT_LEGACY)
-          .eq("lead_id", id)
-          .order("created_at", { ascending: false })
-      : quotesPrimary;
-
-  const { data: quoteRows, error: quotesError } = quotesFinal;
-
-  const leadQuotes =
-    !quotesError && quoteRows
-      ? quoteRows.map((r) => mapQuoteRowFromDb(r as unknown as Record<string, unknown>))
-      : [];
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  let isAdmin = false;
-  if (user?.id) {
-    const { data: me } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-    isAdmin = me?.role === "admin";
-  }
-
-  let qualificationValidatorLabel: string | null = null;
-  if (lead.qualification_validated_by) {
-    const v = referents.find((r) => r.id === lead.qualification_validated_by);
-    qualificationValidatorLabel = v ? referentDisplayLabel(v) : null;
-  }
-
-  const workflowHints = getWorkflowEmailDeliveryHints();
-
-  const displayedStage: LeadStatus =
-    stageParam && (LEAD_PIPELINE as string[]).includes(stageParam)
-      ? (stageParam as LeadStatus)
-      : lead.status;
-
-  // Fetch des kinds d'activités pour la chronologie SLA
-  const { data: activityRows } = await supabase
-    .from("activities")
-    .select("kind")
-    .eq("lead_id", id);
-  const activityKinds = (activityRows ?? []).map((r) => String(r.kind));
-
-  return (
-    <LeadDetailSupabase
-      lead={lead}
-      currentUserId={user?.id ?? null}
-      isAdmin={isAdmin}
-      qualificationValidatorLabel={qualificationValidatorLabel}
-      workflowEmailBanner={workflowHints.bannerMessage}
-      referents={referents}
-      referentLabel={referentLabel}
-      agencies={agencies}
-      retainedAgencyLabel={retainedAgencyLabel}
-      coProposals={coProposals}
-      leadQuotes={leadQuotes}
-      displayedStage={displayedStage}
-      activityKinds={activityKinds}
-    />
-  );
+export default async function FichePage({ params }: Props) {
+  const { id } = await params;
+  const d = await donneesBo3();
+  if (!d) redirect("/login");
+  const p = d.projets.find((x) => x.id === id || x.ref === id);
+  if (!p) notFound();
+  const signature = d.ctx.nom.split(/\s+/)[0] || "L'équipe";
+  return <Suspense><FicheView key={p.id} p={p} agences={d.agences} now={d.now} signature={signature} /></Suspense>;
 }

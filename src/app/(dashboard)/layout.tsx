@@ -1,71 +1,42 @@
 import type { ReactNode } from "react";
+import { Cormorant_Garamond, Poppins } from "next/font/google";
 import { redirect } from "next/navigation";
+import { Bo3Shell } from "@/components/bo3/shell";
+import { donneesBo3 } from "@/lib/bo3/donnees";
+import { travelerClock } from "@/lib/bo3/projet";
+import { ZONES } from "@/lib/bo3/geo";
+import { statutLabel } from "@/lib/bo3/projet";
+import "@/styles/bo3.css";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-import { DashboardMobileNav } from "@/components/dashboard-mobile-nav";
-import { SidebarNav } from "@/components/sidebar-nav";
-import { Topbar } from "@/components/topbar";
-import { createClient } from "@/lib/supabase/server";
+const poppins = Poppins({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-poppins", display: "swap" });
+const cormorant = Cormorant_Garamond({ subsets: ["latin"], weight: ["600", "700"], style: ["normal", "italic"], variable: "--font-cormorant", display: "swap" });
 
-type DashboardLayoutProps = {
-  children: ReactNode;
-};
-
-async function loadLayoutData() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const [profileRes, inboxCountRes, leadsCountRes] = await Promise.all([
-    supabase.from("profiles").select("full_name, role, avatar_url").eq("id", user.id).maybeSingle(),
-    supabase
-      .from("leads")
-      .select("*", { count: "exact", head: true })
-      .not("status", "in", '("won","lost")'),
-    supabase
-      .from("leads")
-      .select("*", { count: "exact", head: true })
-      .not("status", "in", '("won","lost")'),
-  ]);
-
-  const profile = profileRes.data as { full_name?: string; role?: string; avatar_url?: string | null } | null;
-  return {
-    user,
-    userName: profile?.full_name ?? undefined,
-    userRole: profile?.role ?? undefined,
-    avatarUrl: profile?.avatar_url ?? null,
-    inboxCount: inboxCountRes.count ?? 0,
-    leadsCount: leadsCountRes.count ?? 0,
+export default async function DashboardLayout({ children }: { children: ReactNode }) {
+  const d = await donneesBo3();
+  if (!d) redirect("/login");
+  const { ctx, projets, agences, now } = d;
+  const ouverts = projets.filter((p) => p.statut !== "clos");
+  const counts = {
+    file: ouverts.length,
+    projets: projets.length,
+    hot: ouverts.filter((p) => !p.premiereReponse && (travelerClock(p, now).rem ?? 0) < 12).length,
   };
-}
-
-export default async function DashboardLayout({ children }: DashboardLayoutProps) {
-  const data = await loadLayoutData();
-  if (!data) redirect("/login");
-
-  const { user, userName, userRole, avatarUrl, inboxCount, leadsCount } = data;
+  const initiales = ctx.nom.split(/[\s.@_-]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "DA";
 
   return (
-    <div className="min-h-screen bg-[#f6f7f8]">
-      <DashboardMobileNav />
-      <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start">
-        <SidebarNav
-          inboxCount={inboxCount}
-          leadsCount={leadsCount}
-          userEmail={user.email}
-          userName={userName}
-          userRole={userRole}
-          avatarUrl={avatarUrl}
-        />
-        <div className="flex min-h-screen min-w-0 flex-col">
-          <Topbar userEmail={user.email} userName={userName} avatarUrl={avatarUrl} />
-          <main className="min-w-0 flex-1 px-4 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
-            {children}
-          </main>
-        </div>
-      </div>
+    <div className={`${poppins.variable} ${cormorant.variable}`}>
+      <Bo3Shell
+        counts={counts}
+        user={{ nom: ctx.nom, role: ctx.role, initiales }}
+        apercu={ctx.apercu}
+        projets={projets.map((p) => ({ id: p.id, nom: p.nom, ref: p.ref, statut: statutLabel(p), titre: p.trame?.titre ?? null }))}
+        agences={agences.map((a) => ({ id: a.id, n: a.n, zones: a.zones.map((z) => ZONES[z]).join(", ") }))}
+      >
+        {children}
+      </Bo3Shell>
     </div>
   );
 }

@@ -6,11 +6,27 @@ import {
   Text,
   View,
 } from "@react-pdf/renderer";
-import { DIRECTION_ALG_LOGO_URL } from "@/lib/brand-assets";
+import { LOGO_DA_PDF } from "@/lib/pdf/logo-da";
 import type { QuoteItemLine } from "@/lib/quote-items-build";
+import type { Mention } from "@/lib/bo3/types";
+
+/** Proposition Direction l'Algérie issue de la conversion d'un devis agence (refonte v3). */
+export type PropositionPdf = {
+  titre: string;
+  lignes: string[];
+  prix: number;
+  validite: number;
+  note: string;
+  mention: Mention;
+  agence: { nom: string; ville: string } | null;
+  /** « 4 pers. », « octobre » : repris de la trame quand elle les contient. */
+  details: string[];
+};
 
 export type QuoteDevisPdfData = {
   quoteId: string;
+  /** Référence du dossier (leads.reference), vide pour les anciens devis. */
+  reference: string;
   createdAt: string;
   travelerName: string;
   travelerEmail: string;
@@ -18,6 +34,7 @@ export type QuoteDevisPdfData = {
   tripSummary: string;
   workflowLabel: string;
   items: QuoteItemLine[];
+  proposition?: PropositionPdf;
 };
 
 const ink = "#0f1720";
@@ -131,6 +148,7 @@ const styles = StyleSheet.create({
 });
 
 export function QuoteDevisPdfDocument({ data }: { data: QuoteDevisPdfData }) {
+  if (data.proposition) return <PropositionDocument data={data} p={data.proposition} />;
   const ref = data.quoteId.replace(/-/g, "").slice(0, 12).toUpperCase();
 
   return (
@@ -139,7 +157,7 @@ export function QuoteDevisPdfDocument({ data }: { data: QuoteDevisPdfData }) {
         <View style={styles.header}>
           <View style={styles.headerRow}>
             <View style={styles.logoPlate}>
-              <Image src={DIRECTION_ALG_LOGO_URL} style={styles.logoImg} />
+              <Image src={LOGO_DA_PDF} style={styles.logoImg} />
             </View>
             <View style={styles.headerTextCol}>
               <Text style={styles.brandLine}>
@@ -206,6 +224,126 @@ export function QuoteDevisPdfDocument({ data }: { data: QuoteDevisPdfData }) {
               "Direction l'Algérie — document à usage du voyageur. Ne pas reproduire sans autorisation."
             }
           </Text>
+        </View>
+      </Page>
+    </Document>
+  );
+}
+
+// ---------------------------------------------------------------- proposition v3
+
+/** Les polices intégrées du PDF ne connaissent pas l'espace fine insécable de fr-FR. */
+const euros = (n: number) => `${n.toLocaleString("fr-FR").replace(/\s/g, " ")} €`;
+
+const prop = StyleSheet.create({
+  titre: { fontFamily: "Times-Roman", fontSize: 24, color: brand, lineHeight: 1.15 },
+  sousTitre: { marginTop: 6, fontSize: 9.5, color: muted },
+  emise: { marginTop: 2, fontSize: 8.5, color: muted },
+  intro: { marginTop: 22, marginBottom: 6 },
+  ligne: {
+    flexDirection: "row",
+    paddingVertical: 7,
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#e2e8f0",
+  },
+  puce: { width: 12, color: brand, fontSize: 10 },
+  ligneTexte: { flex: 1, fontSize: 10, lineHeight: 1.4 },
+  note: { marginTop: 12, fontFamily: "Times-Italic", fontSize: 11, color: ink, lineHeight: 1.4 },
+  prix: {
+    marginTop: 22,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    backgroundColor: brandLight,
+    borderLeftWidth: 3,
+    borderLeftColor: brand,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  prixLabel: { fontSize: 8, color: muted, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 },
+  prixValeur: { fontSize: 20, fontWeight: "bold", color: brand },
+  conditions: { fontSize: 9, color: muted, textAlign: "right", lineHeight: 1.5 },
+  partenariat: {
+    marginTop: 22,
+    paddingTop: 10,
+    borderTopWidth: 0.5,
+    borderTopColor: "#cbd5e1",
+    fontSize: 9,
+    color: muted,
+    lineHeight: 1.45,
+  },
+  gras: { fontWeight: "bold", color: ink },
+  piedLigne: { flexDirection: "row", justifyContent: "space-between" },
+});
+
+function PropositionDocument({ data, p }: { data: QuoteDevisPdfData; p: PropositionPdf }) {
+  const numero = data.reference || `P-${data.quoteId.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+  const sousTitre = [`Proposition n° ${numero}`, `pour ${data.travelerName}`, ...p.details].join(" · ");
+  const ag = p.mention === "aucune" ? null : p.agence;
+
+  return (
+    <Document title={`${p.titre} — Direction l'Algérie`} author="Direction l'Algérie">
+      <Page size="A4" style={styles.page}>
+        <View style={styles.header}>
+          <View style={styles.headerRow}>
+            <View style={styles.logoPlate}>
+              <Image src={LOGO_DA_PDF} style={styles.logoImg} />
+            </View>
+            <View style={styles.headerTextCol}>
+              <Text style={styles.brandLine}>{"Direction l'Algérie"}</Text>
+              <Text style={styles.title}>Proposition de voyage</Text>
+            </View>
+          </View>
+        </View>
+
+        <Text style={prop.titre}>{p.titre}</Text>
+        <Text style={prop.sousTitre}>{sousTitre}</Text>
+        <Text style={prop.emise}>Émise le {data.createdAt}</Text>
+
+        {p.lignes.length ? (
+          <>
+            <Text style={[styles.sectionTitle, prop.intro]}>Ce que comprend la proposition</Text>
+            {p.lignes.map((l, i) => (
+              <View key={i} style={prop.ligne} wrap={false}>
+                <Text style={prop.puce}>–</Text>
+                <Text style={prop.ligneTexte}>{l}</Text>
+              </View>
+            ))}
+          </>
+        ) : null}
+
+        {p.note ? <Text style={prop.note}>{p.note}</Text> : null}
+
+        <View style={prop.prix} wrap={false}>
+          <View>
+            <Text style={prop.prixLabel}>Prix par personne</Text>
+            <Text style={prop.prixValeur}>{p.prix > 0 ? euros(p.prix) : "—"}</Text>
+          </View>
+          <View>
+            <Text style={prop.conditions}>Valable {p.validite} jours</Text>
+            <Text style={prop.conditions}>Paiement hors plateforme</Text>
+          </View>
+        </View>
+
+        {ag ? (
+          <Text style={prop.partenariat}>
+            {p.mention === "visible" ? (
+              <>
+                <Text style={prop.gras}>Réalisé en partenariat avec {ag.nom}</Text>
+                {ag.ville ? `, agence réceptive à ${ag.ville}.` : ", agence réceptive partenaire."}
+                {" Direction l'Algérie reste votre interlocuteur unique."}
+              </>
+            ) : (
+              `Proposition Direction l'Algérie, construite avec ${ag.nom}${ag.ville ? ` (${ag.ville})` : ""}, agence réceptive partenaire. Votre interlocuteur reste Direction l'Algérie.`
+            )}
+          </Text>
+        ) : null}
+
+        <View style={styles.footer} fixed>
+          <View style={prop.piedLigne}>
+            <Text>{"Direction l'Algérie · www.directionlalgerie.com"}</Text>
+            <Text>Proposition n° {numero}</Text>
+          </View>
         </View>
       </Page>
     </Document>
