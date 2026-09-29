@@ -17,8 +17,9 @@ export async function middleware(request: NextRequest) {
   return updateSession(request);
 }
 
+// /relecture est servi par un autre projet (réécriture dans next.config.ts) : pas de session CRM à rafraîchir.
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|relecture|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
