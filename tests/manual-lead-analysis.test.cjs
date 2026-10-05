@@ -60,6 +60,11 @@ async function run() {
     assert(!JSON.stringify(statusError).includes("test-only-key"));
     assert.equal(errorBodyRead, false);
 
+    global.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error: { message: "Your credit balance is too low; test-only-key" } }) });
+    const creditError = await analyzeManualLeadJson("system", "source");
+    assert.equal(creditError.reason, "credits");
+    assert(!JSON.stringify(creditError).includes("test-only-key"));
+
     global.fetch = async () => { throw new Error("Secret could appear here: test-only-key"); };
     const thrown = await analyzeManualLeadJson("system", "source");
     assert("error" in thrown);

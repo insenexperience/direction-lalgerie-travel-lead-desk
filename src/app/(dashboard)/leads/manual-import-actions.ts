@@ -33,7 +33,10 @@ notes_longues : retranscription complète et fidèle en français, aérée, sect
 Contraintes : reformule seulement les contraintes déclarées, sans inventer de politique ou de restriction.`,
     JSON.stringify({ source_message: source }),
   );
-  if ("error" in result) return { ok: true, draft: fallback, warning: "Analyse IA indisponible. Les faits explicites sont préremplis ; vérifiez et complétez la qualification." };
+  if ("error" in result) {
+    const explanation = result.reason === "credits" ? "Le service d’analyse n’a plus de crédits." : result.reason === "configuration" ? "La connexion au service d’analyse doit être vérifiée." : "Analyse IA indisponible.";
+    return { ok: true, draft: fallback, warning: `${explanation} Les faits explicites sont préremplis ; vérifiez et complétez la qualification.` };
+  }
   try {
     const parsed = JSON.parse(result.raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
     const draft = normalizeManualLeadDraft(parsed);

@@ -1,6 +1,6 @@
 import { completeJson } from "@/lib/ai/agent";
 
-export type ManualLeadAnalysisResult = { raw: string } | { error: string };
+export type ManualLeadAnalysisResult = { raw: string } | { error: string; reason?: "credits" | "configuration" };
 const UNAVAILABLE = "Analyse du message indisponible.";
 const INVALID = "Réponse d’analyse inexploitable.";
 
@@ -47,8 +47,16 @@ export async function analyzeManualLeadJson(system: string, user: string): Promi
     });
     // Never return provider bodies or caught exception messages: either can echo credentials.
     if (!response.ok) {
-      console.warn("[manual-lead-analysis] Provider HTTP failure", response.status);
-      return { error: UNAVAILABLE };
+      let reason: "credits" | "configuration" | undefined = response.status === 401 || response.status === 403 ? "configuration" : undefined;
+      try {
+        const failure: unknown = await response.json();
+        const error = failure && typeof failure === "object" && "error" in failure ? (failure as { error?: unknown }).error : null;
+        const message = error && typeof error === "object" && "message" in error ? (error as { message?: unknown }).message : null;
+        if (typeof message === "string" && /credit balance|insufficient credits?|billing|payment required/i.test(message)) reason = "credits";
+        else if (response.status === 401 || response.status === 403 || (typeof message === "string" && /invalid.*(?:model|api.key)|model.*(?:not found|not available)/i.test(message))) reason = "configuration";
+      } catch { /* Diagnostics never include an untrusted provider body. */ }
+      console.warn("[manual-lead-analysis] Provider HTTP failure", response.status, reason ?? "unclassified");
+      return { error: UNAVAILABLE, ...(reason ? { reason } : {}) };
     }
     const data: unknown = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) return { error: INVALID };
