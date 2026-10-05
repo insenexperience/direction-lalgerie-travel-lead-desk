@@ -37,6 +37,7 @@ const MAILING_STYLES = `
 .bo3 .lead-mailing-module label { display:block; }
 .bo3 .lead-mailing-module iframe { background:#f5f6f2; }
 .bo3 .lead-mailing-module h3 { font-family:var(--serif); }
+.bo3 .lead-mailing-dialog { animation:none; transform:none; }
 .bo3 .lead-mailing-dialog .mod { max-width:1120px; }
 .bo3 .lead-mailing-dialog .mod__bd { padding:16px; }
 @media(max-width:760px) { .bo3 .lead-mailing-dialog .ovl { padding:8px; } .bo3 .lead-mailing-dialog .mod__bd { padding:8px; } }
