@@ -2,7 +2,7 @@
 
 Refonte du back office d'après le handoff Claude Design (`back office/refonte-v2/design_handoff_back_office`, décisions D1–D10 validées le 26/09/2026).
 
-Le parcours conserve l'enum des leads et les colonnes JSON existantes pour la trame et les faits de qualification. Depuis le 05/10/2026, le mailing ajoute une table dédiée `lead_email_messages` pour les brouillons, versions relues et envois ; trois migrations décrites plus bas assurent persistance, concurrence et journal BO3. Les correctifs des déclencheurs de clôture restent nécessaires (voir « Pièges connus »).
+Le parcours conserve l'enum des leads et les colonnes JSON existantes pour la trame et les faits de qualification. Depuis le 05/10/2026, le mailing ajoute une table dédiée `lead_email_messages` pour les brouillons, versions relues et envois ; cinq migrations décrites plus bas assurent persistance, concurrence et journal BO3. Les correctifs des déclencheurs de clôture restent nécessaires (voir « Pièges connus »).
 
 ## Code
 
