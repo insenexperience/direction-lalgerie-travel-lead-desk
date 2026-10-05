@@ -3,18 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import { sendTransactionalHtmlEmail } from "@/lib/email/resend-client";
-import {
-  isResendOutboundConfigured,
-  isAiWelcomeEmailCtAsConfigured,
-} from "@/lib/email/workflow-email-config";
-import {
-  buildWorkflowReplyMailto,
-  buildWorkflowWelcomeEmailAiHtml,
-  buildWorkflowWelcomeEmailSimpleHtml,
-  normalizeWhatsAppE164,
-} from "@/lib/email/workflow-welcome";
-
 export type WorkflowLaunchResult =
   | { ok: true; travelerEmailSent: boolean }
   | { ok: false; error: string };
@@ -171,8 +159,6 @@ function assertCanLaunchWorkflow(
   return null;
 }
 
-const WORKFLOW_SUBJECT = "Direction l'Algérie — confirmation de votre projet";
-
 export async function launchWorkflowAi(leadId: string): Promise<WorkflowLaunchResult> {
   if (!isUuid(leadId)) {
     return { ok: false, error: "Identifiant de lead invalide." };
@@ -192,50 +178,8 @@ export async function launchWorkflowAi(leadId: string): Promise<WorkflowLaunchRe
   const block = assertCanLaunchWorkflow(fetched.row, user.id, "ai");
   if (block) return block;
 
-  let travelerEmailSent = false;
-  let activityDetail = "";
-
-  if (isResendOutboundConfigured()) {
-    let html: string;
-    if (isAiWelcomeEmailCtAsConfigured()) {
-      const waRaw = process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER?.trim() ?? "";
-      const waDigits = normalizeWhatsAppE164(waRaw);
-      const contact =
-        process.env.NEXT_PUBLIC_DA_CONTACT_EMAIL?.trim() ||
-        process.env.RESEND_FROM_EMAIL?.trim() ||
-        "";
-      if (!waDigits || !contact.includes("@")) {
-        return {
-          ok: false,
-          error: "Configuration email incohérente (CTA). Rechargez la page ou vérifiez les variables d’environnement.",
-        };
-      }
-      const ref = fetched.row.submission_id ?? fetched.row.id;
-      const waText = `Bonjour, je souhaite co-construire mon voyage ref:${ref}`;
-      const whatsappHref = `https://wa.me/${waDigits}?text=${encodeURIComponent(waText)}`;
-      const mailtoHref = buildWorkflowReplyMailto(ref, contact);
-      html = buildWorkflowWelcomeEmailAiHtml(fetched.row, { whatsappHref, mailtoHref });
-      activityDetail =
-        "Workflow lancé (mode IA) — email de bienvenue avec CTA WhatsApp et email envoyé au voyageur.";
-    } else {
-      html = buildWorkflowWelcomeEmailSimpleHtml(fetched.row);
-      activityDetail =
-        "Workflow lancé (mode IA) — email simplifié envoyé (CTA WhatsApp / mailto incomplets côté configuration).";
-    }
-
-    const sent = await sendTransactionalHtmlEmail({
-      to: fetched.row.email,
-      subject: WORKFLOW_SUBJECT,
-      html,
-    });
-    if (!sent.ok) {
-      return { ok: false, error: sent.error };
-    }
-    travelerEmailSent = true;
-  } else {
-    activityDetail =
-      "Workflow lancé (mode IA) — aucun email envoyé (Resend non configuré : RESEND_API_KEY / RESEND_FROM_EMAIL).";
-  }
+  const travelerEmailSent = false;
+  const activityDetail = "Workflow lancé (mode IA). L’accusé de réception et ses questions sont à relire, modifier et envoyer depuis le module mailing du dossier.";
 
   const now = new Date().toISOString();
   const runRef = newWorkflowRunRef();
@@ -293,30 +237,11 @@ export async function launchWorkflowManual(
   const block = assertCanLaunchWorkflow(fetched.row, user.id, "manual");
   if (block) return block;
 
-  let travelerEmailSent = false;
-  let activityDetail: string;
-
-  if (sendWelcomeEmail) {
-    if (isResendOutboundConfigured()) {
-      const html = buildWorkflowWelcomeEmailSimpleHtml(fetched.row);
-      const sent = await sendTransactionalHtmlEmail({
-        to: fetched.row.email,
-        subject: WORKFLOW_SUBJECT,
-        html,
-      });
-      if (!sent.ok) {
-        return { ok: false, error: sent.error };
-      }
-      travelerEmailSent = true;
-      activityDetail =
-        "Workflow lancé (mode manuel) — email de bienvenue simple envoyé au voyageur.";
-    } else {
-      activityDetail =
-        "Workflow lancé (mode manuel) — email de bienvenue non envoyé (Resend non configuré alors que la case était cochée).";
-    }
-  } else {
-    activityDetail = "Workflow lancé (mode manuel) — sans email de bienvenue.";
-  }
+  const travelerEmailSent = false;
+  // Retain the old signature for callers while removing implicit dispatch.
+  const activityDetail = sendWelcomeEmail
+    ? "Workflow lancé (mode manuel). Accusé de réception à relire et envoyer depuis le module mailing ; aucun envoi automatique."
+    : "Workflow lancé (mode manuel). Les emails sont disponibles dans le module mailing du dossier.";
 
   const now = new Date().toISOString();
   const runRef = newWorkflowRunRef();

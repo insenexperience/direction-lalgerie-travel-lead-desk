@@ -3,30 +3,54 @@
 | Champ | Valeur |
 |-------|--------|
 | **Périmètre** | Cockpit lead (`/leads/[id]`), liste leads, workflow voyageur (`/leads/[id]/workflow`), statuts pipeline Supabase, gates brief, intake, webhooks ; effets **côté opérateur** des politiques RLS. |
-| **Dernière revue** | 2026-09-27 — Back office v3 : parcours piloté par la trame du site, 7 étapes affichées, deux horloges de 48 h, proposition Direction l'Algérie. Voir la section « Parcours v3 » ci-dessous et [`REFONTE_V3.md`](./REFONTE_V3.md). Les sections v2 plus bas décrivent les écrans conservés sous `/leads/[id]/workflow` (redirigé) et `/agencies/gestion`. |
-| **Sources de vérité** | Runtime : code dans `src/app/(dashboard)/leads/actions.ts`, `workflow-actions.ts`, `lead-brief-gate.ts`. Spec produit : [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md). |
+| **Dernière revue** | 2026-10-05 — Import manuel analysé et relu, qualification logistique partagée, composer email intégré à BO3, consultations préparées avant envoi et historique des mails. Voir les parcours ci-dessous et [`REFONTE_V3.md`](./REFONTE_V3.md). Les sections v2 plus bas décrivent les écrans historiques ; `/leads/[id]/workflow` redirige vers BO3. |
+| **Sources de vérité** | Runtime : `projet-actions.ts`, `manual-import-actions.ts`, `email-actions.ts`, `qualification-details-actions.ts`, `lead-qualification-completeness.ts`, `workflow-actions.ts`, `lead-brief-gate.ts` et migrations mailing. Spec produit : [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md). |
 
 ## Parcours v3 — de la trame du site au dossier gagné (depuis le 27/09/2026)
 
-Le voyageur compose son voyage sur www (Composer, « Mon projet ») ; le site envoie une **trame** structurée à `POST /api/intake`. Le back office part de cette trame au lieu de la requalifier. Détail des données : [`REFONTE_V3.md`](./REFONTE_V3.md).
+Le site peut envoyer une **trame** structurée à `POST /api/intake`. Un email ou message peut aussi être importé manuellement, puis qualifié dans les champs du dossier. La trame du site n'est pas obligatoire : le brief peut être préparé dès que les informations indispensables sont confirmées. Détail des données : [`REFONTE_V3.md`](./REFONTE_V3.md).
 
 ```mermaid
 flowchart LR
-  A[À compléter] -->|lien voyageur raccourci, WhatsApp ou qualification guidée| R[Reçu]
+  A[À compléter] -->|réponses client et faits confirmés| R[Reçu]
   R -->|genererBrief| B[Brief prêt]
-  B -->|envoyerBrief| E[Envoyé aux agences]
+  B -->|preparerEmailAgence| D[Brouillon agence]
+  D -->|envoi explicite ou envoi externe déclaré| E[Envoyé aux agences]
   E -->|saisirProposition / retenirProposition| P[Proposition]
   P -->|convertirProposition puis envoyerProposition| PR[Proposée]
   PR -->|marquerGagne / marquerPerdu| C[Clos]
 ```
 
 - **Étapes affichées** : dérivées de `leads.status` et du contenu du dossier (`statutDe()` dans `src/lib/bo3/load.ts`). L'enum de la base ne change pas.
-- **Première réponse sous 48 h** : `premiereReponse` ou `demanderManque` (le lien voyageur vaut première réponse). L'accusé de réception automatique (`TRAVELER_ACK_ENABLED`) ne compte pas comme première réponse.
-- **Garde-fou « Reçu → Brief prêt »** : la trame doit contenir dates, groupe, budget et lieux (`manqueDe()`), sinon le dossier reste « À compléter ». Le budget peut être « À définir avec l'agence ».
-- **Brief anonyme** : `envoyerBrief` refuse l'envoi si le brief contient le prénom, le nom complet, l'e-mail ou le téléphone du voyageur (`fuitesBrief()`).
-- **Réponse agence sous 48 h** : horloge par agence depuis `brief_sent_at` ; accusé, relances et refus sont datés.
+- **Première réponse sous 48 h** : le premier mail `welcome` ou `qualification` finalisé par le composer compte comme réponse, y compris un envoi externe déclaré. La RPC ajoute au journal `email_sent` ou `email_sent_externally`, avec le contenu édité et `payload.email_kind` ; BO3 lit ces événements pour arrêter l'horloge. Les événements historiques `first_response` / `traveler_link_sent` restent reconnus. L'accusé automatique du site (`ack_sent`, si activé) ne compte pas comme réponse humaine.
+- **Garde-fou « Reçu → Brief prêt »** : `analyzeLeadQualification()` vérifie les informations de chiffrage dans les faits confirmés, réponses voyageur et trame. Un budget « À définir » ou une simple catégorie de budget ne suffit pas. Le moteur est partagé par BO3, la génération du brief et le mailing ; les champs manquants restent à demander.
+- **Brief anonyme et fidèle** : le brief reprend les notes supplémentaires reformatées, les options de parcours et les informations confirmées. Les noms, emails, téléphones et profils sociaux du voyageur sont masqués ; le serveur refuse un mail agence édité qui réintroduit des coordonnées ou une identité.
+- **Préparation agence distincte de l'envoi** : « Confier à une agence » crée/réutilise une consultation `pending_send`, `brief_sent_at = null`, puis ouvre son composer. Les anciens boutons déclarant immédiatement l'envoi ne font plus partie du flux de la fiche.
+- **Réponse agence sous 48 h** : l'horloge démarre seulement lorsque la RPC finalise l'envoi du mail agence et renseigne `brief_sent_at`. Un brouillon ne déclenche ni délai, ni accusé attendu, ni relance, ni saisie de proposition.
 - **Proposition Direction l'Algérie** : le devis d'une agence est converti (titre, lignes, prix par personne, validité, mention du partenariat), puis envoyé au voyageur. Le voyageur ne reçoit jamais le devis de l'agence tel quel.
 - **Écritures** : les actions de `projet-actions.ts` écrivent le statut directement, **conditionné au statut de départ** (jamais de retour en arrière). Elles ne passent pas par `updateLeadStatus` / `assertLeadStatusTransition`. La RLS s'applique toujours : un dossier sans référent est pris par l'opérateur qui agit (`prendreDossier`).
+
+### Import manuel d'un email ou message
+
+1. Depuis l'import manuel, coller le message complet et choisir son canal d'origine. `analyzeManualLeadMessage()` répartit les faits explicites dans les champs et propose une retranscription complète, aérée, dans les notes supplémentaires du voyage. Cette analyse n'insère rien et n'envoie aucun email.
+2. Relire et modifier le contact, le titre, les destinations/options, groupe, dates, hébergements, budget, vols, chambres, contraintes, notes et langue des emails client. La langue est celle du message original (`fr`/`en`), même si la retranscription interne est en français ; elle ne se déduit pas de la nationalité. Si l'IA est indisponible, le préremplissage conservateur est signalé et reste éditable.
+3. Confirmer la relecture puis créer via `createLeadFromManualMessage()`. L'opérateur connecté devient explicitement le référent du dossier. Le message original est conservé intégralement dans `intake_payload.source_message`, distinct des notes reformatées ; le UUID de soumission protège des imports répétés avec le même identifiant.
+4. Les absences restent des absences : pas d'année inférée à partir de la date de réception, pas de groupe transformé en « 1 adulte / 0 enfant », pas de devise ou base de budget inventée. « Entre amis » ne donne pas un nombre ; « solo » explicite permet 1 adulte / 0 enfant. Les montants en devise étrangère restent dans les faits et le texte, sans taux de conversion inventé dans les colonnes financières EUR.
+
+### Qualification et composer email
+
+- « Écrire la première réponse » / « Ouvrir le brouillon » ouvrent le modèle `welcome`. L'onglet Qualification et « Demander ce qui manque » ouvrent `qualification`. Chaque consultation ouvre son `agency_brief` lié au dossier et à l'agence.
+- Les modèles client sont en français ou anglais, le brief agence en français. Ils utilisent le logo et la mise en page Direction l'Algérie. L'opérateur modifie l'objet et le texte ; l'aperçu HTML, la copie du texte/HTML/email mis en forme, le téléchargement HTML et l'envoi reprennent ce contenu édité.
+- `saveLeadEmailDraft()` conserve le brouillon dans `lead_email_messages`. Réactualiser le modèle depuis le dossier remplace son texte après confirmation ; les réponses du client sont enregistrées dans « Compléter les informations pour le brief agence » puis les questions peuvent être régénérées.
+- Les premières questions manquantes concernent les **vols** (et aéroport si vols à proposer), puis le **nombre total et la composition adultes/enfants**, les **âges des enfants au départ**, puis la **répartition et la capacité des chambres**. Suivent dates avec année et durée, montant/devise/base du budget et inclusion/exclusion des vols, hébergement et itinéraire. Les données déjà confirmées ne sont pas demandées à nouveau.
+- Les questions s'adaptent au projet : bivouac seul ou expédition pédestre ne déclenchent pas une demande de chambres d'hôtel ; une expédition demande sa stratégie d'eau et son couchage/matériel. Arrivée/départ, prestations et contraintes restent des précisions complémentaires visibles dans le brief.
+- L'enregistrement/envoi exige un dossier non archivé, un référent assigné et l'utilisateur référent ou admin, ainsi qu'une adresse destinataire valide. L'envoi agence vérifie aussi consultation/destinataire, anonymisation et informations indispensables.
+- **Aucun envoi implicite au lancement du workflow** : `launchWorkflowAi` / `launchWorkflowManual` créent la session ; leurs anciens déclenchements de mails ont été retirés. Seul « Envoyer depuis Travel Lead » appelle Resend. Si le mail est envoyé depuis une autre messagerie, l'opérateur confirme explicitement « J'ai envoyé depuis ma messagerie ».
+- Envoi confirmé par le prestataire (`sent`) et déclaration externe (`external`) restent distincts dans l'historique. La sauvegarde et l'envoi contrôlent la révision du brouillon ; un clic concurrent ne peut pas envoyer une autre version. Un état `sending` dont la livraison est incertaine doit être vérifié auprès du prestataire avant toute nouvelle tentative. Le contenu d'un message déjà traité est conservé ; un nouvel envoi utilise un nouveau brouillon.
+
+### Migrations nécessaires au mailing
+
+Appliquer dans l'ordre : `20261005140000_lead_email_messages.sql` (table, RLS, historique et finalisation), `20261005143000_lead_email_concurrency.sql` (révision attendue), `20261005150000_lead_email_bo3_journal.sql` (journal BO3, première réponse client et transitions après envoi), `20261005152000_lead_email_delivery_guard.sql` (transmission unique, blocage des envois incertains), `20261005153000_lead_email_consultation_guard.sql` (préparations simultanées). Un mail complémentaire conserve le statut et la date initiale de consultation. Copier/exporter un modèle ne remplace pas l'enregistrement d'un envoi.
 
 ## Carte des zones code (à re-vérifier quand le flux change)
 
@@ -34,6 +58,10 @@ flowchart LR
 - `src/app/(dashboard)/leads/workflow-actions.ts` — session workflow, reset
 - `src/app/(dashboard)/leads/ai-actions.ts` — IA, `manual_takeover`
 - `src/lib/lead-brief-gate.ts` — brief exploitable, qualification sign-off
+- `src/lib/lead-qualification-completeness.ts` — questions manquantes et informations nécessaires au brief
+- `src/app/(dashboard)/leads/manual-import-actions.ts` et `src/lib/manual-lead-import.ts` — analyse, relecture et import fidèle
+- `src/app/(dashboard)/leads/email-actions.ts`, `qualification-details-actions.ts` — brouillons/envois explicites, faits logistiques
+- `src/components/bo3/fiche.tsx`, `src/components/leads/lead-email-composer.tsx`, `src/components/leads/qualification/lead-logistics-editor.tsx` — chaîne de traitement et éditeurs
 - `src/components/leads/lead-cockpit-shell.tsx`, `lead-cockpit-pipeline.tsx`, `lead-cockpit-bottom-nav.tsx`
 - `src/app/api/intake/`, `src/app/api/whatsapp/webhook/`
 - `supabase/migrations/`, [`RLS_PROD_CHECKLIST.md`](./RLS_PROD_CHECKLIST.md)
@@ -92,6 +120,7 @@ flowchart TB
 ## Parcours : référent (opérateur travel desk)
 
 - **Allouer** : `assignLeadReferent` ; **prendre** : `claimLead`.
+- **Import manuel** : `createLeadFromManualMessage` affecte explicitement le dossier à l'opérateur connecté ; BO3 prend un dossier de pool via `prendreDossier` lors d'une action opérateur. Le composer n'enregistre ni n'envoie un mail d'un dossier sans référent.
 - Tant que `referent_id` est vide, le passage hors `new` est bloqué (`assertLeadStatusTransition`).
 
 ```mermaid
@@ -157,7 +186,7 @@ flowchart LR
 | Valider un bloc | `validateQualificationBlock` | `op_action = confirmed/adjusted/manual` + `op_validated_at` |
 | Mettre à jour sélections | `updateBlockSelections` | Sélections intermédiaires sans validation |
 | Rouvrir un bloc | `reopenQualificationBlock` | Reset `op_action=null`, conserve sélections |
-| Valider la qualification | `finalizeQualification` | Vérifie 6 blocs validés → `status = agency_assignment` |
+| Valider la qualification | `finalizeQualification` | Vérifie 6 blocs validés et informations indispensables complètes → `status = agency_assignment` |
 
 **Variable d'env requise :** `OPENAI_API_KEY` (server-only).
 
@@ -167,24 +196,27 @@ flowchart TB
   SB -->|"Générer toutes"| IA[runQualificationSuggestions]
   IA --> BL["6 blocs = ready_for_review"]
   BL --> VAL[validateQualificationBlock x6]
-  VAL --> GATE[QualificationGate - 6/6]
+  VAL --> GATE[QualificationGate - 6/6 et informations indispensables]
   GATE --> FIN[finalizeQualification]
   FIN --> AA[status = agency_assignment]
   R -->|"Remplir manuellement"| MANUAL["op_action = manual x6"]
   MANUAL --> GATE
 ```
 
-### Lancement workflow (inchangé v1)
+### Lancement workflow historique
 
 - `launchWorkflowAi` / `launchWorkflowManual` (`workflow-actions.ts`) ; seul le **référent** du dossier.
+- Le lancement ne déclenche plus d'email : accusé et qualification sont relus, enregistrés et envoyés explicitement depuis le composer.
 - **Reset session** : `resetWorkflowVoyageurSession`.
 
 ---
 
 ## Parcours : gate « brief prêt » → assignation agence
 
-- **v2** : `isLeadBriefExploitable` retourne `allBlocksValidated(lead.qualification_blocks)`. Tous les 6 blocs doivent avoir `op_action !== null`.
+- **Condition partagée** : `analyzeLeadQualification().readyForAgencyBrief` doit être vrai. Le mode manuel, les chips de budget et la validation des blocs ne dispensent pas de renseigner les informations indispensables.
+- **v2** : après ce contrôle, `isLeadBriefExploitable` vérifie `allBlocksValidated(lead.qualification_blocks)`. Tous les 6 blocs doivent avoir `op_action !== null`.
 - **Fallback v1** : si `qualification_blocks` est absent (leads legacy), la gate utilise la checklist 8-champs + `qualification_validation_status`.
+- **BO3** : `genererBrief` accepte les faits complets sans trame du site ; `preparerEmailAgence` prépare seulement la consultation, et l'envoi agence du composer revérifie les informations avant transmission/finalisation.
 - Implémentation : `isLeadBriefExploitable` / `getBriefGateBlockMessage` (`lead-brief-gate.ts`) + `assertBriefExploitableBeforeAgencyAssignment` (`actions.ts`) sur `qualification` → `agency_assignment`.
 
 ---
@@ -215,6 +247,7 @@ flowchart TB
 
 | Date | Changement |
 |------|------------|
+| 2026-10-05 | Import manuel avec analyse éditable, notes fidèles/source originale distinctes et référent explicite ; moteur commun de qualification logistique ; templates DA client FR/EN et agence FR, brouillons et historique ; consultations `pending_send` avant envoi explicite/externe ; journal BO3 et horloges déclenchées uniquement après finalisation. |
 | 2026-04-20 | Création de ce document ; correctifs P0 mergés dans le code (`actions.ts`, cockpit pipeline, `lead-supabase-pipeline`). |
 | 2026-04-20 | Refonte UI/UX complète : inbox, cockpit 3 colonnes, dashboard pilotage, liste leads. |
 | 2026-04-20 | Workspace qualification unifié : `LeadQualificationWorkspace` + agent Claude Haiku + 3 server actions. Migration `destination_main`, `travel_desire_narrative`, `qualification_notes`. |

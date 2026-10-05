@@ -38,6 +38,8 @@ export type SupabaseLeadRow = {
   qualification_validation_status: string;
   manual_takeover: boolean;
   submission_id: string | null;
+  /** Message d’origine et précisions structurées recueillies à l’import. */
+  intake_payload?: Record<string, unknown> | null;
   workflow_launched_at: string | null;
   workflow_launched_by: string | null;
   workflow_mode: "ai" | "manual" | null;

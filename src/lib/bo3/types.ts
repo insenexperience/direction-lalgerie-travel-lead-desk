@@ -74,6 +74,7 @@ export type Consultation = {
   agence: string;
   portion: string;
   envoye: string;
+  statut?: string;
   accuse: string | null;
   proposition: Proposition | null;
   refus: string | null;

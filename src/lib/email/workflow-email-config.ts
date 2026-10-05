@@ -25,7 +25,8 @@ export type WorkflowEmailDeliveryHints = {
 
 /**
  * Résumé pour l’UI : prévoir le branchement Resend / variables publiques sans bloquer le desk.
- * Quand `resendReady` est false, les actions de workflow avancent quand même le dossier mais n’appellent pas l’API Resend.
+ * Le lancement d’un workflow prépare le dossier ; l’envoi reste une action
+ * explicite du module mailing après relecture du brouillon.
  */
 export function getWorkflowEmailDeliveryHints(): WorkflowEmailDeliveryHints {
   const resendReady = isResendOutboundConfigured();
@@ -34,10 +35,7 @@ export function getWorkflowEmailDeliveryHints(): WorkflowEmailDeliveryHints {
   let bannerMessage: string | null = null;
   if (!resendReady) {
     bannerMessage =
-      "Les emails voyageur (Resend) ne sont pas configurés sur cet environnement. Vous pouvez quand même lancer le workflow : le statut passera en qualification, sans envoi automatique. Pour activer l’envoi, définissez RESEND_API_KEY et RESEND_FROM_EMAIL (voir .env.example).";
-  } else if (!aiWelcomeTemplateReady) {
-    bannerMessage =
-      "Le mode « IA » enverra un email de bienvenue simplifié (sans boutons WhatsApp / mailto) tant que NEXT_PUBLIC_WHATSAPP_DA_NUMBER et NEXT_PUBLIC_DA_CONTACT_EMAIL (ou RESEND_FROM_EMAIL) ne sont pas tous renseignés.";
+      "Resend n’est pas configuré sur cet environnement. Préparez et modifiez les emails dans le module mailing, puis copiez-les dans votre messagerie et indiquez un envoi externe. Le workflow peut être lancé sans envoi automatique.";
   }
 
   return { resendReady, aiWelcomeTemplateReady, bannerMessage };

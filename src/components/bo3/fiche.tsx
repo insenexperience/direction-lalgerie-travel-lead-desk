@@ -5,14 +5,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import * as A from "@/app/(dashboard)/leads/projet-actions";
 import { LIEUX, ZONES, type Zone } from "@/lib/bo3/geo";
 import {
-  agencyClock, briefToMarkdown, complet, defaultTab, firstResponseText, fmtD, fmtDay, fuitesBrief, hrs, nextAction, nomAgence,
+  agencyClock, briefToMarkdown, defaultTab, fmtD, fmtDay, fuitesBrief, hrs, nextAction, nomAgence,
   portionFor, prenom, r1, statutLabel, suggestions, travelerClock, zonesJours, type Action, H,
 } from "@/lib/bo3/projet";
 import { MANQUES, SOURCES, STATUT_LABEL, STATUTS, type Agence, type BriefSection, type Consultation, type Mention, type Projet, type Trame } from "@/lib/bo3/types";
 import { trameVide } from "@/lib/bo3/trame";
 import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
-import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
+import { Card, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
+import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { LeadLogisticsEditor } from "@/components/leads/qualification/lead-logistics-editor";
+import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
+import { analyzeLeadQualification } from "@/lib/lead-qualification-completeness";
 
 type Res = A.Resultat;
 const QUALIF: [string, string][] = [["Ambiance & type de voyage", "envies, rythme"], ["Groupe", "taille, profil"], ["Temporalité", "mois, durée, souplesse"], ["Hébergement & transport", "type, confort"], ["Incontournables", "lieux, expériences"], ["Budget", "fourchette par personne"]];
@@ -22,7 +26,27 @@ const lienWhatsApp = (tel: string | null, texte: string) => { const d = (tel ?? 
 const lienMail = (email: string | null, sujet: string, texte: string) => (email ? `mailto:${email}?subject=${encodeURIComponent(sujet)}&body=${encodeURIComponent(texte)}` : null);
 const copier = async (t: string) => { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } };
 
-export function FicheView({ p, agences, now: depart, signature }: { p: Projet; agences: Agence[]; now: number; signature: string }) {
+// The BO3 reset otherwise overrides Tailwind controls. Scope the bridge to these modules;
+// keep the generated cockpit stylesheet and all existing screens unchanged.
+const MAILING_STYLES = `
+.bo3 .lead-mailing-module { color:var(--ink); min-width:0; }
+.bo3 .lead-mailing-module button { font:600 12px/1.5 var(--sans); border:1px solid var(--line); border-radius:6px; padding:8px 12px; background:var(--surface); color:var(--ink); }
+.bo3 .lead-mailing-module button[class*="bg-steel"] { background:var(--dark); color:var(--surface); border-color:var(--dark); }
+.bo3 .lead-mailing-module input,.bo3 .lead-mailing-module textarea,.bo3 .lead-mailing-module select { font:400 13px/1.65 var(--sans); color:var(--ink); padding:9px 11px; background:var(--surface); border:1px solid var(--line); border-radius:6px; }
+.bo3 .lead-mailing-module input:disabled,.bo3 .lead-mailing-module textarea:disabled { background:var(--surface-2); color:var(--muted); }
+.bo3 .lead-mailing-module label { display:block; }
+.bo3 .lead-mailing-module iframe { background:#f5f6f2; }
+.bo3 .lead-mailing-module h3 { font-family:var(--serif); }
+.bo3 .lead-mailing-dialog .mod { max-width:1120px; }
+.bo3 .lead-mailing-dialog .mod__bd { padding:16px; }
+@media(max-width:760px) { .bo3 .lead-mailing-dialog .ovl { padding:8px; } .bo3 .lead-mailing-dialog .mod__bd { padding:8px; } }
+`;
+
+function FicheTab({ id, label, count, active, onSelect }: { id:string; label:string; count?:number; active:string; onSelect:(id:string) => void }) {
+  return <button className={active === id ? "on" : ""} onClick={() => onSelect(id)}>{label}{count ? <b>{count}</b> : null}</button>;
+}
+
+export function FicheView({ p, lead, agences, now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; now: number; signature: string }) {
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
@@ -32,16 +56,22 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
   const [tab, setTab] = useState(() => defaultTab(p));
   const [briefTab, setBriefTab] = useState<"edit" | "prev">("edit");
   const [briefOpen, setBriefOpen] = useState(p.statut === "brief_pret");
-  const [sel, setSel] = useState<string[] | null>(null);
+  const [selectedAgencyIds, setSel] = useState<string[] | null>(null);
   const [mode, setMode] = useState<"portion" | "pilote">("portion");
   const [form, setForm] = useState<Record<string, string>>({});
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
+  // Refresh the editable brief when its saved server revision changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setSections(p.brief?.sections ?? []), [p.brief]);
 
-  const na = nextAction(p, agences, now);
+  const information = analyzeLeadQualification(lead);
+  const canGenerateBrief = information.readyForAgencyBrief;
+  const missingInformation = information.checklist.filter((item) => item.requiredForBrief && item.status === "missing").map((item) => item.label);
+  const na = nextAction({ ...p, consultations:p.consultations.filter((c) => c.envoye) }, agences, now);
   const sug = useMemo(() => suggestions(p, agences), [p, agences]);
-  const pend = p.consultations.filter((c) => !c.proposition && !c.refus);
-  const props = p.consultations.filter((c) => c.proposition);
+  const sel = selectedAgencyIds ?? (p.statut === "brief_pret" ? sug.filter((s) => s.jours > 0).slice(0, 1).map((s) => s.a.id) : []);
+  const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus);
+  const props = p.consultations.filter((c) => c.envoye && c.proposition);
   const tc = travelerClock(p, now);
   const canalNom = p.canal === "whatsapp" ? "WhatsApp" : "e-mail";
   const n = (id: string | null | undefined) => nomAgence(agences, id);
@@ -56,6 +86,15 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       if (r.ok) { apres?.(r); router.refresh(); }
     });
   }, [router, toast]);
+
+  function prepareAgencyEmail(agencyId: string) {
+    start(async () => {
+      const result = await A.preparerEmailAgence(p.id, agencyId);
+      if (!result.ok) { toast(result.error); return; }
+      setForm({ agence:agencyId, propId:result.proposalId });
+      setTab("agences"); setModal("agency-email"); router.refresh();
+    });
+  }
 
   const ouvrirConversion = (c: Consultation) => {
     const pr = c.proposition!;
@@ -73,8 +112,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
 
   const run = useCallback((a: Action | "lost" | "won" | "lien", extra?: string) => {
     switch (a) {
-      case "first": setForm({ text: firstResponseText(p, agences, now, signature) }); setModal("first"); break;
-      case "ask": setForm({ text: `Bonjour ${prenom(p)},\n\nVotre projet est bien arrivé. Pour le transmettre à la bonne agence, il me manque ${p.manque.length ? p.manque.join(", ") : "quelques précisions"}. Deux minutes suffisent : {lien}\n\nJe reste votre seul interlocuteur.\n\n${signature} — Direction l'Algérie` }); setModal("ask"); break;
+      case "first": setModal("first"); break;
+      case "ask": setModal("ask"); break;
       case "complete": setModal("complete"); break;
       case "qualif": setTab("trame"); break;
       case "brief": act(() => A.genererBrief(p.id), () => { setTab("agences"); setBriefOpen(true); }); break;
@@ -89,18 +128,22 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       case "lien": act(() => A.demanderManque(p.id, "Lien voyageur : {lien}"), (r) => { if (r.ok && r.url) copier(r.url); }); break;
       default: break;
     }
-  }, [p, agences, now, signature, act, na.agence, pend]);
+  }, [p, act, na.agence, pend]);
 
   // Action demandée depuis la file de travail (?action=…), une seule fois.
   const intentFaite = useRef(false);
   useEffect(() => {
     const a = params.get("action") as Action | null;
-    if (a && !intentFaite.current) { intentFaite.current = true; run(a); router.replace(`/leads/${p.id}`, { scroll: false }); }
+    if (a && !intentFaite.current) {
+      intentFaite.current = true;
+      // URL navigation is an external intent; consume it once in this effect.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      run(a);
+      router.replace(`/leads/${p.id}`, { scroll: false });
+    }
   }, [params, run, router, p.id]);
-  useEffect(() => { if (p.statut === "brief_pret" && sel === null) setSel(sug.filter((s) => s.jours > 0).slice(0, 1).map((s) => s.a.id)); }, [p.statut, sel, sug]);
 
   const F = (k: string) => ({ value: form[k] ?? "", onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value }) });
-  const Tb = ({ id, l, c }: { id: string; l: string; c?: number }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{l}{c ? <b>{c}</b> : null}</button>;
   const echeanceAgence = fmtD(now + 48 * H);
   // Un texte par agence : son nom seul (aucune agence ne voit les autres), et sa portion en mode « un brief par agence ».
   const portionDe = (id: string) => (mode === "pilote" ? "tout" : portionFor(p, agences.find((a) => a.id === id)!) || "tout");
@@ -108,18 +151,20 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
 
   return (
     <div className="page">
+      <style>{MAILING_STYLES}</style>
       {/* En-tête */}
       <div className="hdr">
         <div>
           <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span><span>{canalNom}</span></div>
           <h1 className="t">{p.nom}</h1>
-          <div className="sub">{p.trame ? `« ${p.trame.titre} » · ${p.trame.jours.length} jours${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
+          <div className="sub">{p.trame ? `« ${p.trame.titre} » · ${p.trame.jours.length} jours${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : lead.trip_summary || "Projet à qualifier"}</div>
         </div>
         <div className="row" style={{ alignItems: "flex-end" }}>
           <div style={{ minWidth: 190 }}><div className="lbl" style={{ marginBottom: 4 }}>Première réponse</div><Deadline c={tc} /></div>
           <Menu items={[
             !p.premiereReponse && p.statut !== "clos" && { l: "Écrire la première réponse", ic: "send", f: () => run("first") },
-            complet(p) && !p.brief && p.statut !== "clos" && { l: "Générer le brief", ic: "file", f: () => run("brief") },
+            canGenerateBrief && !p.brief && p.statut !== "clos" && { l: "Générer le brief", ic: "file", f: () => run("brief") },
+            !!p.brief && p.statut !== "clos" && { l: "Confier à une agence", ic: "building", f: () => setModal("agency-choice") },
             p.statut !== "clos" && { l: `Lien voyageur${p.manque.length ? " (champs manquants)" : ""}`, ic: "link", f: () => run("lien") },
             !!lienWhatsApp(p.tel, "") && { l: "WhatsApp voyageur", ic: "wa", f: () => window.open(lienWhatsApp(p.tel, "")!, "_blank", "noopener") },
             p.statut === "proposee" && { l: "Marquer gagné", ic: "check", f: () => run("won") },
@@ -150,19 +195,26 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
 
       {/* Quatre faits */}
       <div className="facts">
-        <div className="fact"><div className="lbl">Complétude</div><div className="v"><Completude p={p} /></div></div>
-        <div className="fact"><div className="lbl">{p.consultations.length ? "Agences consultées" : "Agence pressentie"}</div><div className="v">{p.consultations.length ? p.consultations.map((c) => n(c.agence)).join(" · ") : p.trame && sug[0]?.jours ? `${sug[0].a.n} · ${sug[0].jours} j / ${sug[0].total}` : "à déterminer"}</div></div>
+        <div className="fact"><div className="lbl">Complétude</div><div className="v"><span className={`tag ${canGenerateBrief ? "green" : "amber"}`}>{information.completeness} %</span><div className="mt">{canGenerateBrief ? "informations pour le brief réunies" : `${missingInformation.length} précision${missingInformation.length > 1 ? "s" : ""} à recueillir`}</div></div></div>
+        <div className="fact"><div className="lbl">{p.consultations.some((c) => c.envoye) ? "Agences consultées" : p.consultations.length ? "Agences en préparation" : "Agence pressentie"}</div><div className="v">{p.consultations.length ? p.consultations.map((c) => `${n(c.agence)}${c.envoye ? "" : " (brouillon)"}`).join(" · ") : p.trame && sug[0]?.jours ? `${sug[0].a.n} · ${sug[0].jours} j / ${sug[0].total}` : "à déterminer"}</div></div>
         <div className="fact"><div className="lbl">Horloge agence</div><div className="v">{pend.length ? pend.map((c) => <div key={c.id}><Deadline c={agencyClock(c, now)} small /></div>) : props.length ? <span className="tag green">{props.length} {props.length > 1 ? "propositions reçues" : "proposition reçue"}</span> : <span className="mt">démarre à l&apos;envoi du brief</span>}</div></div>
         <div className="fact"><div className="lbl">Voyageur</div><div className="v">{p.email || "pas d'e-mail"}<div className="mt">{p.tel ?? "pas de téléphone"}{p.agenceChoisie ? ` · a choisi ${n(p.agenceChoisie)}` : ""}</div></div></div>
       </div>
 
       {/* Onglets */}
       <div className="seg" role="tablist">
-        <Tb id="trame" l={p.trame ? "Trame" : "Qualification"} />
-        <Tb id="agences" l="Brief & agences" c={p.consultations.length} />
-        <Tb id="props" l="Propositions & devis" c={props.length} />
-        <Tb id="voyageur" l="Voyageur & messages" c={p.messages.length} />
+        <FicheTab id="trame" label={p.trame ? "Trame" : "Qualification"} active={tab} onSelect={setTab} />
+        <FicheTab id="agences" label="Brief & agences" count={p.consultations.length} active={tab} onSelect={setTab} />
+        <FicheTab id="props" label="Propositions & devis" count={props.length} active={tab} onSelect={setTab} />
+        <FicheTab id="voyageur" label="Voyageur & messages" count={p.messages.length} active={tab} onSelect={setTab} />
       </div>
+
+      {tab === "trame" && p.statut !== "clos" && (
+        <div className="stack lead-mailing-module" style={{ marginBottom:16 }}>
+          <LeadLogisticsEditor key={lead.updated_at} lead={lead} />
+          <LeadEmailComposer lead={lead} kind="qualification" />
+        </div>
+      )}
 
       {tab === "trame" && (p.trame ? (
         <>
@@ -201,7 +253,7 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
               <div className="row wrap" style={{ gap: 6 }}>{MANQUES.map((k) => p.manque.includes(k) ? <span key={k} className="miss"><Icon n="alert" s={11} /> {k}</span> : <span key={k} className="ok"><Icon n="check" s={11} /> {k}</span>)}</div>
               <div className="row">
                 {p.manque.length > 0 && p.statut !== "clos" && (!p.premiereReponse ? <button className="btn a sm" onClick={() => run("ask")}><Icon n="link" s={12} /> Demander ce qui manque</button> : <button className="btn p sm" onClick={() => run("complete")}>Saisir les réponses</button>)}
-                {complet(p) && !p.brief && p.statut !== "clos" && <button className="btn p sm" disabled={pending} onClick={() => run("brief")}>Générer le brief depuis la trame</button>}
+                {canGenerateBrief && !p.brief && p.statut !== "clos" && <button className="btn p sm" disabled={pending} onClick={() => run("brief")}>Générer le brief depuis le dossier</button>}
                 {p.brief && <button className="btn s sm" onClick={() => { setTab("agences"); setBriefOpen(true); }}>Voir le brief</button>}
               </div>
             </div>
@@ -210,7 +262,7 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       ) : (
         <Card t={`Qualification guidée · ${p.source === "whatsapp" ? "lead WhatsApp" : "sans trame"}`} right={<span className="tag amber">{p.qualification.length} / 6</span>}>
           <div className="warn" style={{ marginBottom: 10 }}>Pas de trame : le voyageur n&apos;est pas passé par le Composer. Qualifiez par la conversation, puis construisez la trame. Rien ne part sans vous.</div>
-          {p.texte && <div className="card soft" style={{ padding: "10px 12px", fontStyle: "italic", marginBottom: 10 }}>« {p.texte} »</div>}
+          {p.texte && <details className="card soft" style={{ padding: "10px 12px", marginBottom: 10 }}><summary style={{ cursor:"pointer" }}>Lire les précisions du voyageur</summary><div style={{ whiteSpace:"pre-wrap", lineHeight:1.8, marginTop:8 }}>{p.texte}</div></details>}
           <div className="stack" style={{ gap: 6 }}>
             {QUALIF.map(([b, aide], i) => { const fait = p.qualification.includes(i); return (
               <div key={b} className={`qb ${fait ? "done" : ""}`}>
@@ -221,7 +273,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
           </div>
           <div className="row wrap" style={{ marginTop: 12 }}>
             <button className={`btn ${p.qualification.length === 6 ? "a" : "p"}`} onClick={() => setModal("qualif")}>Construire la trame</button>
-            <button className="btn s sm" onClick={() => run("ask")}><Icon n="link" s={11} /> Envoyer le lien voyageur complet</button>
+            <button className="btn s sm" onClick={() => run("ask")}><Icon n="send" s={11} /> Préparer le mail de qualification</button>
+            {canGenerateBrief && !p.brief && p.statut !== "clos" && <button className="btn p sm" disabled={pending} onClick={() => run("brief")}>Générer le brief depuis le dossier</button>}
           </div>
         </Card>
       ))}
@@ -231,8 +284,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
           <Card t="Brief agence" right={p.brief ? <div className="row"><span className="mt">relu {p.brief.editedAt ? fmtD(p.brief.editedAt) : "—"}</span><button className="btn s xs" onClick={() => setBriefOpen(!briefOpen)}>{briefOpen ? "Replier" : "Ouvrir"}</button></div> : null}>
             {!p.brief && (
               <div className="row wrap" style={{ justifyContent: "space-between" }}>
-                <span className="mt">{complet(p) ? "Le projet est complet. Le brief se génère depuis la trame, puis se relit avant envoi." : `Le brief attend un projet complet. Il manque : ${p.manque.join(", ") || "la trame"}.`}</span>
-                {complet(p) && p.statut !== "clos" && <button className="btn p sm" disabled={pending} onClick={() => run("brief")}>Générer le brief</button>}
+                <span className="mt">{canGenerateBrief ? "Le dossier contient les informations nécessaires. Le brief se prépare puis se relit avant envoi." : `Le brief attend ces précisions : ${missingInformation.join(", ")}.`}</span>
+                {canGenerateBrief && p.statut !== "clos" && <button className="btn p sm" disabled={pending} onClick={() => run("brief")}>Générer le brief</button>}
               </div>
             )}
             {p.brief && briefOpen && (
@@ -264,11 +317,11 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
             )}
           </Card>
 
-          {p.statut === "brief_pret" && p.trame && (
+          {p.brief && p.statut !== "clos" && !p.devis?.envoye && (
             <Card t="Routage · à qui envoyer" right={<div className="row"><button className={`chip ${mode === "portion" ? "on" : ""}`} onClick={() => setMode("portion")}>Un brief par agence</button><button className={`chip ${mode === "pilote" ? "on" : ""}`} onClick={() => setMode("pilote")}>Une agence pilote</button></div>}>
-              <div className="bars" style={{ marginBottom: 12 }}>
+              {p.trame && <div className="bars" style={{ marginBottom: 12 }}>
                 {Object.entries(zonesJours(p.trame)).sort((a, b) => b[1] - a[1]).map(([z, nb]) => <div key={z} className="b"><span>{ZONES[z as Zone]}</span><i style={{ width: `${(nb / p.trame!.jours.length) * 100}%` }} /><span className="n">{nb} j</span></div>)}
-              </div>
+              </div>}
               <div className="stack" style={{ gap: 8 }}>
                 {sug.map(({ a, jours, total }, i) => {
                   const on = (sel ?? []).includes(a.id);
@@ -280,8 +333,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
                         <div className="row wrap"><span className="agc__n">{a.n}</span>{i === 0 && jours ? <span className="tag dark">Suggérée</span> : null}{choisie && <span className="tag teal">Choisie par le voyageur</span>}{choisie && !jours && <span className="tag amber">hors de sa zone</span>}</div>
                         <div className="mt">{a.ville} · {a.zones.map((z) => ZONES[z]).join(", ")}</div>
                       </div>
-                      <div><b>{jours} jour{jours > 1 ? "s" : ""} sur {total}</b> dans sa zone{por && por !== "tout" ? <div className="mt">{mode === "portion" ? `sa portion : ${por}` : "trame complète"}</div> : null}</div>
-                      <div className="row"><input type="checkbox" checked={on} onChange={() => setSel(on ? (sel ?? []).filter((x) => x !== a.id) : [...(sel ?? []), a.id])} /><span className="mt">envoyer</span></div>
+                      <div>{p.trame ? <><b>{jours} jour{jours > 1 ? "s" : ""} sur {total}</b> dans sa zone{por && por !== "tout" ? <div className="mt">{mode === "portion" ? `sa portion : ${por}` : "trame complète"}</div> : null}</> : <span className="mt">Dossier qualifié par l’opérateur</span>}</div>
+                      <div className="row"><input type="checkbox" checked={on} onChange={() => setSel(on ? (sel ?? []).filter((x) => x !== a.id) : [...(sel ?? []), a.id])} /><span className="mt">sélectionner</span></div>
                     </label>
                   );
                 })}
@@ -291,32 +344,32 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
                 {(sel ?? []).map((id) => (
                   <button key={id} className="btn s" disabled={fuites.length > 0} title={fuites.length ? "Corrigez le brief d'abord" : undefined} onClick={() => copier(briefTexte(id)).then((ok) => toast(ok ? `Brief pour ${n(id)} copié. Collez-le dans votre e-mail ou WhatsApp.` : "Copie impossible : sélectionnez le texte dans l'aperçu."))}><Icon n="copy" s={12} /> Copier pour {n(id)}</button>
                 ))}
-                <button className="btn a" disabled={!(sel ?? []).length || fuites.length > 0 || pending} onClick={() => act(() => A.envoyerBrief(p.id, (sel ?? []).map((id) => ({ agence: id, portion: portionDe(id) }))))}>
-                  <Icon n="send" s={12} /> Marquer envoyé à {(sel ?? []).length} agence{(sel ?? []).length > 1 ? "s" : ""}
-                </button>
+                {(sel ?? []).map((id) => <button key={`email:${id}`} className="btn a" disabled={fuites.length > 0 || pending} onClick={() => prepareAgencyEmail(id)}><Icon n="pencil" s={12} /> Préparer l’email pour {n(id)}</button>)}
+                <button className="btn s" disabled={pending || fuites.length > 0} onClick={() => setModal("agency-choice")}><Icon n="building" s={12} /> Confier à une agence</button>
               </div>
             </Card>
           )}
 
           {p.consultations.length > 0 && (
-            <Card t="Suivi des agences" right={p.statut !== "clos" && !p.devis?.envoye ? <div className="row wrap">{agences.filter((a) => !p.consultations.some((c) => c.agence === a.id)).map((a) => <button key={a.id} className="btn s xs" disabled={pending} onClick={() => act(() => A.envoyerBrief(p.id, [{ agence: a.id, portion: "tout" }]))}><Icon n="plus" s={11} /> {a.n}</button>)}</div> : null}>
+            <Card t="Suivi des agences" right={p.statut !== "clos" && !p.devis?.envoye ? <div className="row wrap">{agences.filter((a) => !p.consultations.some((c) => c.agence === a.id)).map((a) => <button key={a.id} className="btn s xs" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}><Icon n="plus" s={11} /> {a.n}</button>)}</div> : null}>
               <div className="stack" style={{ gap: 8 }}>
                 {p.consultations.map((c) => (
                   <div key={c.id} className="agcard">
                     <div>
                       <div className="row wrap"><span className="agc__n">{n(c.agence)}</span><span className="tag">{c.portion === "tout" ? "trame complète" : c.portion}</span>{c.retenue && <span className="tag green">retenue</span>}{c.refus && <span className="tag red">refus</span>}</div>
-                      <div className="mt">envoyé {fmtD(c.envoye)} · {c.accuse ? `accusé ${fmtD(c.accuse)}` : c.proposition || c.refus ? "" : <span style={{ color: hrs(c.envoye, now) > 24 ? "var(--amber-deep)" : undefined }}>sans accusé depuis {r1(hrs(c.envoye, now))} h</span>}{c.relances.length ? ` · relancé ${c.relances.map(fmtD).join(", ")}` : ""}</div>
+                      <div className="mt">{c.envoye ? <>envoyé {fmtD(c.envoye)} · {c.accuse ? `accusé ${fmtD(c.accuse)}` : c.proposition || c.refus ? "" : <span style={{ color: hrs(c.envoye, now) > 24 ? "var(--amber-deep)" : undefined }}>sans accusé depuis {r1(hrs(c.envoye, now))} h</span>}</> : "Brouillon à préparer"}{c.relances.length ? ` · relancé ${c.relances.map(fmtD).join(", ")}` : ""}</div>
                       {c.proposition && <div className="mt">proposition reçue {fmtD(c.proposition.recu)}{c.proposition.prix ? ` · ${c.proposition.prix.toLocaleString("fr-FR")} € / pers.` : ""}</div>}
+                      {p.statut !== "clos" && <button className="btn s xs" style={{ marginTop:8 }} onClick={() => { setForm({ agence:c.agence, propId:c.id }); setModal("agency-email"); }}><Icon n="pencil" s={11} /> Éditer l’email de brief</button>}
                     </div>
-                    <Deadline c={agencyClock(c, now)} />
-                    {!c.proposition && !c.refus && p.statut !== "clos" ? (
+                    {c.envoye && <Deadline c={agencyClock(c, now)} />}
+                    {c.envoye && !c.proposition && !c.refus && p.statut !== "clos" ? (
                       <div className="row wrap" style={{ justifyContent: "flex-end" }}>
                         {!c.accuse && <button className="btn s xs" disabled={pending} onClick={() => act(() => A.accuseAgence(p.id, c.id))}>Accusé reçu</button>}
                         <button className="btn s xs" onClick={() => { setForm({ propId: c.id, prix: "", duree: String(p.trame?.jours.length ?? ""), resume: "", ecarts: "" }); setModal("proposal"); }}>Saisir la proposition</button>
                         <button className="btn p xs" disabled={pending} onClick={() => act(() => A.relancerAgence(p.id, c.id))}>Relancer</button>
                         <button className="btn d xs" disabled={pending} onClick={() => act(() => A.refusAgence(p.id, c.id))}>Refus</button>
                       </div>
-                    ) : <button className="btn s xs" onClick={() => setTab("props")}>Voir</button>}
+                    ) : c.proposition ? <button className="btn s xs" onClick={() => setTab("props")}>Voir</button> : null}
                   </div>
                 ))}
               </div>
@@ -360,27 +413,24 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
         </>
       )}
 
-      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
+      {tab === "voyageur" && <OngletVoyageur p={p} lead={lead} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
 
       {/* Fenêtres */}
-      {modal === "first" && (
-        <Modal title="Première réponse" onClose={() => setModal(null)} foot={<>
-          <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
-          <button className="btn a" disabled={pending} onClick={() => { const l = p.canal === "whatsapp" ? lienWhatsApp(p.tel, form.text ?? "") : lienMail(p.email, "Votre projet de voyage en Algérie", form.text ?? ""); if (l) window.open(l, "_blank", "noopener"); act(() => A.premiereReponse(p.id, form.text ?? "", canalNom), () => setModal(null)); }}><Icon n="send" s={12} /> Envoyer par {canalNom} et marquer</button>
-        </>}>
-          <div className="mt">Un message d&apos;une personne. Il dit chez qui part le projet et quand la proposition arrive. Modèle pré-rempli, modifiable. {canalNom} s&apos;ouvre avec le texte ; l&apos;horloge s&apos;arrête.</div>
-          <textarea className="inp" style={{ minHeight: 200 }} {...F("text")} />
-        </Modal>
-      )}
-      {modal === "ask" && (
-        <Modal title="Demander ce qui manque" onClose={() => setModal(null)} foot={<>
-          <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
-          <button className="btn a" disabled={pending} onClick={() => act(() => A.demanderManque(p.id, form.text ?? ""), (r) => { if (r.ok && r.url) { const texte = (form.text ?? "").replace("{lien}", r.url); const l = p.canal === "whatsapp" ? lienWhatsApp(p.tel, texte) : lienMail(p.email, "Votre projet de voyage en Algérie", texte); if (l) window.open(l, "_blank", "noopener"); else copier(texte); } setModal(null); })}><Icon n="send" s={12} /> Créer le lien et envoyer par {canalNom}</button>
-        </>}>
-          <div className="row wrap">{(p.manque.length ? p.manque : MANQUES).map((k) => <span key={k} className="miss">{k}</span>)}</div>
-          <div className="card soft" style={{ padding: "10px 12px" }}><div className="lbl">Lien voyageur · raccourci aux champs manquants</div><div className="mt" style={{ marginTop: 4 }}>Créé à l&apos;envoi, valable 30 jours. Il remplace {"{lien}"} dans le message.</div></div>
-          <textarea className="inp" style={{ minHeight: 140 }} {...F("text")} />
-        </Modal>
+      {modal === "agency-choice" && <Modal title="Confier à une agence" onClose={() => setModal(null)}>
+        <div className="mt">Choisissez l’agence pour préparer son email. Le brief reste en brouillon jusqu’à l’envoi depuis l’éditeur ou la déclaration d’un envoi externe.</div>
+        {!canGenerateBrief && <div className="warn">À compléter avant envoi : {missingInformation.join(", ")}.</div>}
+        <div className="stack" style={{ gap:8 }}>{agences.map((a) => <div className="agcard" key={a.id}>
+          <div><div className="agc__n">{a.n}</div><div className="mt">{a.ville} · {a.zones.map((z) => ZONES[z]).join(", ")}</div></div>
+          <button className="btn a sm" disabled={pending || !canGenerateBrief || !p.brief || fuites.length > 0} onClick={() => prepareAgencyEmail(a.id)}><Icon n="pencil" s={12} /> Préparer l’email</button>
+        </div>)}</div>
+        {!agences.length && <div className="empty">Aucune agence active disponible.</div>}
+      </Modal>}
+      {(modal === "first" || modal === "ask" || modal === "agency-email") && (
+        <div className="lead-mailing-dialog">
+          <Modal title={modal === "first" ? "Accusé de réception client" : modal === "ask" ? "Prise de contact et qualification" : `Email de brief · ${n(form.agence)}`} onClose={() => setModal(null)}>
+            <div className="lead-mailing-module"><LeadEmailComposer key={`${modal}:${form.propId ?? "client"}`} lead={lead} kind={modal === "first" ? "welcome" : modal === "ask" ? "qualification" : "agency_brief"} agencyId={modal === "agency-email" ? form.agence : undefined} proposalId={modal === "agency-email" ? form.propId : undefined} /></div>
+          </Modal>
+        </div>
       )}
       {(modal === "complete" || modal === "qualif") && (
         <TrameForm
@@ -461,7 +511,7 @@ function Copilote({ p, agences, now, onUse }: { p: Projet; agences: Agence[]; no
   if (!p.premiereReponse) items.push({ t: "Brouillon de première réponse", b: `Bonjour ${prenom(p)}, votre projet est bien arrivé…${sug && sug.jours ? ` Il part chez ${sug.a.n}.` : ""}`, a: "Ouvrir le brouillon", act: "first" });
   if (p.trame && sug && sug.jours) items.push({ t: "Agence suggérée", b: `${sug.a.n} : ${sug.jours} jour${sug.jours > 1 ? "s" : ""} sur ${sug.total} dans sa zone${p.agenceChoisie && p.agenceChoisie !== sug.a.id ? ` · le voyageur a choisi ${nomAgence(agences, p.agenceChoisie)}` : ""}.`, a: "Voir le routage", act: "scroll-brief" });
   if (p.trame && p.trame.ajuster.length) items.push({ t: "Points de vigilance", b: p.trame.ajuster.join(" · "), a: null, act: null });
-  const pend = p.consultations.filter((c) => !c.proposition && !c.refus && !c.accuse && hrs(c.envoye, now) > 24);
+  const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus && !c.accuse && hrs(c.envoye, now) > 24);
   if (pend.length) items.push({ t: "Relance agence", b: `${nomAgence(agences, pend[0].agence)} n'a pas accusé réception depuis ${r1(hrs(pend[0].envoye, now))} h.`, a: "Relancer", act: "remind" });
   if (!items.length) return null;
   return (
@@ -516,9 +566,12 @@ function DevisCard({ p, agences, pending, onModifier, onEnvoyer, onRelancer, onG
   );
 }
 
-function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Projet; canalNom: string; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
+function OngletVoyageur({ p, lead, canalNom, onPremiere, pending, onNote }: { p: Projet; lead: SupabaseLeadRow; canalNom: string; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
   const [note, setNote] = useState(p.notesInternes);
   const ini = p.nom.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const intake = lead.intake_payload ?? {};
+  const travelNotes = lead.project_description || (typeof intake.notes_longues === "string" ? intake.notes_longues : "");
+  const sourceMessage = typeof intake.source_message === "string" ? intake.source_message : "";
   return (
     <div className="grid2">
       <div className="stack">
@@ -526,6 +579,10 @@ function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Proje
           <div className="row"><span className="av">{ini}</span><div><div className="nm">{p.nom}</div><div className="mt">{p.email || "pas d'e-mail"} · {p.tel || "pas de téléphone"}</div></div></div>
           <div className="row wrap" style={{ marginTop: 10 }}><span className={`tag ${p.canal === "whatsapp" ? "dark" : ""}`}>WhatsApp</span><span className={`tag ${p.canal === "email" ? "dark" : ""}`}>e-mail</span><span className="mt">canal préféré : {canalNom}</span></div>
         </Card>
+        {(travelNotes || sourceMessage) && <Card t="Notes supplémentaires du voyage">
+          {travelNotes && <div style={{ whiteSpace:"pre-wrap", lineHeight:1.8 }}>{travelNotes}</div>}
+          {sourceMessage && <details style={{ marginTop:12 }}><summary style={{ cursor:"pointer", fontWeight:600 }}>Lire le message original conservé</summary><div className="card soft" style={{ whiteSpace:"pre-wrap", lineHeight:1.8, marginTop:10, padding:12 }}>{sourceMessage}</div></details>}
+        </Card>}
         <Card t="Notes internes" right={note !== p.notesInternes ? <button className="btn p xs" disabled={pending} onClick={() => onNote(note)}>Enregistrer</button> : null}>
           <textarea className="inp" placeholder="Jamais transmises aux agences ni au voyageur." style={{ minHeight: 70 }} value={note} onChange={(e) => setNote(e.target.value)} />
         </Card>
@@ -534,7 +591,7 @@ function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Proje
             <div><span className="mono mt">{fmtD(p.recu)}</span> reçu · {SOURCES[p.source]}</div>
             {p.premiereReponse && <div><span className="mono mt">{fmtD(p.premiereReponse)}</span> première réponse</div>}
             {p.brief?.editedAt && <div><span className="mono mt">{fmtD(p.brief.editedAt)}</span> brief relu</div>}
-            {p.consultations.map((c) => <div key={c.id}><span className="mono mt">{fmtD(c.envoye)}</span> brief envoyé · {c.portion === "tout" ? "trame complète" : c.portion}</div>)}
+            {p.consultations.map((c) => <div key={c.id}>{c.envoye ? <><span className="mono mt">{fmtD(c.envoye)}</span> brief envoyé</> : "Brouillon agence à préparer"} · {c.portion === "tout" ? "dossier complet" : c.portion}</div>)}
             {p.devis?.envoye && <div><span className="mono mt">{fmtD(p.devis.envoye)}</span> proposition envoyée</div>}
             {p.closedAt && <div><span className="mono mt">{fmtD(p.closedAt)}</span> {p.issue === "gagne" ? "gagné" : `perdu${p.motif ? ` · ${p.motif}` : ""}`}</div>}
           </div>

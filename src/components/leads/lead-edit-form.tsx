@@ -50,7 +50,7 @@ const FLEX_DURATIONS = [
 
 function detectGroupe(travelers: string): string {
   if (!travelers) return "";
-  if (/seul/i.test(travelers)) return "Seul(e)";
+  if (/seul|solo/i.test(travelers)) return "Seul(e)";
   if (/couple/i.test(travelers)) return "En couple";
   if (/famille/i.test(travelers)) return "En famille";
   if (/amis|groupe/i.test(travelers)) return "Entre amis / groupe";
@@ -58,11 +58,20 @@ function detectGroupe(travelers: string): string {
 }
 
 function detectPeople(lead: SupabaseLeadRow): string {
-  const total = (lead.travelers_adults ?? 0) + (lead.travelers_children ?? 0);
-  if (total > 1) return String(total);
+  const intake = intakeObject(lead.intake_payload);
+  const facts = intakeObject(intake.qualification_facts);
+  if (Number(intake.travellers_count) > 0) return String(intake.travellers_count);
+  if (typeof facts.travelers_adults === "number" && typeof facts.travelers_children === "number") {
+    const total = facts.travelers_adults + facts.travelers_children;
+    if (total > 0) return String(total);
+  }
   const m = (lead.travelers ?? "").match(/(\d+)\s*voyageur/);
   if (m) return m[1];
   return "";
+}
+
+function intakeObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 type DateInfo = {
@@ -88,8 +97,10 @@ function parseDateInfo(lead: SupabaseLeadRow): DateInfo {
     const [s, e] = td.split("→").map((x) => x.trim());
     return { mode: "exact", dateStart: s ?? "", dateEnd: e ?? "", flexMonth: "", flexDuration: "" };
   }
-  const flexMonth = FLEX_MONTHS.find((m) => td.includes(m)) ?? "";
-  const flexDuration = FLEX_DURATIONS.find((d) => td.includes(d)) ?? "";
+  const intake = intakeObject(lead.intake_payload);
+  const facts = intakeObject(intake.qualification_facts);
+  const flexMonth = String(facts.travel_period || intake.flex_month || intake.flex_period || lead.travel_period || td || "");
+  const flexDuration = String(facts.duration || intake.flex_duration || "");
   return { mode: "flex", dateStart: "", dateEnd: "", flexMonth, flexDuration };
 }
 
@@ -161,18 +172,27 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
   const [flexDuration, setFlexDuration] = useState(di.flexDuration);
 
   // Style & projet
+  const intake = intakeObject(lead.intake_payload);
+  const facts = intakeObject(intake.qualification_facts);
   const [hebergements, setHebergements] = useState<string[]>(
     parseHebergements(lead.qualification_summary ?? "")
   );
   const [vision, setVision] = useState<string[]>(
     parseVision(lead.travel_style ?? "")
   );
-  const [notes, setNotes] = useState(lead.trip_summary ?? "");
+  const initialNotes = lead.project_description || String(intake.notes_longues || "") || lead.trip_summary || "";
+  const [projectTitle, setProjectTitle] = useState(lead.trip_summary ?? "");
+  const [notes, setNotes] = useState(initialNotes);
 
   // Budget
-  const [budgetIdeal, setBudgetIdeal] = useState(parseBudgetIdeal(lead));
-  const [budgetMax, setBudgetMax] = useState(parseBudgetMax(lead));
-  const [currency, setCurrency] = useState("EUR");
+  const initialBudgetIdeal = Object.hasOwn(facts, "budget_min") ? String(facts.budget_min ?? "") : parseBudgetIdeal(lead);
+  const initialBudgetMax = Object.hasOwn(facts, "budget_max") ? String(facts.budget_max ?? "") : parseBudgetMax(lead);
+  const initialCurrency = Object.hasOwn(facts, "currency") ? String(facts.currency || "") : lead.budget_min !== null || lead.budget_max !== null ? lead.currency : "";
+  const initialBudgetUnit = Object.hasOwn(facts, "budget_unit") ? String(facts.budget_unit || "") : lead.budget_unit ?? "";
+  const [budgetIdeal, setBudgetIdeal] = useState(initialBudgetIdeal);
+  const [budgetMax, setBudgetMax] = useState(initialBudgetMax);
+  const [currency, setCurrency] = useState(initialCurrency);
+  const [budgetUnit, setBudgetUnit] = useState(initialBudgetUnit);
 
   // Planning stage
   const [planningStage, setPlanningStage] = useState<"ideas" | "planning" | "ready" | "">(
@@ -201,19 +221,21 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
     fd.set("email", email.trim());
     fd.set("phone", phone.trim());
     fd.set("whatsapp_phone_number", phone.trim());
-    fd.set("groupe", groupe);
-    fd.set("people", people);
-    fd.set("dates_mode", datesMode === "flex" ? "Période flexible" : "Dates précises");
-    fd.set("date_start", dateStart);
-    fd.set("date_end", dateEnd);
-    fd.set("flex_month", flexMonth);
-    fd.set("flex_duration", flexDuration);
-    fd.set("hebergements", hebergements.join(", "));
-    fd.set("vision", vision.join(" · "));
-    fd.set("notes", notes.trim());
-    fd.set("budget_ideal", budgetIdeal);
-    fd.set("budget_max_field", budgetMax);
-    fd.set("budget_currency", currency);
+    if (groupe !== detectGroupe(lead.travelers ?? "")) fd.set("groupe", groupe);
+    if (people !== detectPeople(lead)) fd.set("people", people);
+    if (datesMode !== di.mode || dateStart !== di.dateStart || dateEnd !== di.dateEnd || flexMonth !== di.flexMonth || flexDuration !== di.flexDuration) {
+      fd.set("dates_mode", datesMode === "flex" ? "Période flexible" : "Dates précises");
+      fd.set("date_start", dateStart); fd.set("date_end", dateEnd);
+      fd.set("flex_month", flexMonth); fd.set("flex_duration", flexDuration);
+    }
+    if (hebergements.join(", ") !== parseHebergements(lead.qualification_summary ?? "").join(", ")) fd.set("hebergements", hebergements.join(", "));
+    if (vision.join(" · ") !== parseVision(lead.travel_style ?? "").join(" · ")) fd.set("vision", vision.join(" · "));
+    if (projectTitle !== (lead.trip_summary ?? "")) fd.set("project_title", projectTitle.trim());
+    if (notes !== initialNotes) fd.set("notes", notes.trim());
+    if (budgetIdeal !== initialBudgetIdeal || budgetMax !== initialBudgetMax || currency !== initialCurrency || budgetUnit !== initialBudgetUnit) {
+      fd.set("budget_ideal", budgetIdeal); fd.set("budget_max_field", budgetMax);
+      fd.set("budget_currency", currency); fd.set("budget_unit", budgetUnit);
+    }
     fd.set("priority", priority);
     if (intakeChannel) fd.set("intake_channel", intakeChannel);
     if (planningStage) fd.set("planning_stage", planningStage);
@@ -231,7 +253,7 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
   }
 
   const totalBudget =
-    budgetIdeal && people
+    budgetUnit === "per_person" && budgetIdeal && people && currency
       ? (parseFloat(budgetIdeal) || 0) * (parseInt(people, 10) || 0)
       : 0;
 
@@ -395,31 +417,27 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
           <div className="grid gap-3 sm:grid-cols-2">
             <label>
               <span className={labelCls}>Période souhaitée</span>
-              <select
+              <input
                 value={flexMonth}
                 onChange={(e) => setFlexMonth(e.target.value)}
                 disabled={pending}
                 className={inputCls}
-              >
-                <option value="">Choisissez une période</option>
-                {FLEX_MONTHS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+                list="lead-edit-period-options"
+                placeholder="Ex. octobre 2027 ; du 7 au 11 à confirmer"
+              />
+              <datalist id="lead-edit-period-options">{FLEX_MONTHS.map(m => <option key={m} value={m} />)}</datalist>
             </label>
             <label>
               <span className={labelCls}>Durée approximative</span>
-              <select
+              <input
                 value={flexDuration}
                 onChange={(e) => setFlexDuration(e.target.value)}
                 disabled={pending}
                 className={inputCls}
-              >
-                <option value="">Durée approximative</option>
-                {FLEX_DURATIONS.map((d) => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
+                list="lead-edit-duration-options"
+                placeholder="Ex. 2–4 jours"
+              />
+              <datalist id="lead-edit-duration-options">{FLEX_DURATIONS.map(d => <option key={d} value={d} />)}</datalist>
             </label>
           </div>
         )}
@@ -473,15 +491,19 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
           </div>
         </div>
 
+        <label className="mb-4 block">
+          <span className={labelCls}>Titre du projet</span>
+          <input value={projectTitle} onChange={event => setProjectTitle(event.target.value)} disabled={pending} className={inputCls} placeholder="Titre court pour retrouver le dossier" />
+        </label>
         <label>
-          <span className={labelCls}>Projet en quelques mots</span>
+          <span className={labelCls}>Notes supplémentaires du voyage</span>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            rows={3}
+            rows={10}
             disabled={pending}
             className={`${inputCls} resize-y`}
-            placeholder="Étapes, villes ou régions qui vous attirent, contraintes particulières…"
+            placeholder="Retranscription du message, étapes, envies et contraintes communiquées…"
           />
         </label>
       </section>
@@ -490,13 +512,10 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
       <section>
         <p className={sectionTitleCls}>
           Budget indicatif{" "}
-          <span className="normal-case font-normal text-[#9aa7b0]">
-            (par personne, hors vols internationaux)
-          </span>
         </p>
         <div className="grid gap-3 sm:grid-cols-3">
           <label>
-            <span className={labelCls}>Budget idéal / pers.</span>
+          <span className={labelCls}>Budget idéal</span>
             <input
               type="number"
               min="0"
@@ -509,7 +528,7 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
             />
           </label>
           <label>
-            <span className={labelCls}>Budget maximum / pers.</span>
+            <span className={labelCls}>Budget maximum</span>
             <input
               type="number"
               min="0"
@@ -529,12 +548,15 @@ export function LeadEditForm({ lead, onSaved }: LeadEditFormProps) {
               disabled={pending}
               className={inputCls}
             >
+              <option value="">À préciser</option>
               <option value="EUR">Euro (€)</option>
               <option value="USD">Dollar ($)</option>
               <option value="DZD">Dinar algérien (DZD)</option>
+              <option value="GBP">Livre sterling (GBP)</option>
             </select>
           </label>
         </div>
+        <label className="mt-3 block"><span className={labelCls}>Ce montant concerne</span><select value={budgetUnit} onChange={event => setBudgetUnit(event.target.value)} disabled={pending} className={inputCls}><option value="">À préciser</option><option value="per_person">Une personne</option><option value="total">L’ensemble du groupe</option></select></label>
         {totalBudget > 0 && (
           <p className="mt-2 text-[11px] text-[#6b7a85]">
             Budget total estimé :{" "}

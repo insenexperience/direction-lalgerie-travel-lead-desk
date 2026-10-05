@@ -34,6 +34,7 @@ export function clockState(start: string, done: string | null, now: number): Clo
 }
 export const travelerClock = (p: Projet, now: number) => clockState(p.recu, p.premiereReponse, now);
 export function agencyClock(c: Consultation, now: number): Clock {
+  if (!c.envoye) return { state: "off", label: "Brouillon", pct: 0, sub: "Délai démarré à l’envoi du brief" };
   if (c.refus) return { state: "off", label: "Refus", pct: 100, sub: fmtD(c.refus) };
   if (c.proposition) {
     const h = hrs(c.envoye, c.proposition.recu);
@@ -89,7 +90,7 @@ export function urgency(p: Projet, now: number): number {
   const t = travelerClock(p, now);
   // Première réponse faite, à l'heure ou en retard : plus d'urgence côté voyageur.
   let u = p.premiereReponse ? 5000 : t.rem ?? -1;
-  const ag = p.consultations.filter((c) => !c.proposition && !c.refus).map((c) => 48 - hrs(c.envoye, now));
+  const ag = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus).map((c) => 48 - hrs(c.envoye, now));
   if (ag.length) u = Math.min(u, Math.min(...ag) + 0.5);
   if (p.consultations.some((c) => !c.accuse && !c.proposition && !c.refus && hrs(c.envoye, now) > 24)) u = Math.min(u, 6);
   return u;
@@ -112,7 +113,7 @@ export type Action =
 export type NextAction = { t: string; s: string; act: Action; a?: boolean; agence?: string };
 
 export function nextAction(p: Projet, agences: Agence[], now: number): NextAction {
-  const pend = p.consultations.filter((c) => !c.proposition && !c.refus);
+  const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus);
   const noAck = pend.find((c) => !c.accuse && hrs(c.envoye, now) > 24);
   const n = (id: string) => nomAgence(agences, id);
   switch (p.statut) {

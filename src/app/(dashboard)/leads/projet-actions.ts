@@ -9,6 +9,9 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { chargerAgences, chargerProjets, resoudreAgenceChoisie } from "@/lib/bo3/load";
 import { briefToMarkdown, buildBrief, fuitesBrief, manqueDe } from "@/lib/bo3/projet";
 import { colonnesDepuisTrame } from "@/lib/bo3/trame";
+import { analyzeLeadQualification } from "@/lib/lead-qualification-completeness";
+import { agencyTravelNotes, anonymizeAgencyText } from "@/lib/email/lead-email-template";
+import { mapRowToSupabaseLeadRow } from "@/lib/supabase-lead-detail-map";
 import type { BriefSection, Mention, Message, Projet, Trame } from "@/lib/bo3/types";
 
 export type Resultat = { ok: true; info?: string; url?: string } | { ok: false; erreur: string };
@@ -135,13 +138,23 @@ export async function noteInterne(id: string, texte: string) {
 // ---------------------------------------------------------------- brief
 export async function genererBrief(id: string) {
   return executer(id, async (ctx, p) => {
-    if (!p.trame) return refus("Pas de trame : construisez-la d'abord.");
-    if (p.manque.length) return refus(`Le brief attend un projet complet. Il manque : ${p.manque.join(", ")}.`);
+    const { data: row } = verifier(await ctx.supabase.from("leads").select("*").eq("id", id).single());
+    const lead = mapRowToSupabaseLeadRow(row, true);
+    const analysis = analyzeLeadQualification(lead);
+    if (!analysis.readyForAgencyBrief) return refus(`Complétez le dossier : ${analysis.questions.filter((q) => q.requiredForBrief).map((q) => q.label).join(", ")}.`);
+    const sections: BriefSection[] = p.trame ? buildBrief(p) : [
+      { id: "voyage", title: "Le voyage en une ligne", text: lead.trip_summary || "Projet de voyage sur mesure" },
+    ];
+    sections.push({ id: "logistique", title: "Informations confirmées du voyage", text: analysis.checklist.filter((item) => item.status === "complete" && item.value).map((item) => `• ${item.label} : ${item.value}`).join("\n") });
+    const notes = agencyTravelNotes(lead);
+    if (notes) sections.push({ id: "demande", title: "Demande détaillée du voyageur", text: notes });
+    if (analysis.questions.length) sections.push({ id: "a-confirmer", title: "Points complémentaires à confirmer", text: analysis.questions.map((q) => `• ${q.label}`).join("\n") });
+    const brief = anonymizeAgencyText(briefToMarkdown(sections), lead);
     const now = new Date().toISOString();
-    const { error } = await ctx.supabase.from("leads").update({ generated_brief: briefToMarkdown(buildBrief(p)), brief_generated_at: now, brief_edited_at: now }).eq("id", id);
+    const { error } = await ctx.supabase.from("leads").update({ generated_brief: brief, brief_generated_at: now, brief_edited_at: now }).eq("id", id);
     if (error) throw new Error(error.message);
     await statut(ctx, id, "agency_assignment", ["new", "qualification", "refinement"]);
-    return { ok: true, info: "Brief généré depuis la trame. Relisez avant d'envoyer." };
+    return { ok: true, info: "Brief généré depuis les informations confirmées et les notes du voyage. Relisez avant d'envoyer." };
   });
 }
 
@@ -153,32 +166,36 @@ export async function modifierBrief(id: string, sections: BriefSection[]) {
   });
 }
 
-/** Envoi (copier-coller + « envoyé ») à une ou plusieurs agences : l'horloge agence démarre. */
-export async function envoyerBrief(id: string, envois: { agence: string; portion: string }[]) {
-  return executer(id, async (ctx, p) => {
-    if (!p.brief || !p.brief.sections.length) return refus("Générez et relisez le brief avant l'envoi.");
+/** Prepare an agency consultation. Only the mail composer's explicit dispatch starts its clock. */
+export async function preparerEmailAgence(id: string, agencyId: string): Promise<{ ok: true; proposalId: string } | { ok: false; error: string }> {
+  try {
+    const loaded = await charger(id);
+    if (estErreur(loaded)) return { ok: false, error: loaded.ok ? "Dossier indisponible." : loaded.erreur };
+    const { ctx, p } = loaded;
+    await prendreDossier(ctx, id);
+    if (!p.brief?.sections.length) return { ok: false, error: "Générez et relisez le brief avant de préparer son email." };
     const fuites = fuitesBrief(p.brief.sections, p);
-    if (fuites.length) return refus(`Le brief contient ${fuites.join(", ")}. Corrigez avant l'envoi : rien ne part.`);
-    const nouveaux = envois.filter((e) => !p.consultations.some((c) => c.agence === e.agence));
-    if (!nouveaux.length) return refus("Choisissez au moins une agence.");
-    const now = new Date().toISOString();
-    const { error } = await ctx.supabase.from("lead_circuit_proposals").insert(
-      nouveaux.map((e) => ({
-        lead_id: id,
-        agency_id: e.agence,
-        title: p.trame?.titre ?? "Proposition de circuit",
-        circuit_outline: briefToMarkdown(p.brief!.sections),
-        status: "awaiting_response",
-        brief_sent_at: now,
-        created_by_profile_id: ctx.userId,
-        agency_proposal_payload: { portion: e.portion, reminders: [] },
-      })),
-    );
+    if (fuites.length) return { ok: false, error: `Retirez les données personnelles du brief : ${fuites.join(", ")}.` };
+    const agencies = await chargerAgences(ctx);
+    if (!agencies.some((a) => a.id === agencyId)) return { ok: false, error: "Agence introuvable ou suspendue." };
+    const existing = p.consultations.find((c) => c.agence === agencyId);
+    if (existing) return { ok: true, proposalId: existing.id };
+    const { data, error } = await ctx.supabase.from("lead_circuit_proposals").insert({
+      lead_id: id, agency_id: agencyId, title: p.trame?.titre || "Proposition de voyage",
+      circuit_outline: briefToMarkdown(p.brief.sections), status: "pending_send", brief_sent_at: null,
+      created_by_profile_id: ctx.userId, agency_proposal_payload: { portion: "tout", reminders: [], mail_workflow: "reviewed" },
+    }).select("id").single();
+    if (error?.code === "23505") {
+      const { data: concurrent } = await ctx.supabase.from("lead_circuit_proposals").select("id").eq("lead_id", id).eq("agency_id", agencyId).contains("agency_proposal_payload", { mail_workflow: "reviewed" }).maybeSingle();
+      if (concurrent) return { ok: true, proposalId: String(concurrent.id) };
+    }
     if (error) throw new Error(error.message);
     await statut(ctx, id, "agency_assignment", ["new", "qualification", "refinement"]);
-    await journal(ctx, id, "brief_sent", { k: "sys", s: "Brief envoyé", b: `${nouveaux.length} agence${nouveaux.length > 1 ? "s" : ""} · réponse attendue sous 48 h.` });
-    return { ok: true, info: `Brief marqué envoyé à ${nouveaux.length} agence${nouveaux.length > 1 ? "s" : ""}. Horloge agence démarrée.` };
-  });
+    rafraichir(id);
+    return { ok: true, proposalId: String(data.id) };
+  } catch {
+    return { ok: false, error: "La consultation n’a pas pu être préparée. Aucun email envoyé." };
+  }
 }
 
 // ---------------------------------------------------------------- agences
