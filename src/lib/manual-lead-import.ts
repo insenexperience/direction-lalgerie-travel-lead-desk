@@ -67,27 +67,105 @@ function explicitBudgetFlightScope(source: string): "yes" | "no" | "" {
   return included === excluded ? "" : included ? "yes" : "no";
 }
 
-/** Conservative fallback when AI is unavailable. Only explicit labelled facts are extracted. */
+function messageParagraphs(source: string): string[] {
+  return source.replace(/\r\n/g, "\n").trim().split(/\n+/)
+    .flatMap(line => line.split(/(?<=[.!?])\s+(?=[\p{Lu}])/u)).map(line => line.trim()).filter(Boolean);
+}
+
+/** Natural-language fallback remains deliberately narrow: ambiguity never becomes a fact. */
+function explicitNaturalFacts(source: string): Partial<ManualLeadDraft> {
+  const paragraphs = messageParagraphs(source);
+  const confirmed = paragraphs.filter(line => !/\?|peut-être|peut etre|éventuellement|non confirmé|a priori|\b(?:environ|probablement|envisageons|envisage|maybe|perhaps|approximately|pas|not)\b|à confirmer|a confirmer|sous réserve|\bsi\b|\bou\b|\bor\b|\bentre\s+\d|\b\d+\s*(?:à|a|[-–]|to)\s*\d+/iu.test(line));
+  const unique = (values: string[]) => {
+    const distinct = [...new Set(values.filter(Boolean))];
+    return distinct.length === 1 ? distinct[0] : "";
+  };
+  const count = (word: string) => unique(confirmed.flatMap(line => {
+    if (/\b(?:pas|not|budget)\b/iu.test(line)) return [];
+    return [...line.matchAll(new RegExp(`\\b(\\d{1,3})\\s+${word}\\b`, "giu"))].map(match => match[1]);
+  }));
+  const adults = count("adultes?");
+  const children = count("enfants?");
+  const name = confirmed.map(line => line.match(/\b(?:je m['’]appelle|mon nom est)\s+([\p{Lu}][\p{L}'’-]*(?:\s+[\p{Lu}][\p{L}'’-]*){0,5})(?=\s*(?:[.(,!]|$))/u)?.[1]
+    ?? line.match(/\bje suis\s+([\p{Lu}][\p{L}'’-]*(?:\s+[\p{Lu}][\p{L}'’-]*){1,5})(?=\s*(?:[.(,!]|$))/u)?.[1] ?? "");
+  const roomLines = confirmed.filter(line => !/\b(?:pas|not)\b/iu.test(line));
+  const rooms = roomLines.flatMap(line => [...line.matchAll(/\b\d{1,2}\s+(?:chambres?(?:\s+(?:singles?|doubles?|twins?|triples?|familiales?))?|singles?|doubles?|twins?)\b/giu)].map(match => match[0]));
+  const roomGroups = new Map<string, { amounts: Set<string>; wording: string }>();
+  for (const wording of rooms) {
+    const type = wording.match(/single|double|twin|triple|familial/iu)?.[0]?.toLowerCase() ?? "unspecified";
+    const amount = wording.match(/^\d+/)?.[0] ?? "";
+    const group = roomGroups.get(type) ?? { amounts: new Set<string>(), wording };
+    group.amounts.add(amount); roomGroups.set(type, group);
+  }
+  const roomDistribution = [...roomGroups.values()].some(group => group.amounts.size > 1) ? "" : [...roomGroups.values()].map(group => group.wording).join(", ");
+  const ages = unique(confirmed.flatMap(line => {
+    const match = line.match(/\benfants?(?:\s+âgés?)?\s+(?:de\s+)?((?:\d{1,2}\s*(?:ans)?\s*(?:(?:,|et)\s*)?)+)\s*ans\b/iu);
+    if (!match) return [];
+    if (/\d,\d/.test(match[1])) return []; // Decimal age vs comma list is ambiguous.
+    const values = match[1].match(/\d+/g) ?? [];
+    return children && values.length !== Number(children) ? [] : [values.join(", ")];
+  }));
+  const monthNames = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+  const dateRanges = confirmed.flatMap(line => [...line.matchAll(new RegExp(`\\bdu\\s+(\\d{1,2})\\s+au\\s+(\\d{1,2})\\s+(${monthNames.join("|")})(?:\\s+(\\d{4}))?\\b`, "giu"))]);
+  const periods = unique(dateRanges.map(match => match[0]));
+  const exact = dateRanges.length === 1 && dateRanges[0][4] ? dateRanges[0] : null;
+  const month = exact ? String(monthNames.indexOf(exact[3].toLowerCase()) + 1).padStart(2, "0") : "";
+  const budgetLines = confirmed.filter(line => /\bbudget\b/iu.test(line));
+  const amounts = budgetLines.flatMap(line => {
+    const tail = line.slice(line.search(/\bbudget\b/iu));
+    if (/\b(?:millions?|mille|k)\b/iu.test(tail)) return [];
+    const match = tail.match(/^budget(?:\s+(?:idéal|maximum|max|global|total))?(?:\s+(?:est|de|prévu|sera))?\s*[:=]?\s*(?:(EUR|USD|GBP|DZD)\s*)?(\d[\d \u00a0]*(?:[,.]\d{1,2})?)(?![\d,.])\s*(€|euros?|EUR|USD|GBP|DZD|£)?/iu);
+    if (!match) return [];
+    return [{ amount: match[2].replace(/[ \u00a0]/g, "").replace(",", "."), currency: /^(?:€|euros?)$/iu.test(match[3] ?? "") ? "EUR" : match[1]?.toUpperCase() || (match[3] === "£" ? "GBP" : match[3]?.toUpperCase() ?? ""), maximum: /\b(?:maximum|max)\b/iu.test(tail) }];
+  });
+  const flightModes = confirmed.flatMap(line => {
+    if (/\b(?:nos|mes|les)\s+vols\s+(?:sont\s+)?(?:déjà\s+)?réservés|\b(?:nous avons|j['’]ai)\s+réservé\s+(?:nos|mes|les)\s+vols/iu.test(line)) return ["booked"];
+    if (/\b(?:nous|je)\s+réserver(?:ons|ai)\s+(?:nos|mes|les)\s+vols/iu.test(line)) return ["excluded"];
+    if (/\b(?:nous souhaitons|je souhaite)\s+(?:une proposition\s+)?(?:avec|incluant)\s+(?:les\s+)?vols/iu.test(line)) return ["included"];
+    return [];
+  });
+  const travelLines = confirmed.filter(line => /\b(?:visiter|découvrir|séjour|voyage|traversée)\b/iu.test(line));
+  const places = ["Alger", "Tipaza", "Djemila", "Timgad", "Djanet", "Tamanrasset", "In Salah", "Tefedest", "Oran", "Constantine", "Ghardaïa"]
+    .filter(place => travelLines.some(line => new RegExp(`\\b${place}\\b`, "iu").test(line)));
+  const accommodation = unique(confirmed.flatMap(line => [...line.matchAll(/\bhôtels?\s+(?:de\s+)?[1-5]\s+étoiles?\b/giu)].map(match => match[0])));
+  return {
+    full_name: unique(name), travelers_adults: adults, travelers_children: children,
+    travellers_count: adults && children ? String(Number(adults) + Number(children)) : "",
+    children_ages: ages, rooms: roomDistribution, flex_period: periods,
+    date_start: exact ? `${exact[4]}-${month}-${exact[1].padStart(2, "0")}` : "",
+    date_end: exact ? `${exact[4]}-${month}-${exact[2].padStart(2, "0")}` : "",
+    budget_ideal: unique(amounts.filter(item => !item.maximum).map(item => item.amount)),
+    budget_max: unique(amounts.filter(item => item.maximum).map(item => item.amount)),
+    currency: unique(amounts.map(item => item.currency)),
+    budget_unit: unique(budgetLines.map(line => /\bpar personne\b|\/\s*pers\b/iu.test(line) ? "per_person" : /\b(?:total|groupe)\b/iu.test(line) ? "total" : "")),
+    flights: unique(flightModes), hebergements: accommodation,
+    destination_main: places.join(" et "),
+  };
+}
+
+/** Conservative fallback when AI is unavailable: explicit labelled or unambiguous facts only. */
 export function extractManualLeadFallback(source: string): ManualLeadDraft {
   function label(names: string): string {
     return source.match(new RegExp(`^(?:${names})\\s*:\\s*(.+)$`, "im"))?.[1]?.trim() ?? "";
   }
   const email = source.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "";
   const solo = /\bsolo foot travel\b|\bvoyage(?:urs)?\s*:\s*(?:seul|solo)|\bvoyage seul\b/i.test(source);
+  const natural = explicitNaturalFacts(source);
   return normalizeManualLeadDraft({
+    ...natural,
     // Use the message's wording, never the traveler's nationality.
     language: /\b(?:expedition leader|proposed dates|preferred regions|dear team|kind regards|I (?:would|am|want|plan|hope|wish)|could you|would you)\b/i.test(source) ? "en" : "fr",
-    full_name: label("Expedition leader|Nom complet|Prénom|Name|Full name"),
+    full_name: label("Expedition leader|Nom complet|Prénom|Name|Full name") || natural.full_name,
     email, phone: label("Téléphone|Telephone|Phone"),
-    project_title: source.split(/\r?\n/).find(line => line.trim())?.trim() ?? "",
+    project_title: natural.destination_main ? `Voyage à ${natural.destination_main}` : (messageParagraphs(source)[0] ?? "").slice(0, 120),
     group_type: solo ? "Solo" : label("Voyageurs|Type de groupe"),
-    travellers_count: solo ? "1" : label("Nombre de voyageurs|Participants"),
-    travelers_adults: solo ? "1" : label("Adultes"), travelers_children: solo ? "0" : label("Enfants"),
-    flex_period: label("Proposed dates|Période|Mois"), flex_duration: label("Durée|Duration"),
-    destination_main: label("Preferred regions|Destinations|Destination"),
+    travellers_count: solo ? "1" : label("Nombre de voyageurs|Participants") || natural.travellers_count,
+    travelers_adults: solo ? "1" : label("Adultes") || natural.travelers_adults, travelers_children: solo ? "0" : label("Enfants") || natural.travelers_children,
+    flex_period: label("Proposed dates|Période|Mois") || natural.flex_period, flex_duration: label("Durée|Duration"),
+    destination_main: label("Preferred regions|Destinations|Destination") || natural.destination_main,
     vision: label("Activity|Vision du voyage"),
     budget_includes_flights: explicitBudgetFlightScope(source),
-    notes_longues: source.replace(/\r\n/g, "\n").trim(),
+    notes_longues: messageParagraphs(source).join("\n\n"),
   });
 }
 

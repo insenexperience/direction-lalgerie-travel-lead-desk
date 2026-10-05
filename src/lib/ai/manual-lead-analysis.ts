@@ -46,7 +46,10 @@ export async function analyzeManualLeadJson(system: string, user: string): Promi
       }),
     });
     // Never return provider bodies or caught exception messages: either can echo credentials.
-    if (!response.ok) return { error: UNAVAILABLE };
+    if (!response.ok) {
+      console.warn("[manual-lead-analysis] Provider HTTP failure", response.status);
+      return { error: UNAVAILABLE };
+    }
     const data: unknown = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) return { error: INVALID };
     const payload = data as Record<string, unknown>;
@@ -56,7 +59,9 @@ export async function analyzeManualLeadJson(system: string, user: string): Promi
       const value = block as Record<string, unknown>;
       return value.type === "text" && typeof value.text === "string" ? [value.text] : [];
     }).join("").trim();
-    return usableJson(raw);
+    const result = usableJson(raw);
+    if ("error" in result) console.warn("[manual-lead-analysis] Invalid JSON transcript");
+    return result;
   } catch {
     return { error: UNAVAILABLE };
   } finally {

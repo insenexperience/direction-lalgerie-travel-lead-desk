@@ -44,6 +44,72 @@ assert.equal(invalid.budget_ideal, "");
 assert.equal(invalid.flights, "");
 assert.equal(normalizeManualLeadDraft({ budget_includes_flights: "unknown" }).budget_includes_flights, "");
 
+const naturalMessage = "Bonjour, je suis Camille Exemple (camille@example.test). Nous souhaitons visiter Alger et Tipaza du 7 au 11 octobre 2027 : 2 adultes et 2 enfants de 6 et 9 ans, 2 chambres doubles, hôtels 4 étoiles. Budget 2000 € par personne hors vols. Nous réserverons nos vols nous-mêmes. Merci.";
+const natural = extractManualLeadFallback(naturalMessage);
+assert.equal(natural.full_name, "Camille Exemple");
+assert.equal(natural.email, "camille@example.test");
+assert.equal(natural.travelers_adults, "2");
+assert.equal(natural.travelers_children, "2");
+assert.equal(natural.travellers_count, "4");
+assert.equal(natural.children_ages, "6, 9");
+assert.equal(natural.rooms, "2 chambres doubles");
+assert.equal(natural.date_start, "2027-10-07");
+assert.equal(natural.date_end, "2027-10-11");
+assert.equal(natural.flex_period, "du 7 au 11 octobre 2027");
+assert.equal(natural.budget_ideal, "2000");
+assert.equal(natural.budget_max, "", "Do not invent a maximum from a stated budget");
+assert.equal(natural.currency, "EUR");
+assert.equal(natural.budget_unit, "per_person");
+assert.equal(natural.budget_includes_flights, "no");
+assert.equal(natural.flights, "excluded");
+assert.equal(natural.hebergements, "hôtels 4 étoiles");
+assert.equal(natural.destination_main, "Alger et Tipaza");
+assert.equal(natural.notes_longues.replace(/\s+/g, " "), naturalMessage);
+assert(natural.notes_longues.includes("\n\n"), "Every original sentence is retained in airy paragraphs");
+const naturalRow = buildManualLeadInsert(natural, naturalMessage, { submissionId: "00000000-0000-4000-8000-000000000003", channel: "email" });
+assert.equal(naturalRow.intake_payload.source_message, naturalMessage);
+assert.equal(naturalRow.project_description, natural.notes_longues);
+assert.equal(naturalRow.intake_payload.qualification_facts.room_distribution, "2 chambres doubles");
+
+const noYear = extractManualLeadFallback("Nous souhaitons visiter Alger du 7 au 11 octobre. Nous serons 2 adultes.");
+assert.equal(noYear.flex_period, "du 7 au 11 octobre");
+assert.equal(noYear.date_start, "");
+assert.equal(noYear.date_end, "");
+assert.equal(noYear.travelers_adults, "2");
+assert.equal(noYear.travelers_children, "", "Adults alone never imply zero children");
+assert.equal(noYear.travellers_count, "");
+for (const ambiguous of [
+  "Nous serons 2 ou 3 adultes et 2 enfants de 6 à 9 ans, 2 chambres doubles ou triples. Budget 2000 ou 3000 € par personne ?",
+  "Peut-être 2 adultes et 2 enfants, 2 chambres doubles. Budget 2000 € par personne à confirmer.",
+  "Nous envisageons entre 2 et 3 adultes. Souhaitez-vous 2 chambres doubles ? Budget non indiqué pour 2 adultes.",
+  "Nous ne souhaitons pas 2 chambres doubles, hôtels 4 étoiles. Budget : pas 2000 €."
+]) {
+  const parsed = extractManualLeadFallback(ambiguous);
+  assert.equal(parsed.travelers_adults, "", ambiguous);
+  assert.equal(parsed.travelers_children, "", ambiguous);
+  assert.equal(parsed.children_ages, "", ambiguous);
+  assert.equal(parsed.rooms, "", ambiguous);
+  assert.equal(parsed.budget_ideal, "", ambiguous);
+  assert.equal(parsed.hebergements, "", ambiguous);
+  assert.equal(parsed.notes_longues.replace(/\s+/g, " "), ambiguous);
+}
+const ageMismatch = extractManualLeadFallback("Nous serons 2 adultes et 2 enfants de 6 ans, 1 chambre familiale.");
+assert.equal(ageMismatch.children_ages, "", "One age does not complete two children");
+const conflictingCounts = extractManualLeadFallback("Nous serons 2 adultes. Nous serons 3 adultes.");
+assert.equal(conflictingCounts.travelers_adults, "", "Conflicting declarations remain unresolved");
+assert.equal(extractManualLeadFallback("Nous serons 2 adultes du 7 au 11 février 2027.").date_start, "2027-02-07");
+assert.equal(extractManualLeadFallback("Nous serons 2 adultes du 30 au 31 février 2027.").date_start, "");
+const conflictingRooms = extractManualLeadFallback("Nous souhaitons 1 chambre double et 1 single. Finalement 2 doubles.");
+assert.equal(conflictingRooms.rooms, "", "Do not merge contradictory room counts into a confirmed allocation");
+assert.equal(conflictingRooms.notes_longues.replace(/\s+/g, " "), "Nous souhaitons 1 chambre double et 1 single. Finalement 2 doubles.");
+assert.equal(extractManualLeadFallback("Nous souhaitons 2 chambres doubles. Deux adultes partageront les 2 doubles.").rooms, "2 chambres doubles", "Repeating the same allocation must not double its capacity");
+assert.equal(extractManualLeadFallback("Budget 2.000 € par personne.").budget_ideal, "", "Never read a partial amount from an ambiguous numeric format");
+assert.equal(extractManualLeadFallback("Budget 2 millions DZD.").budget_ideal, "", "Magnitude words must not be discarded");
+const longMessage = "Je souhaite organiser un voyage dont toutes les nombreuses conditions et options doivent rester conservées ".repeat(4) + ". Une autre phrase utile.";
+const longFallback = extractManualLeadFallback(longMessage);
+assert(longFallback.project_title.length <= 120);
+assert.equal(longFallback.notes_longues.replace(/\s+/g, " "), longMessage);
+
 for (const [source, expected] of [
   ["Budget : 2 000 € par personne, hors vols", "no"],
   ["Mon budget est 2000 euros sans les vols.", "no"],
