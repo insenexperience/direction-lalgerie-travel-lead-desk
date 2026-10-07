@@ -60,6 +60,7 @@ export function agencyTravelNotes(lead: LeadEmailTemplateInput): string {
 
 function feasibilityChecklistValue(item: QualificationChecklistItem): string {
   const value = item.value || "";
+  if (item.id === "dates") return [...new Set(value.split(/\s+·\s+/))].join(" · ");
   if (item.id === "flights") return ({ include: "Vols à inclure", self_managed: "Vols réservés par le voyageur", already_booked: "Vols déjà réservés", none: "Aucun vol nécessaire" } as Record<string, string>)[value] || value;
   if (item.id === "budget_scope") return ({ "flights included": "Vols inclus", "flights excluded": "Hors vols" } as Record<string, string>)[value] || value;
   if (item.id === "budget") return value.replace(/\bper_person\b/g, "par personne").replace(/\btotal$/, "au total");

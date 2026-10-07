@@ -30,6 +30,7 @@ const copier = async (t: string) => { try { await navigator.clipboard.writeText(
 // The BO3 reset otherwise overrides Tailwind controls. Scope the bridge to these modules;
 // keep the generated cockpit stylesheet and all existing screens unchanged.
 const MAILING_STYLES = `
+.bo3 .lead-mailing-header { position:relative; z-index:10; }
 .bo3 .lead-mailing-module { color:var(--ink); min-width:0; }
 .bo3 .lead-mailing-module button { font:600 12px/1.5 var(--sans); border:1px solid var(--line); border-radius:6px; padding:8px 12px; background:var(--surface); color:var(--ink); }
 .bo3 .lead-mailing-module button[class*="bg-steel"] { background:var(--dark); color:var(--surface); border-color:var(--dark); }
@@ -170,7 +171,7 @@ export function FicheView({ p, lead, agences, feasibilityMessages = [], now: dep
     <div className="page">
       <style>{MAILING_STYLES}</style>
       {/* En-tête */}
-      <div className="hdr">
+      <div className="hdr lead-mailing-header">
         <div>
           <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span><span>{canalNom}</span></div>
           <h1 className="t">{p.nom}</h1>
