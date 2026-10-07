@@ -14,6 +14,7 @@ import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
 import { Card, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import type { LeadEmailMessage } from "@/app/(dashboard)/leads/email-actions";
 import { LeadLogisticsEditor } from "@/components/leads/qualification/lead-logistics-editor";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import { analyzeLeadQualification } from "@/lib/lead-qualification-completeness";
@@ -47,7 +48,10 @@ function FicheTab({ id, label, count, active, onSelect }: { id:string; label:str
   return <button className={active === id ? "on" : ""} onClick={() => onSelect(id)}>{label}{count ? <b>{count}</b> : null}</button>;
 }
 
-export function FicheView({ p, lead, agences, now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; now: number; signature: string }) {
+export type FeasibilityMessageSummary = Pick<LeadEmailMessage, "id" | "agency_id" | "status" | "subject" | "created_at" | "sent_at">;
+const STUDY_STATUS: Record<LeadEmailMessage["status"], string> = { draft: "Brouillon", sending: "Transmission à vérifier", sent: "Envoyé", external: "Envoi externe déclaré", failed: "Échec de transmission" };
+
+export function FicheView({ p, lead, agences, feasibilityMessages = [], now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; feasibilityMessages?: FeasibilityMessageSummary[]; now: number; signature: string }) {
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
@@ -60,6 +64,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const [selectedAgencyIds, setSel] = useState<string[] | null>(null);
   const [mode, setMode] = useState<"portion" | "pilote">("portion");
   const [form, setForm] = useState<Record<string, string>>({});
+  const [studyAgencyId, setStudyAgencyId] = useState(agences.length === 1 ? agences[0].id : "");
+  const [studyDirty, setStudyDirty] = useState(false);
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
   // Refresh the editable brief when its saved server revision changes.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -95,6 +101,16 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
       setForm({ agence:agencyId, propId:result.proposalId });
       setTab("agences"); setModal("agency-email"); router.refresh();
     });
+  }
+
+  function selectStudyAgency(agencyId: string) {
+    if (studyDirty && !window.confirm("Changer d’agence et abandonner les modifications non enregistrées ?")) return;
+    setStudyDirty(false); setStudyAgencyId(agencyId);
+  }
+
+  function closeStudy() {
+    if (studyDirty && !window.confirm("Fermer l’étude et abandonner les modifications non enregistrées ?")) return;
+    setStudyDirty(false); setModal(null);
   }
 
   const ouvrirConversion = (c: Consultation) => {
@@ -160,8 +176,14 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
           <h1 className="t">{p.nom}</h1>
           <div className="sub">{p.trame ? `« ${p.trame.titre} » · ${p.trame.jours.length} jours${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : lead.trip_summary || "Projet à qualifier"}</div>
         </div>
-        <div className="row" style={{ alignItems: "flex-end" }}>
+        <div className="row wrap" style={{ alignItems: "flex-end" }}>
           <div style={{ minWidth: 190 }}><div className="lbl" style={{ marginBottom: 4 }}>Première réponse</div><Deadline c={tc} /></div>
+          {p.statut !== "clos" && <Menu label="Modèles d’email" items={[
+            { l: "Accusé de réception client", ic: "mail", f: () => setModal("first") },
+            { l: "Prise de contact et qualification", ic: "users", f: () => setModal("ask") },
+            { l: "Étude de faisabilité non chiffrée", ic: "building", f: () => setModal("agency-feasibility") },
+            { l: "Brief agence pour chiffrage", ic: "file", f: () => { setTab("agences"); setBriefOpen(true); if (canGenerateBrief && p.brief) setModal("agency-choice"); } },
+          ]} />}
           <Menu items={[
             !p.premiereReponse && p.statut !== "clos" && { l: "Écrire la première réponse", ic: "send", f: () => run("first") },
             canGenerateBrief && !p.brief && p.statut !== "clos" && { l: "Générer le brief", ic: "file", f: () => run("brief") },
@@ -282,7 +304,19 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
 
       {tab === "agences" && (
         <>
-          <Card t="Brief agence" right={p.brief ? <div className="row"><span className="mt">relu {p.brief.editedAt ? fmtD(p.brief.editedAt) : "—"}</span><button className="btn s xs" onClick={() => setBriefOpen(!briefOpen)}>{briefOpen ? "Replier" : "Ouvrir"}</button></div> : null}>
+          <Card t="Première étude de faisabilité" right={<span className="tag teal">Non chiffrée</span>}>
+            <p className="mt" style={{ lineHeight:1.8 }}>Demandez à l’agence un avis terrain, un premier parcours et les contraintes à anticiper. Cette étape peut commencer pendant la qualification, avant le brief pour chiffrage.</p>
+            {p.statut !== "clos" && <div className="row wrap" style={{ marginTop:12 }}>
+              <label className="grow">Agence destinataire<select className="inp" value={studyAgencyId} onChange={(e) => selectStudyAgency(e.target.value)}><option value="">Choisir une agence</option>{agences.map((a) => <option key={a.id} value={a.id}>{a.n}</option>)}</select></label>
+              <button className="btn p" disabled={!studyAgencyId} onClick={() => setModal("agency-feasibility")}><Icon n="pencil" s={13} /> Préparer l’étude non chiffrée</button>
+            </div>}
+            {!agences.length && <p className="mt">Aucune agence active disponible.</p>}
+            {feasibilityMessages.length > 0 && <div className="stack" style={{ marginTop:14, gap:8 }}>{feasibilityMessages.map((m) => <div key={m.id} className="row wrap" style={{ justifyContent:"space-between", borderTop:"1px solid var(--line-2)", paddingTop:8 }}>
+              <div><b>{m.agency_id ? n(m.agency_id) : "Agence supprimée"}</b><div className="mt">{STUDY_STATUS[m.status]} · {fmtD(new Date(m.sent_at || m.created_at).getTime())}</div><div className="mt">{m.subject}</div></div>
+              {p.statut !== "clos" && m.agency_id && agences.some((a) => a.id === m.agency_id) && <button className="btn s xs" onClick={() => { setStudyAgencyId(m.agency_id!); setModal("agency-feasibility"); }}>Ouvrir les emails</button>}
+            </div>)}</div>}
+          </Card>
+          <Card t="Brief agence pour chiffrage" right={p.brief ? <div className="row"><span className="mt">relu {p.brief.editedAt ? fmtD(p.brief.editedAt) : "—"}</span><button className="btn s xs" onClick={() => setBriefOpen(!briefOpen)}>{briefOpen ? "Replier" : "Ouvrir"}</button></div> : null}>
             {!p.brief && (
               <div className="row wrap" style={{ justifyContent: "space-between" }}>
                 <span className="mt">{canGenerateBrief ? "Le dossier contient les informations nécessaires. Le brief se prépare puis se relit avant envoi." : `Le brief attend ces précisions : ${missingInformation.join(", ")}.`}</span>
@@ -433,6 +467,12 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
           </Modal>
         </div>
       )}
+      {modal === "agency-feasibility" && <div className="lead-mailing-dialog">
+          <Modal title="Première étude de faisabilité non chiffrée" onClose={closeStudy}>
+          <label className="lbl" style={{ display:"block", marginBottom:14 }}>Agence destinataire<select className="inp" value={studyAgencyId} onChange={(e) => selectStudyAgency(e.target.value)}><option value="">Choisir une agence</option>{agences.map((a) => <option key={a.id} value={a.id}>{a.n}</option>)}</select></label>
+          {studyAgencyId ? <div className="lead-mailing-module"><LeadEmailComposer key={`agency-feasibility:${studyAgencyId}`} lead={lead} kind="agency_feasibility" agencyId={studyAgencyId} onDirtyChange={setStudyDirty} /></div> : <div className="empty">Choisissez l’agence à qui demander le premier parcours.</div>}
+        </Modal>
+      </div>}
       {(modal === "complete" || modal === "qualif") && (
         <TrameForm
           initiale={p.trame ?? trameVide(p.texte ? p.texte.slice(0, 60) : undefined)}

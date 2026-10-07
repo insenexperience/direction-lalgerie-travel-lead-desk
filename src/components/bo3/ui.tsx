@@ -82,7 +82,7 @@ export function Modal({ title, onClose, children, foot }: { title: string; onClo
 }
 
 export type MenuItem = { l: string; ic: string; f: () => void; d?: boolean } | false | null | undefined;
-export function Menu({ items }: { items: MenuItem[] }) {
+export function Menu({ items, label = "Actions" }: { items: MenuItem[]; label?: string }) {
   const [o, setO] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -93,7 +93,7 @@ export function Menu({ items }: { items: MenuItem[] }) {
   }, [o]);
   return (
     <div className="menu" ref={ref}>
-      <button className="btn s" onClick={() => setO(!o)} aria-expanded={o}>Actions <Icon n="chevron" s={12} /></button>
+      <button className="btn s" onClick={() => setO(!o)} aria-expanded={o}>{label} <Icon n="chevron" s={12} /></button>
       {o && (
         <div className="menu__list">
           {items.filter(Boolean).map((it, i) => it && (

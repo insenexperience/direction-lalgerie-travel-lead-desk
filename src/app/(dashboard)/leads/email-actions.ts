@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
 import { isResendOutboundConfigured } from "@/lib/email/workflow-email-config";
 import { sendTransactionalHtmlEmail } from "@/lib/email/resend-client";
-import { anonymizeAgencyText, buildLeadEmailTemplate, LEAD_EMAIL_TEMPLATE_VERSION, type LeadEmailKind, type LeadEmailLanguage, type LeadEmailTemplateInput } from "@/lib/email/lead-email-template";
+import { anonymizeAgencyText, buildLeadEmailTemplate, isAgencyEmailKind, LEAD_EMAIL_TEMPLATE_VERSION, type LeadEmailKind, type LeadEmailLanguage, type LeadEmailTemplateInput } from "@/lib/email/lead-email-template";
 
 export type LeadEmailMessage = {
   id: string;
@@ -37,10 +37,29 @@ export type LeadEmailDraftInput = {
 };
 
 type Failure = { ok: false; error: string };
-const KINDS: LeadEmailKind[] = ["welcome", "qualification", "agency_brief"];
+const KINDS: LeadEmailKind[] = ["welcome", "qualification", "agency_feasibility", "agency_brief"];
 const UNRESOLVED_DELIVERY = "Un email de ce type est encore en cours de transmission ou sans confirmation. Vérifiez son état auprès du prestataire avant tout nouvel envoi ou déclaration d’envoi externe.";
+const EMPTY_FEASIBILITY = "Renseignez les envies, une destination ou les notes du voyage avant de demander une première étude de faisabilité à l’agence.";
+
+/** An early study needs a travel idea, not a fully qualified or priced brief. */
+function hasFeasibilityTravelContent(lead: LeadEmailTemplateInput): boolean {
+  const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const intake = object(lead.intake_payload);
+  const responses = object(lead.traveler_responses);
+  const facts = { ...object(intake.qualification_facts), ...object(responses.qualification_facts) };
+  const meaningful = (value: unknown) => {
+    if (typeof value !== "string") return false;
+    const content = anonymizeAgencyText(value, lead).replace(/\[(?:voyageur|email masqué|téléphone masqué|profil masqué)\]/g, "")
+      .trim().replace(/[\s—–\-·|:]+$/g, "").trim();
+    return /[\p{L}\p{N}]{3}/u.test(content)
+      && !/^(?:à (?:préciser|définir)|a (?:preciser|definir)|non renseigné|inconnu|unknown|to be (?:defined|confirmed)|projet de voyage(?: sur mesure)?|nouveau projet|voyage sur mesure)[.!\s]*$/i.test(content);
+  };
+  return [lead.trip_summary, lead.destination_main, lead.project_description, lead.travel_desire_narrative, intake.notes_longues, intake.vision, facts.itinerary].some(meaningful)
+    || buildLeadEmailTemplate(lead, "agency_feasibility").analysis.checklist.some((item) => item.id === "itinerary" && item.status === "complete" && meaningful(item.value));
+}
 
 function migrationError(message: string): string {
+  if (/lead_email_messages_kind_check|lead_email_feasibility/i.test(message)) return "L’étude de faisabilité nécessite la migration 20261007120000_lead_email_feasibility.sql. Appliquez-la avant d’enregistrer ou d’envoyer ce modèle.";
   return /lead_email_messages|finalize_lead_email_message|schema cache/i.test(message)
     ? "Le module mailing nécessite la migration 20261005140000_lead_email_messages.sql. Appliquez les migrations Supabase avant d’enregistrer ou d’envoyer."
     : message;
@@ -61,18 +80,22 @@ async function getContext(leadId: string, requireAssignment: boolean) {
 }
 
 async function resolveRecipient(context: Extract<Awaited<ReturnType<typeof getContext>>, { ok: true }>, kind: LeadEmailKind, agencyId?: string | null, proposalId?: string | null) {
-  if (kind !== "agency_brief") {
+  if (!isAgencyEmailKind(kind)) {
     if (agencyId || proposalId) return { ok: false as const, error: "Le mail client ne peut pas être lié à une agence." };
     const recipient = context.lead.email?.trim() ?? "";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return { ok: false as const, error: "Renseignez une adresse email voyageur valide dans le dossier." };
     return { ok: true as const, recipient, agencyName: null, agencyId: null, proposalId: null, agencyFollowup: false };
   }
-  if (!agencyId || !isUuid(agencyId)) return { ok: false as const, error: "Choisissez l’agence destinataire du brief." };
+  if (kind === "agency_feasibility" && proposalId) return { ok: false as const, error: "L’étude de faisabilité ne doit pas être liée à une consultation chiffrée." };
+  if (!agencyId || !isUuid(agencyId)) return { ok: false as const, error: "Choisissez l’agence destinataire du message." };
   const { data: agency, error } = await context.supabase.from("agencies").select("id,legal_name,trade_name,email,status").eq("id", agencyId).maybeSingle();
   if (error || !agency) return { ok: false as const, error: "Agence introuvable ou non accessible." };
   if (agency.status === "suspended") return { ok: false as const, error: "Cette agence est suspendue." };
   const recipient = String(agency.email ?? "").trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) return { ok: false as const, error: "Renseignez une adresse email valide pour l’agence." };
+  if (kind === "agency_feasibility") {
+    return { ok: true as const, recipient, agencyName: String(agency.trade_name || agency.legal_name), agencyId, proposalId: null, agencyFollowup: false };
+  }
   let resolvedProposalId = proposalId ?? null;
   let agencyFollowup = false;
   if (resolvedProposalId) {
@@ -104,22 +127,23 @@ export async function getLeadEmailWorkspace(leadId: string, kind: LeadEmailKind,
   const template = buildLeadEmailTemplate(context.lead, kind);
   const recipient = await resolveRecipient(context, kind, agencyId, proposalId);
   let query = context.supabase.from("lead_email_messages").select("*").eq("lead_id", leadId).eq("kind", kind).order("created_at", { ascending: false }).limit(20);
-  query = kind === "agency_brief" && agencyId ? query.eq("agency_id", agencyId) : query.is("agency_id", null);
+  query = isAgencyEmailKind(kind) && agencyId ? query.eq("agency_id", agencyId) : query.is("agency_id", null);
   // Do not use the bounded history to decide whether a previous delivery is
   // unresolved: an older sending message must block a new UUID too.
   let unresolved = context.supabase.from("lead_email_messages").select("id").eq("lead_id", leadId).eq("kind", kind).eq("status", "sending").limit(1);
-  unresolved = kind === "agency_brief" && agencyId ? unresolved.eq("agency_id", agencyId) : unresolved.is("agency_id", null);
+  unresolved = isAgencyEmailKind(kind) && agencyId ? unresolved.eq("agency_id", agencyId) : unresolved.is("agency_id", null);
   const [{ data, error }, { data: unresolvedMessages, error: unresolvedError }] = await Promise.all([query, unresolved]);
   const history = (data ?? []) as LeadEmailMessage[];
   const storageError = error ?? unresolvedError;
   return { ok: true as const, template, recipient: recipient.ok ? recipient.recipient : "", recipientError: recipient.ok ? null : recipient.error,
     agencyName: recipient.ok ? recipient.agencyName : null, proposalId: recipient.ok ? recipient.proposalId : proposalId ?? null,
     agencyFollowup: recipient.ok ? recipient.agencyFollowup : false,
+    feasibilityReady: kind !== "agency_feasibility" || hasFeasibilityTravelContent(context.lead), feasibilityMessage: EMPTY_FEASIBILITY,
     unresolvedSending: Boolean(unresolvedMessages?.length), unresolvedSendingMessage: UNRESOLVED_DELIVERY,
     canEdit: context.canEdit, resendReady: isResendOutboundConfigured(), deliveryReady: isResendOutboundConfigured(),
     deliveryMessage: isResendOutboundConfigured() ? null : "Resend n’est pas configuré : copiez le message dans votre messagerie puis indiquez un envoi externe.",
     storageReady: !storageError, storageError: storageError ? migrationError(storageError.message) : null,
-    draft: history.find((message) => message.status === "draft" && (kind !== "agency_brief" || message.proposal_id === (recipient.ok ? recipient.proposalId : proposalId))) ?? null, history };
+    draft: history.find((message) => message.status === "draft" && (!isAgencyEmailKind(kind) || message.proposal_id === (recipient.ok ? recipient.proposalId : proposalId ?? null))) ?? null, history };
 }
 
 export async function saveLeadEmailDraft(input: LeadEmailDraftInput): Promise<{ ok: true; draft: LeadEmailMessage } | Failure> {
@@ -131,9 +155,10 @@ export async function saveLeadEmailDraft(input: LeadEmailDraftInput): Promise<{ 
   const context = await getContext(input.leadId, true);
   if (!context.ok) return context;
   if (context.lead.deleted_at) return { ok: false, error: "Ce dossier est archivé." };
+  if (input.kind === "agency_feasibility" && !hasFeasibilityTravelContent(context.lead)) return { ok: false, error: EMPTY_FEASIBILITY };
   const recipient = await resolveRecipient(context, input.kind, input.agencyId, input.proposalId);
   if (!recipient.ok) return recipient;
-  if (input.kind === "agency_brief" && (anonymizeAgencyText(bodyText, context.lead) !== bodyText || anonymizeAgencyText(subject, context.lead) !== subject)) return { ok: false, error: "Le brief agence contient un nom ou des coordonnées du voyageur. Retirez ces données personnelles avant de l’enregistrer." };
+  if (isAgencyEmailKind(input.kind) && (anonymizeAgencyText(bodyText, context.lead) !== bodyText || anonymizeAgencyText(subject, context.lead) !== subject)) return { ok: false, error: "Le message agence contient un nom ou des coordonnées du voyageur. Retirez ces données personnelles avant de l’enregistrer." };
   const template = buildLeadEmailTemplate(context.lead, input.kind, { language: input.language, bodyText });
   const patch = { lead_id: input.leadId, kind: input.kind, agency_id: recipient.agencyId, proposal_id: recipient.proposalId,
     recipient: recipient.recipient, subject, body_text: bodyText, html: template.html, language: template.language,
@@ -168,6 +193,7 @@ async function checkedDraft(draftId: string) {
   const context = await getContext(draft.lead_id, true);
   if (!context.ok) return context;
   if (context.lead.deleted_at) return { ok: false as const, error: "Ce dossier est archivé." };
+  if (draft.kind === "agency_feasibility" && !hasFeasibilityTravelContent(context.lead)) return { ok: false as const, error: EMPTY_FEASIBILITY };
   if (draft.status !== "draft") return { ok: false as const, error: "Ce message a déjà été traité. Créez un nouveau brouillon pour un nouvel envoi." };
   const recipient = await resolveRecipient(context, draft.kind, draft.agency_id, draft.proposal_id);
   if (!recipient.ok) return recipient;
@@ -177,8 +203,8 @@ async function checkedDraft(draftId: string) {
   const { data: unresolvedMessages, error: unresolvedError } = await unresolved;
   if (unresolvedError) return { ok: false as const, error: migrationError(unresolvedError.message) };
   if (unresolvedMessages?.length) return { ok: false as const, error: UNRESOLVED_DELIVERY };
+  if (isAgencyEmailKind(draft.kind) && (anonymizeAgencyText(draft.body_text, context.lead) !== draft.body_text || anonymizeAgencyText(draft.subject, context.lead) !== draft.subject)) return { ok: false as const, error: "Le message agence contient des données personnelles du voyageur." };
   if (draft.kind === "agency_brief") {
-    if (anonymizeAgencyText(draft.body_text, context.lead) !== draft.body_text || anonymizeAgencyText(draft.subject, context.lead) !== draft.subject) return { ok: false as const, error: "Le brief contient des données personnelles du voyageur." };
     const analysis = buildLeadEmailTemplate(context.lead, draft.kind).analysis;
     if (!analysis.readyForAgencyBrief) return { ok: false as const, error: "Complétez les informations indispensables à la préparation du brief agence avant de l’envoyer." };
   }

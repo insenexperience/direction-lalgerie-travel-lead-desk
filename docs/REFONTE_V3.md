@@ -2,7 +2,7 @@
 
 Refonte du back office d'après le handoff Claude Design (`back office/refonte-v2/design_handoff_back_office`, décisions D1–D10 validées le 26/09/2026).
 
-Le parcours conserve l'enum des leads et les colonnes JSON existantes pour la trame et les faits de qualification. Depuis le 05/10/2026, le mailing ajoute une table dédiée `lead_email_messages` pour les brouillons, versions relues et envois ; cinq migrations décrites plus bas assurent persistance, concurrence et journal BO3. Les correctifs des déclencheurs de clôture restent nécessaires (voir « Pièges connus »).
+Le parcours conserve l'enum des leads et les colonnes JSON existantes pour la trame et les faits de qualification. Depuis le 05/10/2026, le mailing ajoute une table dédiée `lead_email_messages` pour les brouillons, versions relues et envois ; six migrations décrites plus bas assurent persistance, concurrence et journal BO3. Les correctifs des déclencheurs de clôture restent nécessaires (voir « Pièges connus »).
 
 ## Code
 
@@ -38,7 +38,7 @@ Elles sont **dérivées** de `leads.status` (enum inchangé) et du contenu du do
 Transitions écrites par les actions (toujours conditionnées au statut de départ, pour ne jamais reculer un dossier) :
 
 - `genererBrief`, `preparerEmailAgence` : `new|qualification|refinement` → `agency_assignment`. La préparation de consultation n'enregistre aucun envoi : `status = pending_send`, `brief_sent_at = null`.
-- `finalize_lead_email_message` : après un envoi client `welcome` ou `qualification`, `new` → `qualification` ; après un mail `agency_brief`, la consultation passe à `awaiting_response` et reçoit `brief_sent_at`. Un envoi externe déclaré suit ces mêmes indicateurs, avec sa provenance distincte.
+- `finalize_lead_email_message` : après un envoi client `welcome` ou `qualification`, `new` → `qualification` ; après un mail `agency_brief`, la consultation passe à `awaiting_response` et reçoit `brief_sent_at`. Un envoi externe déclaré suit ces mêmes indicateurs, avec sa provenance distincte. `agency_feasibility` enregistre seulement le message et son activité, sans mutation de lead ni consultation.
 - `saisirProposition`, `retenirProposition`, `convertirProposition` : `agency_assignment` → `co_construction`
 - `envoyerProposition` : `co_construction|agency_assignment` → `quote`
 - `marquerGagne` / `marquerPerdu` : → `won` / `lost` (+ `closed_at`)
@@ -68,7 +68,9 @@ Arrivée/départ en Algérie, prestations et besoins particuliers peuvent rester
 
 ## Mailing dans la chaîne BO3
 
-« Écrire la première réponse » et « Ouvrir le brouillon » ouvrent le modèle `welcome`. Qualification expose `qualification` et la fiche logistique. Chaque consultation dispose de son `agency_brief`. Les modèles utilisent le logo et la mise en page Direction l'Algérie ; les emails client sont en français ou anglais, selon la langue originale enregistrée et le choix de l'opérateur. Le brief agence reste en français.
+« Écrire la première réponse » et « Ouvrir le brouillon » ouvrent le modèle `welcome`. Qualification expose `qualification` et la fiche logistique. Chaque consultation dispose de son `agency_brief`. Les modèles utilisent le logo et la mise en page Direction l'Algérie ; les emails client sont en français ou anglais, selon la langue originale enregistrée et le choix de l'opérateur. Les deux modèles agence restent en français. Le menu « Modèles d’email » en tête de fiche donne accès aux quatre modèles même après une première réponse.
+
+« Première étude de faisabilité » dans Brief & agences, ou le menu des modèles, ouvre `agency_feasibility`. Cette demande non chiffrée invite l’agence à imaginer un parcours et préciser faisabilité, étapes/ordre/durée, trajets/rythme, contraintes, adaptations et informations à confirmer. Elle demande un délai estimé, sans imposer les 48 h du devis. Le modèle part du projet, des notes anonymisées et des faits confirmés ; il ignore `generated_brief` pour ne pas reprendre ses demandes de prix. La qualification peut rester incomplète, mais une idée de voyage est nécessaire. Le brouillon et son historique sont liés au lead et à une agence non suspendue ; `proposal_id` reste nul. Cette étude ne crée aucune consultation chiffrée et n’arrête ni ne démarre aucune horloge.
 
 L'objet et le texte sont éditables. L'aperçu, la copie de l'email mis en forme, du texte ou du HTML, le téléchargement HTML et l'envoi reprennent le texte édité. Le HTML est rendu avec échappement du texte de l'opérateur. Le brief conserve les notes détaillées et les données confirmées, en masquant noms, coordonnées et profils sociaux ; le serveur refuse la réintroduction de données personnelles dans un mail agence édité.
 
@@ -78,17 +80,18 @@ L'historique distingue `draft`, `sending`, `sent`, `failed` et `external`. Le co
 
 ### Migrations mailing
 
-Appliquer ces trois fichiers dans l'ordre :
+Appliquer ces six fichiers dans l'ordre :
 
 1. `20261005140000_lead_email_messages.sql` : table des mails, RLS pour les dossiers visibles et mutations du référent/admin, protection de l'historique et RPC de finalisation.
 2. `20261005143000_lead_email_concurrency.sql` : contrôle de la révision attendue lors de la finalisation.
 3. `20261005150000_lead_email_bo3_journal.sql` : même finalisation atomique avec journal BO3 et progression client/agence.
 4. `20261005152000_lead_email_delivery_guard.sql` : une seule transmission en cours par dossier/type/agence ; les envois incertains bloquent une nouvelle transmission jusqu’à vérification.
 5. `20261005153000_lead_email_consultation_guard.sql` : deux préparations simultanées réutilisent la même consultation du module mailing.
+6. `20261007120000_lead_email_feasibility.sql` : type `agency_feasibility`, agence existante non suspendue, absence de consultation chiffrée et finalisation limitée au mail/journal ; historique conservé si l’agence est supprimée.
 
 Un email complémentaire à une agence conserve le statut et la date du premier brief de sa consultation.
 
-La RPC `finalize_lead_email_message` enregistre le résultat et l'activité `email_sent` / `email_sent_externally` avec `payload = { k:'out', s, b, email_kind, email_id, delivery }`. Un mail client finalisé peut arrêter l'horloge de première réponse ; un mail agence finalisé démarre l'horloge agence. Copier, exporter ou enregistrer un brouillon ne déclare aucun envoi.
+La RPC `finalize_lead_email_message` enregistre le résultat et l'activité `email_sent` / `email_sent_externally` avec `payload = { k:'out', s, b, email_kind, email_id, delivery }`. Un mail client finalisé peut arrêter l'horloge de première réponse ; un mail `agency_brief` finalisé démarre l'horloge agence. Une étude `agency_feasibility` reste indépendante des deux horloges. Copier, exporter ou enregistrer un brouillon ne déclare aucun envoi.
 
 ## Les deux horloges de 48 h
 
@@ -109,6 +112,7 @@ Calcul dans `clockState()` / `agencyClock()` (`projet.ts`), fuseau Africa/Algier
 | Réponses et faits logistiques confirmés | `intake_payload.qualification_facts` : vols, composition/âges, chambres, dates/durée, budget/devise/base/périmètre, hébergement, parcours, prestations, contraintes et expédition ; les réponses voyageur et la trame alimentent aussi le moteur |
 | Colonnes historiques (listes, recherche) | `leads.budget`, `trip_dates`, `travelers`, tenues à jour par `colonnesDepuisTrame()` |
 | Brief | `leads.generated_brief` (markdown), `brief_generated_at`, `brief_edited_at` |
+| Étude de faisabilité non chiffrée | `lead_email_messages.kind = agency_feasibility`, `agency_id` renseigné, `proposal_id = null` ; historique et brouillons sans consultation ni délai de devis |
 | Consultation en préparation | une ligne `lead_circuit_proposals`, `status = pending_send`, `brief_sent_at = null` ; visible en BO3 comme brouillon |
 | Une agence consultée | même ligne après envoi finalisé : `brief_sent_at` non nul, `status = awaiting_response` |
 | Brouillons et historique des mails | `lead_email_messages` : dossier, agence/consultation éventuelles, destinataire, objet, texte et HTML, langue, version du template, informations manquantes, statut, prestataire/auteur/date d'envoi |

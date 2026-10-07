@@ -3,7 +3,7 @@
 | Champ | Valeur |
 |-------|--------|
 | **Périmètre** | Cockpit lead (`/leads/[id]`), liste leads, workflow voyageur (`/leads/[id]/workflow`), statuts pipeline Supabase, gates brief, intake, webhooks ; effets **côté opérateur** des politiques RLS. |
-| **Dernière revue** | 2026-10-05 — Import manuel analysé et relu, qualification logistique partagée, composer email intégré à BO3, consultations préparées avant envoi et historique des mails. Voir les parcours ci-dessous et [`REFONTE_V3.md`](./REFONTE_V3.md). Les sections v2 plus bas décrivent les écrans historiques ; `/leads/[id]/workflow` redirige vers BO3. |
+| **Dernière revue** | 2026-10-07 — Étude de faisabilité agence non chiffrée et accès aux quatre modèles depuis la fiche. Import manuel analysé et relu, qualification logistique partagée, composer email intégré à BO3, consultations préparées avant envoi et historique des mails. Voir les parcours ci-dessous et [`REFONTE_V3.md`](./REFONTE_V3.md). Les sections v2 plus bas décrivent les écrans historiques ; `/leads/[id]/workflow` redirige vers BO3. |
 | **Sources de vérité** | Runtime : `projet-actions.ts`, `manual-import-actions.ts`, `email-actions.ts`, `qualification-details-actions.ts`, `lead-qualification-completeness.ts`, `workflow-actions.ts`, `lead-brief-gate.ts` et migrations mailing. Spec produit : [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md). |
 
 ## Parcours v3 — de la trame du site au dossier gagné (depuis le 27/09/2026)
@@ -13,6 +13,8 @@ Le site peut envoyer une **trame** structurée à `POST /api/intake`. Un email o
 ```mermaid
 flowchart LR
   A[À compléter] -->|réponses client et faits confirmés| R[Reçu]
+  A -->|option : agency_feasibility| F[Étude non chiffrée et parcours envisagé]
+  F -->|avis agence et points à confirmer| A
   R -->|genererBrief| B[Brief prêt]
   B -->|preparerEmailAgence| D[Brouillon agence]
   D -->|envoi explicite ou envoi externe déclaré| E[Envoyé aux agences]
@@ -24,6 +26,7 @@ flowchart LR
 - **Étapes affichées** : dérivées de `leads.status` et du contenu du dossier (`statutDe()` dans `src/lib/bo3/load.ts`). L'enum de la base ne change pas.
 - **Première réponse sous 48 h** : le premier mail `welcome` ou `qualification` finalisé par le composer compte comme réponse, y compris un envoi externe déclaré. La RPC ajoute au journal `email_sent` ou `email_sent_externally`, avec le contenu édité et `payload.email_kind` ; BO3 lit ces événements pour arrêter l'horloge. Les événements historiques `first_response` / `traveler_link_sent` restent reconnus. L'accusé automatique du site (`ack_sent`, si activé) ne compte pas comme réponse humaine.
 - **Garde-fou « Reçu → Brief prêt »** : `analyzeLeadQualification()` vérifie les informations de chiffrage dans les faits confirmés, réponses voyageur et trame. Un budget « À définir » ou une simple catégorie de budget ne suffit pas. Le moteur est partagé par BO3, la génération du brief et le mailing ; les champs manquants restent à demander.
+- **Étude préalable facultative** : « Modèles d’email → Étude de faisabilité non chiffrée » ou la carte correspondante dans « Brief & agences » ouvre `agency_feasibility`. Le dossier peut être incomplet mais doit contenir une idée de voyage. Le message demande un avis terrain, un parcours (étapes, ordre, durée, transports), contraintes, alternatives, points à clarifier et délai estimé. Aucune demande de prix. Il est lié au dossier et à une agence non suspendue, sans consultation ni `proposal_id`, sans progression de statut ni démarrage des horloges. Brouillon éditable et historique propres.
 - **Brief anonyme et fidèle** : le brief reprend les notes supplémentaires reformatées, les options de parcours et les informations confirmées. Les noms, emails, téléphones et profils sociaux du voyageur sont masqués ; le serveur refuse un mail agence édité qui réintroduit des coordonnées ou une identité.
 - **Préparation agence distincte de l'envoi** : « Confier à une agence » crée/réutilise une consultation `pending_send`, `brief_sent_at = null`, puis ouvre son composer. Les anciens boutons déclarant immédiatement l'envoi ne font plus partie du flux de la fiche.
 - **Réponse agence sous 48 h** : l'horloge démarre seulement lorsque la RPC finalise l'envoi du mail agence et renseigne `brief_sent_at`. Un brouillon ne déclenche ni délai, ni accusé attendu, ni relance, ni saisie de proposition.
@@ -40,17 +43,17 @@ flowchart LR
 ### Qualification et composer email
 
 - « Écrire la première réponse » / « Ouvrir le brouillon » ouvrent le modèle `welcome`. L'onglet Qualification et « Demander ce qui manque » ouvrent `qualification`. Chaque consultation ouvre son `agency_brief` lié au dossier et à l'agence.
-- Les modèles client sont en français ou anglais, le brief agence en français. Ils utilisent le logo et la mise en page Direction l'Algérie. L'opérateur modifie l'objet et le texte ; l'aperçu HTML, la copie du texte/HTML/email mis en forme, le téléchargement HTML et l'envoi reprennent ce contenu édité.
+- Le menu « Modèles d’email » garde les quatre modèles accessibles, même après la première réponse. Les modèles client sont en français ou anglais, les deux modèles agence en français. Ils utilisent le logo et la mise en page Direction l'Algérie. L'opérateur modifie l'objet et le texte ; l'aperçu HTML, la copie du texte/HTML/email mis en forme, le téléchargement HTML et l'envoi reprennent ce contenu édité.
 - `saveLeadEmailDraft()` conserve le brouillon dans `lead_email_messages`. Réactualiser le modèle depuis le dossier remplace son texte après confirmation ; les réponses du client sont enregistrées dans « Compléter les informations pour le brief agence » puis les questions peuvent être régénérées.
 - Les premières questions manquantes concernent les **vols** (et aéroport si vols à proposer), puis le **nombre total et la composition adultes/enfants**, les **âges des enfants au départ**, puis la **répartition et la capacité des chambres**. Suivent dates avec année et durée, montant/devise/base du budget et inclusion/exclusion des vols, hébergement et itinéraire. Les données déjà confirmées ne sont pas demandées à nouveau.
 - Les questions s'adaptent au projet : bivouac seul ou expédition pédestre ne déclenchent pas une demande de chambres d'hôtel ; une expédition demande sa stratégie d'eau et son couchage/matériel. Arrivée/départ, prestations et contraintes restent des précisions complémentaires visibles dans le brief.
-- L'enregistrement/envoi exige un dossier non archivé, un référent assigné et l'utilisateur référent ou admin, ainsi qu'une adresse destinataire valide. L'envoi agence vérifie aussi consultation/destinataire, anonymisation et informations indispensables.
+- L'enregistrement/envoi exige un dossier non archivé, un référent assigné et l'utilisateur référent ou admin, ainsi qu'une adresse destinataire valide. L'envoi agence vérifie aussi consultation/destinataire, anonymisation et informations indispensables pour le brief chiffré. L’étude préalable ne requiert pas la qualification complète et n’utilise jamais le brief de chiffrage généré.
 - **Aucun envoi implicite au lancement du workflow** : `launchWorkflowAi` / `launchWorkflowManual` créent la session ; leurs anciens déclenchements de mails ont été retirés. Seul « Envoyer depuis Travel Lead » appelle Resend. Si le mail est envoyé depuis une autre messagerie, l'opérateur confirme explicitement « J'ai envoyé depuis ma messagerie ».
 - Envoi confirmé par le prestataire (`sent`) et déclaration externe (`external`) restent distincts dans l'historique. La sauvegarde et l'envoi contrôlent la révision du brouillon ; un clic concurrent ne peut pas envoyer une autre version. Un état `sending` dont la livraison est incertaine doit être vérifié auprès du prestataire avant toute nouvelle tentative. Le contenu d'un message déjà traité est conservé ; un nouvel envoi utilise un nouveau brouillon.
 
 ### Migrations nécessaires au mailing
 
-Appliquer dans l'ordre : `20261005140000_lead_email_messages.sql` (table, RLS, historique et finalisation), `20261005143000_lead_email_concurrency.sql` (révision attendue), `20261005150000_lead_email_bo3_journal.sql` (journal BO3, première réponse client et transitions après envoi), `20261005152000_lead_email_delivery_guard.sql` (transmission unique, blocage des envois incertains), `20261005153000_lead_email_consultation_guard.sql` (préparations simultanées). Un mail complémentaire conserve le statut et la date initiale de consultation. Copier/exporter un modèle ne remplace pas l'enregistrement d'un envoi.
+Appliquer dans l'ordre : `20261005140000_lead_email_messages.sql` (table, RLS, historique et finalisation), `20261005143000_lead_email_concurrency.sql` (révision attendue), `20261005150000_lead_email_bo3_journal.sql` (journal BO3, première réponse client et transitions après envoi), `20261005152000_lead_email_delivery_guard.sql` (transmission unique, blocage des envois incertains), `20261005153000_lead_email_consultation_guard.sql` (préparations simultanées), puis `20261007120000_lead_email_feasibility.sql` (nouveau type, agence non suspendue, consultation interdite et finalisation sans effet sur le pipeline). Un mail complémentaire conserve le statut et la date initiale de consultation. Copier/exporter un modèle ne remplace pas l'enregistrement d'un envoi.
 
 ## Carte des zones code (à re-vérifier quand le flux change)
 
@@ -247,6 +250,7 @@ flowchart TB
 
 | Date | Changement |
 |------|------------|
+| 2026-10-07 | Nouveau modèle `agency_feasibility` : étude non chiffrée et premier parcours dès la qualification, sans consultation ni horloge ; menu des quatre modèles et historique des études dans Brief & agences. |
 | 2026-10-05 | Import manuel avec analyse éditable, notes fidèles/source originale distinctes et référent explicite ; moteur commun de qualification logistique ; templates DA client FR/EN et agence FR, brouillons et historique ; consultations `pending_send` avant envoi explicite/externe ; journal BO3 et horloges déclenchées uniquement après finalisation. |
 | 2026-04-20 | Création de ce document ; correctifs P0 mergés dans le code (`actions.ts`, cockpit pipeline, `lead-supabase-pipeline`). |
 | 2026-04-20 | Refonte UI/UX complète : inbox, cockpit 3 colonnes, dashboard pilotage, liste leads. |

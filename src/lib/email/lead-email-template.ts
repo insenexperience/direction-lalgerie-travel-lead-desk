@@ -1,8 +1,13 @@
 import { DIRECTION_ALG_LOGO_URL } from "@/lib/brand-assets";
 import { escapeHtml } from "@/lib/email/html";
-import { analyzeLeadQualification, type LeadQualificationInput } from "@/lib/lead-qualification-completeness";
+import { analyzeLeadQualification, type LeadQualificationInput, type QualificationChecklistItem } from "@/lib/lead-qualification-completeness";
 
-export type LeadEmailKind = "welcome" | "qualification" | "agency_brief";
+export type LeadEmailKind = "welcome" | "qualification" | "agency_feasibility" | "agency_brief";
+export type AgencyEmailKind = "agency_feasibility" | "agency_brief";
+
+export function isAgencyEmailKind(kind: unknown): kind is AgencyEmailKind {
+  return kind === "agency_feasibility" || kind === "agency_brief";
+}
 export type LeadEmailLanguage = "fr" | "en";
 export type LeadEmailTemplateInput = LeadQualificationInput & {
   id?: string;
@@ -15,7 +20,7 @@ export type LeadEmailTemplateInput = LeadQualificationInput & {
   preferred_language?: string | null;
 };
 
-export const LEAD_EMAIL_TEMPLATE_VERSION = "direction-algerie-2026-10-v1";
+export const LEAD_EMAIL_TEMPLATE_VERSION = "direction-algerie-2026-10-v2";
 const CONTACT = "contact@directionlalgerie.com";
 const SITE = "https://www.directionlalgerie.com";
 
@@ -53,6 +58,15 @@ export function agencyTravelNotes(lead: LeadEmailTemplateInput): string {
   return notes ? anonymizeAgencyText(notes.trim(), lead) : "";
 }
 
+function feasibilityChecklistValue(item: QualificationChecklistItem): string {
+  const value = item.value || "";
+  if (item.id === "flights") return ({ include: "Vols à inclure", self_managed: "Vols réservés par le voyageur", already_booked: "Vols déjà réservés", none: "Aucun vol nécessaire" } as Record<string, string>)[value] || value;
+  if (item.id === "budget_scope") return ({ "flights included": "Vols inclus", "flights excluded": "Hors vols" } as Record<string, string>)[value] || value;
+  if (item.id === "budget") return value.replace(/\bper_person\b/g, "par personne").replace(/\btotal$/, "au total");
+  if (item.id === "children_ages" && /^\d+(?:,\s*\d+)*$/.test(value)) return `${value} ans`;
+  return value;
+}
+
 function firstName(fullName: string | undefined): string {
   return fullName?.trim().split(/\s+/)[0] ?? "";
 }
@@ -83,12 +97,13 @@ export function renderLeadEmailHtml(input: {
   mailtoHref?: string;
 }): string {
   const english = input.language === "en";
-  const agency = input.kind === "agency_brief";
+  const agency = isAgencyEmailKind(input.kind);
+  const feasibility = input.kind === "agency_feasibility";
   const name = firstName(input.travelerName);
-  const title = agency ? "Un projet à construire ensemble." : input.kind === "welcome"
+  const title = feasibility ? "Un premier parcours à imaginer." : agency ? "Un projet à construire ensemble." : input.kind === "welcome"
     ? `${english ? "Welcome" : "Bienvenue"}${name ? `, ${name}` : ""}.`
     : english ? "Let’s shape your journey." : "Donnons forme à votre voyage.";
-  const subtitle = agency ? `Brief agence · ${input.reference || "Direction l’Algérie"}` : english
+  const subtitle = feasibility ? `Étude de faisabilité non chiffrée · ${input.reference || "Direction l’Algérie"}` : agency ? `Brief agence · ${input.reference || "Direction l’Algérie"}` : english
     ? "Your travel project is in good hands." : "Votre projet de voyage est bien arrivé.";
   const mailto = input.mailtoHref?.startsWith("mailto:") ? input.mailtoHref : `mailto:${CONTACT}`;
   const whatsapp = input.whatsappHref && /^https:\/\/wa\.me\/\d{8,15}(?:\?|$)/.test(input.whatsappHref) ? input.whatsappHref : null;
@@ -100,8 +115,9 @@ export function buildLeadEmailTemplate(lead: LeadEmailTemplateInput, kind: LeadE
   language?: LeadEmailLanguage;
   bodyText?: string;
 } = {}) {
-  const analysis = analyzeLeadQualification(lead, { language: kind === "agency_brief" ? "fr" : options.language ?? recordedLanguage(lead) });
-  const language = kind === "agency_brief" ? "fr" : analysis.language;
+  const agency = isAgencyEmailKind(kind);
+  const analysis = analyzeLeadQualification(lead, { language: agency ? "fr" : options.language ?? recordedLanguage(lead) });
+  const language = agency ? "fr" : analysis.language;
   const english = language === "en";
   const ref = lead.reference || (lead.id ? `DA-${lead.id.slice(0, 8).toUpperCase()}` : "Dossier à qualifier");
   const questionText = analysis.questions.map((question) => `• ${question.label} : ${question.question}`).join("\n\n");
@@ -112,11 +128,35 @@ export function buildLeadEmailTemplate(lead: LeadEmailTemplateInput, kind: LeadE
     [english ? "Travel style" : "Style", lead.travel_style],
     [english ? "Budget" : "Budget", lead.budget],
   ].filter(([, value]) => typeof value === "string" && value.trim()).map(([label, value]) => `${label} : ${value}`).join("\n");
-  const subject = kind === "agency_brief" ? `Direction l’Algérie — Brief agence ${ref}` : kind === "welcome"
+  const subject = kind === "agency_feasibility" ? anonymizeAgencyText(`Direction l’Algérie — Étude de faisabilité non chiffrée ${ref}`, lead) : kind === "agency_brief" ? `Direction l’Algérie — Brief agence ${ref}` : kind === "welcome"
     ? english ? "Direction l’Algérie — We have received your travel enquiry" : "Direction l’Algérie — Votre projet de voyage est bien arrivé"
     : english ? "Direction l’Algérie — A few details for your travel project" : "Direction l’Algérie — Quelques précisions pour votre voyage";
   let bodyText: string;
-  if (kind === "agency_brief") {
+  if (kind === "agency_feasibility") {
+    // A generated sales brief can ask for prices or promise a response in 48 h.
+    // Start this earlier study from the traveler facts and source notes instead.
+    const intake = lead.intake_payload && typeof lead.intake_payload === "object" && !Array.isArray(lead.intake_payload)
+      ? lead.intake_payload as Record<string, unknown> : {};
+    const notes = agencyTravelNotes(lead) || (typeof intake.source_message === "string" ? anonymizeAgencyText(intake.source_message.trim(), lead) : "");
+    const confirmed = analysis.checklist.filter((item) => item.status === "complete" && item.value && !(item.id === "itinerary" && anonymizeAgencyText(item.value.trim(), lead) === notes));
+    const project = [
+      ["Projet", lead.trip_summary], ["Destinations envisagées", lead.destination_main], ["Style souhaité", lead.travel_style],
+    ].filter(([, value]) => typeof value === "string" && value.trim()).map(([label, value]) => `${label} : ${value}`).join("\n");
+    bodyText = anonymizeAgencyText([
+      "Bonjour,",
+      `Nous sollicitons votre expertise locale pour une première étude de faisabilité non chiffrée du dossier ${ref}, et pour imaginer un parcours adapté. Direction l’Algérie reste l’interlocuteur du voyageur.`,
+      "À ce stade, nous attendons un avis de terrain et une première intention de parcours. Le chiffrage sera demandé dans un second temps, après validation du parcours et de ses conditions de réalisation. Un budget éventuellement communiqué ci-dessous sert uniquement de contrainte de conception ; aucune offre tarifaire n’est attendue pour cette étude.",
+      project ? `Projet envisagé — à étudier :\n${project}` : "Le projet est décrit dans la demande détaillée ci-dessous ; les éléments non précisés restent à confirmer.",
+      notes ? `Demande détaillée du voyageur — retranscription anonymisée :\n${notes}` : "Aucune demande détaillée complémentaire n’a été renseignée à ce stade.",
+      confirmed.length ? `Précisions confirmées dans le dossier :\n${confirmed.map((item) => `• ${item.label} : ${feasibilityChecklistValue(item)}`).join("\n")}` : "Aucune précision de qualification supplémentaire n’est confirmée à ce stade.",
+      analysis.questions.length ? `Informations inconnues ou restant à confirmer — ne pas les considérer comme acquises :\n${analysis.questions.map((question) => `• ${question.label} : à confirmer`).join("\n")}` : "",
+      "Pour ce premier retour, pourriez-vous nous proposer :\n• Un avis sur la faisabilité du projet sur le terrain, en distinguant ce qui est possible, ce qui nécessite une adaptation et ce qui paraît impossible.\n• Une première idée de parcours : étapes, ordre des visites, durée conseillée, trajets et temps de déplacement estimés, ainsi qu’un rythme adapté.\n• Les contraintes de saison, d’accès et d’autorisations, ainsi que les conditions logistiques nécessaires : accompagnement, transports et hébergements selon le projet.\n• Des alternatives concrètes si certaines destinations, étapes ou modalités ne peuvent pas être réalisées.\n• Les points à clarifier avec le voyageur et les hypothèses qui restent à valider avant d’arrêter le parcours.",
+      analysis.expedition ? "Pour ce projet d’expédition, merci d’examiner particulièrement le format en autonomie, les obligations de guidage ou d’escorte, les accès et autorisations, la disponibilité et la fiabilité de l’eau, les besoins de portage ou de ravitaillement, les conditions de bivouac et les solutions de repli. Les itinéraires, distances et stratégies d’eau évoqués par le voyageur sont des pistes à vérifier, sans confirmation à ce stade." : "",
+      "Merci de nous indiquer le délai nécessaire pour nous transmettre ce premier avis et votre suggestion de parcours. Si des informations sont indispensables pour commencer l’étude, précisez-les dans votre retour.",
+      "Pour toute question, merci de répondre à Direction l’Algérie. Les échanges et coordonnées du voyageur restent gérés par notre équipe.",
+      "Bien cordialement,\nDirection l’Algérie",
+    ].filter(Boolean).join("\n\n"), lead);
+  } else if (kind === "agency_brief") {
     const brief = anonymizeAgencyText(lead.generated_brief?.trim() || recap || "Le projet doit être qualifié dans le dossier.", lead);
     const notes = agencyTravelNotes(lead);
     bodyText = anonymizeAgencyText([
@@ -142,7 +182,7 @@ export function buildLeadEmailTemplate(lead: LeadEmailTemplateInput, kind: LeadE
       english ? "Kind regards,\nDirection l’Algérie" : "Bien cordialement,\nDirection l’Algérie",
     ].filter(Boolean).join("\n\n");
   }
-  if (options.bodyText !== undefined) bodyText = options.bodyText;
+  if (options.bodyText !== undefined) bodyText = kind === "agency_feasibility" ? anonymizeAgencyText(options.bodyText, lead) : options.bodyText;
   return { subject, bodyText, language, reference: ref, questions: analysis.questions, analysis,
-    html: renderLeadEmailHtml({ kind, language, bodyText, travelerName: kind === "agency_brief" ? undefined : lead.traveler_name, reference: ref }) };
+    html: renderLeadEmailHtml({ kind, language, bodyText, travelerName: agency ? undefined : lead.traveler_name, reference: kind === "agency_feasibility" ? anonymizeAgencyText(ref, lead) : ref }) };
 }
