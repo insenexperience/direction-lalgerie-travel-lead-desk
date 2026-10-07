@@ -4,7 +4,8 @@ import type { Bo3Contexte } from "./acces";
 import type { Zone } from "./geo";
 import { briefFromMarkdown, manqueDe } from "./projet";
 import { trameDepuisSite, trameInterne } from "./trame";
-import type { Agence, Canal, Consultation, DevisDA, Mention, Message, Projet, Source, Statut, Trame } from "./types";
+import { analyzeLeadQualification } from "@/lib/lead-qualification-completeness";
+import type { Agence, Canal, Consultation, DevisDA, Mention, Message, Projet, Source, Statut } from "./types";
 
 type Row = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -63,7 +64,7 @@ export async function chargerAgences(ctx: Bo3Contexte): Promise<Agence[]> {
 
 // ---------------------------------------------------------------- projets
 const LEAD_COLS =
-  "id, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
+  "id, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at, travelers, travelers_adults, travelers_children, traveler_responses, trip_dates, travel_period, travel_start_date, travel_end_date, budget, budget_min, budget_max, budget_unit, currency, destination_main, travel_style, travel_desire_narrative, qualification_notes, qualification_summary";
 
 function sourceDe(r: Row): Source {
   const origine = s(r.page_origin) + " " + s(r.source);
@@ -74,12 +75,12 @@ function sourceDe(r: Row): Source {
   return "manuel";
 }
 
-function statutDe(db: string, trame: Trame | null, manque: string[], consultations: Consultation[]): Statut {
+function statutDe(db: string, ready: boolean, consultations: Consultation[]): Statut {
   if (db === "won" || db === "lost") return "clos";
   if (db === "quote" || db === "negotiation") return "proposee";
   if (db === "co_construction") return "proposition";
-  if (db === "agency_assignment") return consultations.length ? "envoye" : "brief_pret";
-  return !trame || manque.length ? "a_completer" : "recu";
+  if (db === "agency_assignment") return consultations.some((c) => !!c.envoye) ? "envoye" : "brief_pret";
+  return ready ? "recu" : "a_completer";
 }
 
 function devisDe(q: Row): DevisDA {
@@ -102,7 +103,7 @@ function devisDe(q: Row): DevisDA {
 }
 
 /** Évènements du journal qui sont des messages (payload.k) ou des jalons du dossier. */
-const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message"];
+const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "email_sent", "email_sent_externally"];
 
 export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {}): Promise<Projet[]> {
   const rows = await tout((de, a) => {
@@ -120,7 +121,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
       .from("lead_circuit_proposals")
       .select("id, lead_id, agency_id, status, brief_sent_at, proposal_received_at, proposal_declined_at, agency_proposal_price, agency_proposal_duration_days, agency_proposal_summary, agency_proposal_payload, converted_quote_id, created_at")
       .in("lead_id", lot)
-      .not("brief_sent_at", "is", null)
+      .or("brief_sent_at.not.is.null,status.eq.pending_send")
       .order("brief_sent_at").order("id")
       .range(de, a)),
     lire((lot, de, a) => ctx.supabase.from("quotes").select("id, lead_id, kind, summary, items, created_at, sent_at, sent_via").in("lead_id", lot).eq("kind", "da_traveler").order("created_at").order("id").range(de, a)),
@@ -141,8 +142,9 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
     const intake = o(r.intake_payload);
     const trame = trameInterne(o(r.ai_qualification_payload).trame_v3) ?? trameDepuisSite(intake.trame);
     const manque = manqueDe(trame);
+    const qualificationReady = analyzeLeadQualification(r).readyForAgencyBrief;
     const acts = A.get(id) ?? [];
-    const premiere = acts.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)));
+    const premiere = acts.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)) || (["email_sent", "email_sent_externally"].includes(s(a.kind)) && ["welcome", "qualification"].includes(s(o(a.payload).email_kind))));
     const consultations: Consultation[] = (P.get(id) ?? []).map((c) => {
       const pl = o(c.agency_proposal_payload);
       const recu = c.proposal_received_at ? s(c.proposal_received_at) : null;
@@ -151,6 +153,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
         agence: s(c.agency_id),
         portion: s(pl.portion) || "tout",
         envoye: s(c.brief_sent_at),
+        statut: s(c.status),
         accuse: pl.acknowledged_at ? s(pl.acknowledged_at) : null,
         proposition: recu ? { recu, prix: n(c.agency_proposal_price), duree: n(c.agency_proposal_duration_days), resume: s(c.agency_proposal_summary), ecarts: s(pl.ecarts) } : null,
         refus: c.proposal_declined_at ? s(c.proposal_declined_at) : null,
@@ -180,7 +183,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
       tel: s(r.phone) || null,
       canal: (/whats/.test(canalPref) || sourceDe(r) === "whatsapp" ? "whatsapp" : "email") as Canal,
       source: sourceDe(r),
-      statut: statutDe(dbStatus, trame, manque, consultations),
+      statut: statutDe(dbStatus, qualificationReady, consultations),
       dbStatus,
       recu: s(r.created_at),
       premiereReponse: premiere ? s(premiere.created_at) : r.welcome_email_sent_at ? s(r.welcome_email_sent_at) : null,

@@ -8,6 +8,7 @@ import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import { LEAD_PIPELINE } from "@/lib/mock-leads";
 import { parseCrmConversionBand, parseCrmFollowUpStrategy } from "@/lib/crm-fields";
 import { buildLeadInsertFromIntake } from "@/lib/intake-lead-insert";
+import { buildLeadDetailsPatch } from "@/lib/lead-details-patch";
 import { computeScoreFromWeights } from "@/lib/lead-score";
 import { normalizeLeadStatusForUi } from "@/lib/lead-status-coerce";
 import {
@@ -262,137 +263,16 @@ export async function updateLeadDetails(
     return { ok: false, error: "Non authentifié." };
   }
 
-  const travelerName = fdStr(formData, "traveler_name");
-  if (!travelerName) {
-    return { ok: false, error: "Le nom du voyageur est obligatoire." };
-  }
+  const { data: current, error: currentError } = await supabase
+    .from("leads")
+    .select("intake_payload, travelers, trip_summary, project_description, qualification_summary, budget, budget_min, budget_max, budget_unit, currency")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (currentError || !current) return { ok: false, error: "Lead introuvable." };
 
-  const priorityRaw = fdStr(formData, "priority");
-  const priority = priorityRaw === "high" ? "high" : "normal";
-
-  const intakeRaw = fdStr(formData, "intake_channel");
-  const intakeChannel =
-    intakeRaw === "manual" ||
-    intakeRaw === "whatsapp" ||
-    intakeRaw === "web_form" ||
-    intakeRaw === "email"
-      ? intakeRaw
-      : null;
-
-  const wa = fdStr(formData, "whatsapp_phone_number");
-
-  // ── New site-aligned fields ────────────────────────────────────────────────
-  const groupe        = fdStr(formData, "groupe");         // Seul(e) / En couple / En famille / Entre amis / groupe
-  const peopleRaw     = fdStr(formData, "people");         // total voyageurs
-  const datesMode     = fdStr(formData, "dates_mode");     // "Dates précises" | "Période flexible"
-  const dateStart     = fdStr(formData, "date_start");     // YYYY-MM-DD
-  const dateEnd       = fdStr(formData, "date_end");       // YYYY-MM-DD
-  const flexMonth     = fdStr(formData, "flex_month");     // e.g. "Printemps"
-  const flexDuration  = fdStr(formData, "flex_duration"); // e.g. "1 semaine"
-  const hebergements  = fdStr(formData, "hebergements");  // comma-separated
-  const vision        = fdStr(formData, "vision");         // dot-separated
-  const notes         = fdStr(formData, "notes");          // project description
-
-  const budgetIdealRaw  = fdStr(formData, "budget_ideal");
-  const budgetMaxRaw    = fdStr(formData, "budget_max_field");
-  const budgetCurrency  = fdStr(formData, "budget_currency"); // EUR | USD | DZD
-
-  // Currency conversion helper (all stored as EUR)
-  function toEur(raw: string): number | null {
-    const v = parseFloat(raw);
-    if (!raw || !isFinite(v) || v <= 0) return null;
-    if (budgetCurrency === "DZD") return Math.round((v / 276) * 100) / 100;
-    if (budgetCurrency === "USD") return Math.round(v * 0.92 * 100) / 100;
-    return v;
-  }
-
-  const budgetMinEur = toEur(budgetIdealRaw);
-  const budgetMaxEur = toEur(budgetMaxRaw);
-  const peopleCount  = peopleRaw ? (parseInt(peopleRaw, 10) || 1) : null;
-
-  // Build human-readable trip_dates string
-  let tripDates = "";
-  if (datesMode === "Dates précises" || datesMode === "exact") {
-    const parts: string[] = [];
-    if (dateStart) parts.push(`du ${dateStart}`);
-    if (dateEnd)   parts.push(`au ${dateEnd}`);
-    tripDates = parts.join(" ");
-  } else if (datesMode === "Période flexible" || datesMode === "flex") {
-    const parts: string[] = [];
-    if (flexMonth)    parts.push(flexMonth);
-    if (flexDuration) parts.push(flexDuration);
-    tripDates = parts.join(" · ");
-  }
-
-  // Build travelers text: "groupe — X voyageur(s)"
-  let travelersText = "";
-  if (groupe) travelersText += groupe;
-  if (peopleCount) {
-    const suffix = peopleCount > 1 ? "voyageurs" : "voyageur";
-    travelersText += travelersText ? ` — ${peopleCount} ${suffix}` : `${peopleCount} ${suffix}`;
-  }
-
-  // Build human-readable budget text
-  let budgetText = "";
-  if (budgetMinEur !== null) {
-    const idealStr = Math.round(budgetMinEur).toLocaleString("fr-FR");
-    budgetText = `${idealStr} € / pers.`;
-    if (budgetMaxEur !== null) {
-      const maxStr = Math.round(budgetMaxEur).toLocaleString("fr-FR");
-      budgetText = `${idealStr}–${maxStr} € / pers.`;
-    }
-  }
-
-  const patch: Record<string, unknown> = {
-    traveler_name: travelerName,
-    email: fdStr(formData, "email"),
-    phone: fdStr(formData, "phone"),
-    priority,
-    whatsapp_phone_number: wa.length ? wa : null,
-  };
-
-  if (intakeChannel) patch.intake_channel = intakeChannel;
-
-  // Travelers
-  if (groupe || peopleCount !== null) {
-    if (travelersText) patch.travelers = travelersText;
-    if (peopleCount !== null) {
-      patch.travelers_adults   = peopleCount;
-      patch.travelers_children = 0;
-    }
-  }
-
-  // Dates
-  if (tripDates) patch.trip_dates = tripDates;
-  if (datesMode === "Dates précises" || datesMode === "exact") {
-    if (dateStart) patch.travel_start_date = dateStart;
-    if (dateEnd)   patch.travel_end_date   = dateEnd;
-  }
-
-  // Style & projet
-  if (vision)        patch.travel_style = vision;
-  if (notes)         patch.trip_summary = notes;
-  if (hebergements) {
-    patch.qualification_summary = `Hébergements : ${hebergements}`;
-  }
-
-  // Budget (always per_person for site-aligned form)
-  if (budgetMinEur !== null) {
-    patch.budget_min  = budgetMinEur;
-    patch.budget_unit = "per_person";
-    if (budgetText)   patch.budget = budgetText;
-  }
-  if (budgetMaxEur !== null) {
-    patch.budget_max = budgetMaxEur;
-  }
-
-  // Planning stage
-  const planningStageRaw = fdStr(formData, "planning_stage");
-  if (planningStageRaw === "ideas" || planningStageRaw === "planning" || planningStageRaw === "ready") {
-    patch.planning_stage = planningStageRaw;
-  }
-
-  const { error } = await supabase.from("leads").update(patch).eq("id", leadId);
+  const prepared = buildLeadDetailsPatch(current, formData);
+  if (!prepared.ok) return { ok: false, error: prepared.error };
+  const { error } = await supabase.from("leads").update(prepared.patch).eq("id", leadId);
 
   if (error) {
     return { ok: false, error: error.message };
@@ -562,6 +442,21 @@ async function assertBriefExploitableBeforeAgencyAssignment(
         "qualification_validation_status",
         "workflow_mode",
         "qualification_blocks",
+        "intake_payload",
+        "traveler_responses",
+        "travelers_adults",
+        "travelers_children",
+        "travel_period",
+        "travel_start_date",
+        "travel_end_date",
+        "budget_min",
+        "budget_max",
+        "budget_unit",
+        "currency",
+        "destination_main",
+        "project_description",
+        "travel_desire_narrative",
+        "qualification_notes",
       ].join(", "),
     )
     .eq("id", leadId)
@@ -1273,7 +1168,7 @@ export async function generateAndSaveBrief(leadId: string): Promise<ActionResult
   const { data: row, error: fetchErr } = await supabase
     .from("leads")
     .select(
-      "reference, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks, budget_min, budget_max, budget_unit, travelers_adults, travelers_children",
+      "reference, traveler_name, email, phone, project_description, intake_payload, travelers, trip_dates, budget, travel_style, trip_summary, destination_main, qualification_notes, qualification_blocks, budget_min, budget_max, budget_unit, travelers_adults, travelers_children",
     )
     .eq("id", leadId)
     .maybeSingle();

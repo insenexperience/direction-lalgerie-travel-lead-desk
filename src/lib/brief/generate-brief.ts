@@ -1,8 +1,14 @@
 import type { QualificationBlocks } from "@/lib/qualification-blocks";
 import { safeQualificationBlocks } from "@/lib/qualification-blocks";
 import { calculateLeadBudget, formatEur } from "@/lib/pipeline-calculations";
+import { agencyTravelNotes, anonymizeAgencyText } from "@/lib/email/lead-email-template";
 
 export type BriefInput = {
+  traveler_name?: string;
+  email?: string;
+  phone?: string;
+  project_description?: string | null;
+  intake_payload?: unknown;
   reference: string | null;
   travelers: string;
   trip_dates: string;
@@ -92,6 +98,13 @@ export function generateBrief(lead: BriefInput): string {
   }
   sections.push("");
 
+  const travelNotes = agencyTravelNotes(lead);
+  if (travelNotes) {
+    sections.push("## Demande détaillée du voyageur");
+    sections.push(travelNotes);
+    sections.push("");
+  }
+
   if (lead.destination_main?.trim()) {
     sections.push("## Zones d'intérêt");
     sections.push(line("Destination principale", lead.destination_main));
@@ -119,7 +132,7 @@ export function generateBrief(lead: BriefInput): string {
   sections.push("");
   sections.push("_Pour toute question, contactez Direction l'Algérie — ne contacter pas directement le voyageur._");
 
-  return sections.filter((s) => s !== undefined && s !== null).join("\n");
+  return anonymizeAgencyText(sections.filter((s) => s !== undefined && s !== null).join("\n"), lead);
 }
 
 const blockLabelFr: Record<string, string> = {

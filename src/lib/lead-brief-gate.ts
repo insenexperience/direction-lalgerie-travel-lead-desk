@@ -8,8 +8,9 @@
 
 import { allBlocksValidated, BLOCK_IDS, type QualificationBlocks } from "@/lib/qualification-blocks";
 import { QUALIFICATION_BLOCKS_CONFIG } from "@/components/leads/qualification/qualification-blocks-config";
+import { analyzeLeadQualification, type LeadQualificationInput } from "@/lib/lead-qualification-completeness";
 
-export type LeadBriefGateRow = {
+export type LeadBriefGateRow = LeadQualificationInput & {
   traveler_name?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -55,6 +56,7 @@ function qualificationSignedOff(row: LeadBriefGateRow): boolean {
 }
 
 export function isLeadBriefExploitable(row: LeadBriefGateRow): boolean {
+  if (!analyzeLeadQualification(row).readyForAgencyBrief) return false;
   // v2 : gate basee sur les 6 blocs structures
   if (row.qualification_blocks) {
     return allBlocksValidated(row.qualification_blocks);
@@ -68,6 +70,14 @@ export function isLeadBriefExploitable(row: LeadBriefGateRow): boolean {
 
 /** Message utilisateur si passage vers l'assignation doit etre bloque. */
 export function getBriefGateBlockMessage(row: LeadBriefGateRow): string | null {
+  if (t(row.qualification_validation_status) === "rejected") {
+    return "La qualification a été rejetée : corrigez la fiche avant l’assignation agence.";
+  }
+  const completeness = analyzeLeadQualification(row);
+  if (!completeness.readyForAgencyBrief) {
+    const missingLabels = completeness.checklist.filter((item) => item.requiredForBrief && item.status === "missing").map((item) => item.label);
+    return `Informations à compléter avant l’assignation agence : ${missingLabels.join(", ")}. Complétez la fiche logistique ou demandez ces précisions au voyageur depuis le composer email.`;
+  }
   // v2 : gate basee sur les 6 blocs structures
   if (row.qualification_blocks) {
     const missing = BLOCK_IDS

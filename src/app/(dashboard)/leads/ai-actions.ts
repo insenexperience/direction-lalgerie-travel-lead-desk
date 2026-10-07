@@ -26,6 +26,8 @@ import {
   EMPTY_QUALIFICATION_BLOCKS,
 } from "@/lib/qualification-blocks";
 import { getBlockOptionIds } from "@/components/leads/qualification/qualification-blocks-config";
+import { analyzeLeadQualification, type LeadQualificationInput } from "@/lib/lead-qualification-completeness";
+import { getBriefGateBlockMessage, type LeadBriefGateRow } from "@/lib/lead-brief-gate";
 
 export type AiActionResult = { ok: true } | { ok: false; error: string };
 
@@ -538,6 +540,16 @@ export async function validateQualification(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Non authentifié." };
 
+  const { data: lead, error: fetchError } = await supabase
+    .from("leads")
+    .select("*")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (fetchError || !lead) return { ok: false, error: "Lead introuvable." };
+  if (lead.status !== "qualification") return { ok: false, error: "Ce lead n’est pas à l’étape qualification." };
+  const gateMessage = getBriefGateBlockMessage({ ...lead, qualification_validation_status: "validated" } as LeadBriefGateRow);
+  if (gateMessage) return { ok: false, error: gateMessage };
+
   const { error } = await supabase
     .from("leads")
     .update({
@@ -967,13 +979,14 @@ export async function finalizeQualification(params: {
 
   const { data: leadRaw, error: fetchErr } = await supabase
     .from("leads")
-    .select("qualification_blocks, status")
+    .select("*")
     .eq("id", leadId)
     .maybeSingle();
 
   if (fetchErr || !leadRaw) return { ok: false, error: "Lead introuvable." };
 
   const row = leadRaw as unknown as Record<string, unknown>;
+  if (row.status !== "qualification") return { ok: false, error: "Ce lead n’est pas à l’étape qualification." };
   const blocks = safeQualificationBlocks(row.qualification_blocks);
 
   if (!allBlocksValidated(blocks)) {
@@ -981,17 +994,11 @@ export async function finalizeQualification(params: {
     return { ok: false, error: `Blocs non validés : ${missing.join(', ')}.` };
   }
 
-  // Extraire le budget qualifié et mettre à jour les champs structurés
-  const budgetSelections = blocks.budget?.op_selections ?? [];
-  const BUDGET_RANGE_MAP: Record<string, { min: number; max: number | null; label: string }> = {
-    budget_low:     { min: 0,    max: 1500, label: "Économique (< 1 500 €/pers.)" },
-    budget_mid:     { min: 1500, max: 2500, label: "Moyen (1 500–2 500 €/pers.)" },
-    budget_high:    { min: 2500, max: 4000, label: "Confort (2 500–4 000 €/pers.)" },
-    budget_premium: { min: 4000, max: 7000, label: "Premium (4 000–7 000 €/pers.)" },
-    budget_luxury:  { min: 7000, max: null, label: "Luxe (7 000 €+/pers.)" },
-  };
-  const rangeKey = budgetSelections.find((s) => s in BUDGET_RANGE_MAP);
-  const qualifiedBudget = rangeKey ? BUDGET_RANGE_MAP[rangeKey] : null;
+  const completeness = analyzeLeadQualification(row as LeadQualificationInput);
+  if (!completeness.readyForAgencyBrief) {
+    const missing = completeness.checklist.filter((item) => item.requiredForBrief && item.status === "missing").map((item) => item.label);
+    return { ok: false, error: `Informations à compléter pour le brief agence : ${missing.join(", ")}.` };
+  }
 
   const { error } = await supabase
     .from("leads")
@@ -999,13 +1006,7 @@ export async function finalizeQualification(params: {
       status: "agency_assignment",
       qualification_validation_status: "validated",
       qualification_validated_at: new Date().toISOString(),
-      // Écrase le budget intake avec le budget qualifié (si sélectionné)
-      ...(qualifiedBudget ? {
-        budget_min: qualifiedBudget.min,
-        budget_max: qualifiedBudget.max,
-        budget_unit: "per_person",
-        budget: qualifiedBudget.label,
-      } : {}),
+      // Preserve the traveler's amount and basis; broad AI chips are not a budget.
       qualification_validated_by: user.id,
     })
     .eq("id", leadId);
