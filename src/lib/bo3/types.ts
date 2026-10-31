@@ -113,6 +113,7 @@ export type Agence = {
 
 export type Projet = {
   id: string;
+  updatedAt?: string;
   ref: string;
   nom: string;
   email: string | null;

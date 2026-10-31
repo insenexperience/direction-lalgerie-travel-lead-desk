@@ -4,6 +4,7 @@ import type { Bo3Contexte } from "./acces";
 import type { Zone } from "./geo";
 import { briefFromMarkdown, manqueDe } from "./projet";
 import { trameDepuisSite, trameInterne } from "./trame";
+import { etapeAvecAvancementManuel } from "./manual-stage";
 import type { Agence, Canal, Consultation, DevisDA, Mention, Message, Projet, Source, Statut, Trame } from "./types";
 
 type Row = Record<string, unknown>;
@@ -63,7 +64,7 @@ export async function chargerAgences(ctx: Bo3Contexte): Promise<Agence[]> {
 
 // ---------------------------------------------------------------- projets
 const LEAD_COLS =
-  "id, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
+  "id, updated_at, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
 
 function sourceDe(r: Row): Source {
   const origine = s(r.page_origin) + " " + s(r.source);
@@ -102,7 +103,7 @@ function devisDe(q: Row): DevisDA {
 }
 
 /** Évènements du journal qui sont des messages (payload.k) ou des jalons du dossier. */
-const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message"];
+const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced"];
 
 export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {}): Promise<Projet[]> {
   const rows = await tout((de, a) => {
@@ -174,13 +175,14 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
     const choisie = s(o(intake.trame).agence_choisie);
     return {
       id,
+      updatedAt: s(r.updated_at),
       ref: s(r.reference) || `DA-${id.slice(0, 8).toUpperCase()}`,
       nom: s(r.traveler_name) || s(r.email) || "Voyageur",
       email: s(r.email) || null,
       tel: s(r.phone) || null,
       canal: (/whats/.test(canalPref) || sourceDe(r) === "whatsapp" ? "whatsapp" : "email") as Canal,
       source: sourceDe(r),
-      statut: statutDe(dbStatus, trame, manque, consultations),
+      statut: etapeAvecAvancementManuel(statutDe(dbStatus, trame, manque, consultations), dbStatus, acts),
       dbStatus,
       recu: s(r.created_at),
       premiereReponse: premiere ? s(premiere.created_at) : r.welcome_email_sent_at ? s(r.welcome_email_sent_at) : null,

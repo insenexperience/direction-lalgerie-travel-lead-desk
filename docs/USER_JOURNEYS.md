@@ -284,6 +284,16 @@ Règles : soumission **unique** (`409` si déjà soumis) ; **régénérer** le l
 
 ---
 
+## Avancement manuel des dossiers — 31 octobre 2026
+
+La fiche BO3 propose **Avancer manuellement**, sous les étapes et dans **Actions**, pour déclarer un traitement déjà effectué sur WhatsApp, par e-mail, au téléphone ou par un autre canal. L’opérateur choisit une étape ultérieure jusqu’à « Proposée au voyageur » et renseigne une note obligatoire. Il peut sauter plusieurs étapes déjà traitées hors du desk. La clôture garde les actions explicites « Marquer gagné » et « Clore · perdu » (motif obligatoire).
+
+`avancerEtapeManuellement` relit le dossier et contrôle le rôle, le référent, la progression et la version affichée. La fonction SQL `advance_lead_manual_stage` (migration `20261031120000`) verrouille le dossier, recontrôle les accès et la version, puis enregistre le statut et l’activité `manual_stage_advanced` dans une seule transaction. Un dossier libre est pris en charge par l’opérateur ; un dossier archivé, clos, modifié entre-temps ou affecté à un autre référent est refusé (sauf admin pour l’affectation).
+
+Le jalon manuel complète le calcul des étapes BO3 et apparaît dans **Voyageur & messages**, avec auteur en base, date, étape, canal et note. Il ne fabrique ni email, ni brief, ni consultation, ni devis, et ne remplit pas les informations de qualification manquantes. Les contrôles de complétude et d’anonymisation des vrais envois restent actifs. Une clôture, un reset vers un autre statut et une progression ultérieure du pipeline priment sur l’ancien jalon. Les notifications habituelles de statut du projet suivent le statut enregistré.
+
+La case facultative **La première réponse au voyageur a déjà été faite** ajoute un jalon `first_response` dans la même transaction, uniquement si aucune première réponse n’est connue. Elle arrête le compteur des 48 h à la date de l’enregistrement ; une première réponse existante conserve sa date. La déclaration ne contacte pas elle-même le voyageur.
+
 ## Règle d’évolution (obligatoire)
 
 Toute PR qui modifie **pipeline**, **workflow voyageur**, **gates brief**, **référent**, **intake** ou **RLS** sur les leads doit **mettre à jour ce fichier** (diagrammes, tableau C1–C8, ou changelog) dans la **même PR**, sauf urgence avec PR de suivi sous 48 h et todo explicite.

@@ -12,6 +12,8 @@ import { MANQUES, SOURCES, STATUT_LABEL, STATUTS, type Agence, type BriefSection
 import { trameVide } from "@/lib/bo3/trame";
 import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
+import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
+import { ManualStageDialog } from "./manual-stage-dialog";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
 
 type Res = A.Resultat;
@@ -118,6 +120,7 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
         <div className="row" style={{ alignItems: "flex-end" }}>
           <div style={{ minWidth: 190 }}><div className="lbl" style={{ marginBottom: 4 }}>Première réponse</div><Deadline c={tc} /></div>
           <Menu items={[
+            etapesManuellesSuivantes(p.statut).length > 0 && { l: "Avancer manuellement", ic: "arrowR", f: () => setModal("manual-stage") },
             !p.premiereReponse && p.statut !== "clos" && { l: "Écrire la première réponse", ic: "send", f: () => run("first") },
             complet(p) && !p.brief && p.statut !== "clos" && { l: "Générer le brief", ic: "file", f: () => run("brief") },
             p.statut !== "clos" && { l: `Lien voyageur${p.manque.length ? " (champs manquants)" : ""}`, ic: "link", f: () => run("lien") },
@@ -133,6 +136,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
         <div className="stepper__bar">{STATUTS.map((s, k) => <i key={s} className={k < stepIdx ? "done" : k === stepIdx ? "cur" : ""} />)}</div>
         <div className="stepper__t"><b>Étape {stepIdx + 1} / 7 · {statutLabel(p)}</b><span>{stepIdx < 6 ? `puis : ${STATUT_LABEL[STATUTS[stepIdx + 1]]}` : ""}</span></div>
       </div>
+
+      {etapesManuellesSuivantes(p.statut).length > 0 && <div style={{ marginTop: -8, marginBottom: 16 }}><button className="btn s sm" disabled={pending} onClick={() => setModal("manual-stage")}><Icon n="arrowR" s={12} /> Avancer manuellement</button></div>}
 
       {/* Prochaine action */}
       {na.act ? (
@@ -363,6 +368,7 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
 
       {/* Fenêtres */}
+      {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={p.updatedAt ?? ""} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
       {modal === "first" && (
         <Modal title="Première réponse" onClose={() => setModal(null)} foot={<>
           <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
