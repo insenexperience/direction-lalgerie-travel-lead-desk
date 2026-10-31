@@ -73,6 +73,8 @@ won / lost / negotiation
 
 **PDF**: `GET /api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` → `@react-pdf/renderer` → buffer → optional storage in `quote_pdfs` bucket. When `quotes.items` is the v3 object (`{ v: 3, … }`), the PDF is the "Proposition de voyage" of Direction l'Algérie with the partnership mention; otherwise the legacy table. PDF packages are listed in `next.config.ts` as `serverExternalPackages`.
 
+**Radar module** (`/radar`, since 2026-10-31): internal tool for the five Notion databases of the "Radar Direction l'Algérie" (signals, actors, events, partnerships, content ideas). Read and written directly in Notion server-side (`src/lib/radar/notion-api.ts`, `NOTION_TOKEN`), cached 60 s with `unstable_cache` and purged by `updateTag` in the server actions (`src/app/(dashboard)/radar/actions.ts`). Screens in `src/components/radar/`, styles in `src/styles/radar.css` (hand-written, scoped `.bo3 .rd-*` / `.rdag`). The **agent DA** (`POST /api/radar/agent`, NDJSON stream, OpenAI with tools) reads the radar, an aggregated desk summary (no traveler personal data) and the private Notion page "Contexte de l'agent DA"; it only *proposes* writes, which the operator accepts via `appliquerProposition`. The repo is public: project context lives in Notion, never in the code. Unit tests: `npx tsx --test src/lib/radar/radar.test.ts src/components/radar/md.test.tsx`.
+
 **Traveler requalification page**: public, client-facing page `GET /q/[token]` (hosted on `app.directionlalgerie.com` alongside the desk) where the traveler completes qualification instead of replying to a long email. Operator generates a per-lead token from the cockpit (`generateTravelerLink` in `leads/actions.ts`); the page + `POST /api/q/[token]` use the **service role** (public, no session — `middleware.ts` skips `updateSession` on `/q/*`). Responses land on `leads.traveler_responses` (JSONB) and show read-only in the cockpit dossier. With `?champs=dates,groupe,budget,lieux` (v3), the page shows a short form limited to what the trame lacks, posted to `POST /api/q/[token]/champs`, which fills `ai_qualification_payload.trame_v3`. Validation/typing in `src/lib/traveler-requalification.ts`; option ids reuse `qualification-blocks-config.ts`. Env: `NEXT_PUBLIC_TRAVELER_BASE_URL`. Docs: `docs/SPEC_PAGE_VOYAGEUR_REQUALIFICATION.md`.
 
 ### Key Tables
@@ -131,6 +133,9 @@ INTAKE_SHARED_SECRET=          # Bearer token for /api/intake
 CRON_SECRET=                   # protects /api/cron/keepalive (keeps Supabase awake)
 TRAVELER_ACK_ENABLED=0         # 1 = automatic acknowledgment e-mail to the traveler (keep 0 until contact@ works again)
 BO3_APERCU_LOCAL=              # 1 = preview without login, development only
+NOTION_TOKEN=                  # Notion internal integration shared with the Radar page (radar module + agent)
+NOTION_RADAR_CONTEXTE_PAGE_ID= # optional: Notion page holding the agent context (default: "Contexte de l'agent DA")
+RADAR_AGENT_MODEL=             # optional: OpenAI model for the radar agent (default OPENAI_MODEL)
 ```
 
 See `.env.example` for full list.

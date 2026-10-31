@@ -20,7 +20,7 @@ type Props = {
 };
 
 /** Écrans refondus (v3). Les autres routes gardent leur mise en page d'avant, dans `.legacy`. */
-const V3 = [/^\/inbox$/, /^\/leads$/, /^\/leads\/[^/]+$/, /^\/dashboard$/, /^\/agencies$/];
+const V3 = [/^\/inbox$/, /^\/leads$/, /^\/leads\/[^/]+$/, /^\/dashboard$/, /^\/agencies$/, /^\/radar(\/[^/]+)?$/];
 
 const lire = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const ecrire = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* navigation privée */ } };
@@ -50,14 +50,14 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
       if (e.key === "Escape") { setCmd(false); return; }
       const k = e.key.toLowerCase();
       if (k === "g") { g = true; clearTimeout(gt); gt = setTimeout(() => (g = false), 900); return; }
-      if (g) { g = false; const dest = { f: "/inbox", p: "/leads", b: "/dashboard", a: "/agencies" }[k]; if (dest) go(dest); }
+      if (g) { g = false; const dest = { f: "/inbox", p: "/leads", b: "/dashboard", a: "/agencies", r: "/radar" }[k]; if (dest) go(dest); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [go]);
 
   const v3 = V3.some((r) => r.test(pathname));
-  const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname;
+  const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname.startsWith("/radar") ? "/radar" : pathname;
 
   return (
     <ToastProvider>
@@ -82,6 +82,7 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
             { l: "Projets", ic: "list", k: "G P", f: () => go("/leads") },
             { l: "Pilotage", ic: "chart", k: "G B", f: () => go("/dashboard") },
             { l: "Agences", ic: "building", k: "G A", f: () => go("/agencies") },
+            { l: "Radar · veille et réseau", ic: "radar", k: "G R", f: () => go("/radar") },
             { l: "Nouveau projet", ic: "plus", f: () => setNouveau(true) },
             { l: col ? "Déplier la barre latérale" : "Replier la barre latérale", ic: "panel", k: "⌘B", f: () => setCol(!col) },
             { l: theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre", ic: theme === "dark" ? "sun" : "moon", f: () => setTheme(theme === "dark" ? "light" : "dark") },
@@ -118,6 +119,8 @@ function Sidebar({ actif, counts, user, col, setCol }: { actif: string; counts: 
       <It href="/inbox" ic="inbox" l="File de travail" b={counts.file} hot={counts.hot > 0} k="G F" />
       <It href="/leads" ic="list" l="Projets" b={counts.projets} k="G P" />
       <It href="/dashboard" ic="chart" l="Pilotage" k="G B" />
+      <div className="sb__grp">Veille</div>
+      <It href="/radar" ic="radar" l="Radar" k="G R" />
       <div className="sb__grp">Ressources</div>
       <It href="/agencies" ic="building" l="Agences" k="G A" />
       <It href="/contacts" ic="users" l="Contacts" />
@@ -196,7 +199,7 @@ function CommandPalette({ open, onClose, projets, agences, go, actions }: { open
             );
           }) : <div className="empty">Aucun résultat</div>}
         </div>
-        <div className="cmd__ft"><span><kbd>↑</kbd> <kbd>↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>G</kbd> puis <kbd>F</kbd> file · <kbd>P</kbd> projets · <kbd>B</kbd> pilotage</span></div>
+        <div className="cmd__ft"><span><kbd>↑</kbd> <kbd>↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>G</kbd> puis <kbd>F</kbd> file · <kbd>P</kbd> projets · <kbd>B</kbd> pilotage · <kbd>R</kbd> radar</span></div>
       </div>
     </div>
   );
