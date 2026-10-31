@@ -17,6 +17,7 @@ const P: Record<string, string> = {
   pencil: "M16 3l5 5-12 12H4v-5Z", copy: "M8 8h12v12H8zM4 16V4h12", link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1", alert: "M12 3 2 20h20L12 3Zm0 6v5m0 3v.5",
   chevron: "M6 9l6 6 6-6", sparkles: "M12 3v3m0 12v3M5 12H2m20 0h-3m-2.2-6.8 2.1-2.1M5.1 18.9l2.1-2.1m0-11.6L5.1 3.1m13.8 15.8-2.1-2.1M12 8l1.2 2.8L16 12l-2.8 1.2L12 16l-1.2-2.8L8 12l2.8-1.2Z",
   sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-15v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4", moon: "M21 13A8 8 0 1 1 11 3a6 6 0 0 0 10 10Z", panel: "M3 5h18v14H3zM9 5v14",
+  radar: "M12 21a9 9 0 1 1 9-9M12 16a4 4 0 1 1 4-4M12 12l7-7M12 12h.01",
   timeline: "M3 6h6M3 12h10M3 18h14M17 4v4m2-2h-4", refresh: "M20 12a8 8 0 1 1-2.3-5.7L20 4v6h-6", logout: "M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7",
 };
 export function Icon({ n, s = 16, style }: { n: string; s?: number; style?: React.CSSProperties }) {
