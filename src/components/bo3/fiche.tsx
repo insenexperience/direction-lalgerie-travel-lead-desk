@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import * as A from "@/app/(dashboard)/leads/projet-actions";
 import { LIEUX, ZONES, type Zone } from "@/lib/bo3/geo";
 import {
-  agencyClock, briefToMarkdown, complet, defaultTab, firstResponseText, fmtD, fmtDay, fuitesBrief, hrs, nextAction, nomAgence,
+  agencyClock, briefToMarkdown, complet, defaultTab, fmtD, fmtDay, fuitesBrief, hrs, nextAction, nomAgence,
   portionFor, prenom, r1, statutLabel, suggestions, travelerClock, zonesJours, type Action, H,
 } from "@/lib/bo3/projet";
 import { MANQUES, SOURCES, STATUT_LABEL, STATUTS, type Agence, type BriefSection, type Consultation, type Mention, type Projet, type Trame } from "@/lib/bo3/types";
@@ -14,6 +14,10 @@ import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
 import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
 import { ManualStageDialog } from "./manual-stage-dialog";
+import { ExternalExchangeDialog } from "./external-exchange-dialog";
+import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
+import "@/styles/lead-workflow.css";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
 
 type Res = A.Resultat;
@@ -24,7 +28,7 @@ const lienWhatsApp = (tel: string | null, texte: string) => { const d = (tel ?? 
 const lienMail = (email: string | null, sujet: string, texte: string) => (email ? `mailto:${email}?subject=${encodeURIComponent(sujet)}&body=${encodeURIComponent(texte)}` : null);
 const copier = async (t: string) => { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } };
 
-export function FicheView({ p, agences, now: depart, signature }: { p: Projet; agences: Agence[]; now: number; signature: string }) {
+export function FicheView({ p, lead, agences, now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; now: number; signature: string }) {
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
@@ -40,10 +44,10 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
   useEffect(() => setSections(p.brief?.sections ?? []), [p.brief]);
 
-  const na = nextAction(p, agences, now);
+  const na = nextAction({ ...p, consultations: p.consultations.filter(c => c.envoye) }, agences, now);
   const sug = useMemo(() => suggestions(p, agences), [p, agences]);
-  const pend = p.consultations.filter((c) => !c.proposition && !c.refus);
-  const props = p.consultations.filter((c) => c.proposition);
+  const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus);
+  const props = p.consultations.filter((c) => c.envoye && c.proposition);
   const tc = travelerClock(p, now);
   const canalNom = p.canal === "whatsapp" ? "WhatsApp" : "e-mail";
   const n = (id: string | null | undefined) => nomAgence(agences, id);
@@ -58,6 +62,14 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       if (r.ok) { apres?.(r); router.refresh(); }
     });
   }, [router, toast]);
+
+  function prepareAgencyEmail(agencyId: string) {
+    start(async () => {
+      const r = await A.preparerEmailAgence(p.id, agencyId, mode);
+      if (!r.ok) { toast(r.error); return; }
+      setForm({ agence: agencyId, propId: r.proposalId }); setModal("agency-email"); router.refresh();
+    });
+  }
 
   const ouvrirConversion = (c: Consultation) => {
     const pr = c.proposition!;
@@ -75,7 +87,7 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
 
   const run = useCallback((a: Action | "lost" | "won" | "lien", extra?: string) => {
     switch (a) {
-      case "first": setForm({ text: firstResponseText(p, agences, now, signature) }); setModal("first"); break;
+      case "first": setModal("first"); break;
       case "ask": setForm({ text: `Bonjour ${prenom(p)},\n\nVotre projet est bien arrivé. Pour le transmettre à la bonne agence, il me manque ${p.manque.length ? p.manque.join(", ") : "quelques précisions"}. Deux minutes suffisent : {lien}\n\nJe reste votre seul interlocuteur.\n\n${signature} — Direction l'Algérie` }); setModal("ask"); break;
       case "complete": setModal("complete"); break;
       case "qualif": setTab("trame"); break;
@@ -111,15 +123,18 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
   return (
     <div className="page">
       {/* En-tête */}
-      <div className="hdr">
+      <div className="hdr lead-desk-header">
         <div>
           <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span><span>{canalNom}</span></div>
           <h1 className="t">{p.nom}</h1>
-          <div className="sub">{p.trame ? `« ${p.trame.titre} » · ${p.trame.jours.length} jours${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
+          <div className="sub">{p.trame ? `« ${p.trame.titre} »${p.trame.jours.length ? ` · ${p.trame.jours.length} jours` : p.trame.cadre.duree ? ` · ${p.trame.cadre.duree}` : ""}${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
         </div>
-        <div className="row" style={{ alignItems: "flex-end" }}>
+        <div className="row wrap" style={{ alignItems: "flex-end" }}>
           <div style={{ minWidth: 190 }}><div className="lbl" style={{ marginBottom: 4 }}>Première réponse</div><Deadline c={tc} /></div>
           <Menu items={[
+            p.statut !== "clos" && { l: "Enregistrer un échange déjà effectué", ic: "check", f: () => setModal("exchange") },
+            p.statut !== "clos" && { l: "Préparer un email au voyageur", ic: "mail", f: () => setModal(p.premiereReponse ? "ask" : "first") },
+            !!p.brief && p.statut !== "clos" && { l: "Préparer un email de brief agence", ic: "building", f: () => setModal("agency-choice") },
             etapesManuellesSuivantes(p.statut).length > 0 && { l: "Avancer manuellement", ic: "arrowR", f: () => setModal("manual-stage") },
             !p.premiereReponse && p.statut !== "clos" && { l: "Écrire la première réponse", ic: "send", f: () => run("first") },
             complet(p) && !p.brief && p.statut !== "clos" && { l: "Générer le brief", ic: "file", f: () => run("brief") },
@@ -138,6 +153,8 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       </div>
 
       {etapesManuellesSuivantes(p.statut).length > 0 && <div style={{ marginTop: -8, marginBottom: 16 }}><button className="btn s sm" disabled={pending} onClick={() => setModal("manual-stage")}><Icon n="arrowR" s={12} /> Avancer manuellement</button></div>}
+
+      {p.statut !== "clos" && <div className="lead-contact-actions row wrap"><span className={`tag ${p.premiereReponse ? "green" : "amber"}`}>{p.premiereReponse ? `Premier échange enregistré · ${fmtD(p.premiereReponse)}` : "Premier échange à enregistrer"}</span><button className="btn s sm" disabled={pending} onClick={() => setModal("exchange")}><Icon n="check" s={12} /> Échange déjà effectué</button><button className="btn s sm" disabled={pending} onClick={() => setModal(p.premiereReponse ? "ask" : "first")}><Icon n="mail" s={12} /> Préparer un email</button></div>}
 
       {/* Prochaine action */}
       {na.act ? (
@@ -296,21 +313,19 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
                 {(sel ?? []).map((id) => (
                   <button key={id} className="btn s" disabled={fuites.length > 0} title={fuites.length ? "Corrigez le brief d'abord" : undefined} onClick={() => copier(briefTexte(id)).then((ok) => toast(ok ? `Brief pour ${n(id)} copié. Collez-le dans votre e-mail ou WhatsApp.` : "Copie impossible : sélectionnez le texte dans l'aperçu."))}><Icon n="copy" s={12} /> Copier pour {n(id)}</button>
                 ))}
-                <button className="btn a" disabled={!(sel ?? []).length || fuites.length > 0 || pending} onClick={() => act(() => A.envoyerBrief(p.id, (sel ?? []).map((id) => ({ agence: id, portion: portionDe(id) }))))}>
-                  <Icon n="send" s={12} /> Marquer envoyé à {(sel ?? []).length} agence{(sel ?? []).length > 1 ? "s" : ""}
-                </button>
+                {(sel ?? []).map(id => <button key={`mail:${id}`} className="btn a" disabled={pending || fuites.length > 0} onClick={() => prepareAgencyEmail(id)}><Icon n="mail" s={12} /> Préparer l’email pour {n(id)}</button>)}
               </div>
             </Card>
           )}
 
           {p.consultations.length > 0 && (
-            <Card t="Suivi des agences" right={p.statut !== "clos" && !p.devis?.envoye ? <div className="row wrap">{agences.filter((a) => !p.consultations.some((c) => c.agence === a.id)).map((a) => <button key={a.id} className="btn s xs" disabled={pending} onClick={() => act(() => A.envoyerBrief(p.id, [{ agence: a.id, portion: "tout" }]))}><Icon n="plus" s={11} /> {a.n}</button>)}</div> : null}>
+            <Card t="Suivi des agences" right={p.statut !== "clos" && !p.devis?.envoye ? <div className="row wrap">{agences.filter((a) => !p.consultations.some((c) => c.agence === a.id)).map((a) => <button key={a.id} className="btn s xs" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}><Icon n="plus" s={11} /> {a.n}</button>)}</div> : null}>
               <div className="stack" style={{ gap: 8 }}>
                 {p.consultations.map((c) => (
                   <div key={c.id} className="agcard">
                     <div>
-                      <div className="row wrap"><span className="agc__n">{n(c.agence)}</span><span className="tag">{c.portion === "tout" ? "trame complète" : c.portion}</span>{c.retenue && <span className="tag green">retenue</span>}{c.refus && <span className="tag red">refus</span>}</div>
-                      <div className="mt">envoyé {fmtD(c.envoye)} · {c.accuse ? `accusé ${fmtD(c.accuse)}` : c.proposition || c.refus ? "" : <span style={{ color: hrs(c.envoye, now) > 24 ? "var(--amber-deep)" : undefined }}>sans accusé depuis {r1(hrs(c.envoye, now))} h</span>}{c.relances.length ? ` · relancé ${c.relances.map(fmtD).join(", ")}` : ""}</div>
+                      <div className="row wrap"><span className="agc__n">{n(c.agence)}</span><span className="tag">{c.portion === "tout" ? "trame complète" : c.portion}</span>{!c.envoye && <button className="btn s xs" disabled={pending} onClick={() => prepareAgencyEmail(c.agence)}>Préparer l’email</button>}{c.retenue && <span className="tag green">retenue</span>}{c.refus && <span className="tag red">refus</span>}</div>
+                      <div className="mt">{c.envoye ? `envoyé ${fmtD(c.envoye)}` : "Brouillon · pas encore envoyé"} · {c.accuse ? `accusé ${fmtD(c.accuse)}` : c.proposition || c.refus ? "" : <span style={{ color: hrs(c.envoye, now) > 24 ? "var(--amber-deep)" : undefined }}>sans accusé depuis {r1(hrs(c.envoye, now))} h</span>}{c.relances.length ? ` · relancé ${c.relances.map(fmtD).join(", ")}` : ""}</div>
                       {c.proposition && <div className="mt">proposition reçue {fmtD(c.proposition.recu)}{c.proposition.prix ? ` · ${c.proposition.prix.toLocaleString("fr-FR")} € / pers.` : ""}</div>}
                     </div>
                     <Deadline c={agencyClock(c, now)} />
@@ -368,26 +383,10 @@ export function FicheView({ p, agences, now: depart, signature }: { p: Projet; a
       {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
 
       {/* Fenêtres */}
-      {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={p.updatedAt ?? ""} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
-      {modal === "first" && (
-        <Modal title="Première réponse" onClose={() => setModal(null)} foot={<>
-          <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
-          <button className="btn a" disabled={pending} onClick={() => { const l = p.canal === "whatsapp" ? lienWhatsApp(p.tel, form.text ?? "") : lienMail(p.email, "Votre projet de voyage en Algérie", form.text ?? ""); if (l) window.open(l, "_blank", "noopener"); act(() => A.premiereReponse(p.id, form.text ?? "", canalNom), () => setModal(null)); }}><Icon n="send" s={12} /> Envoyer par {canalNom} et marquer</button>
-        </>}>
-          <div className="mt">Un message d&apos;une personne. Il dit chez qui part le projet et quand la proposition arrive. Modèle pré-rempli, modifiable. {canalNom} s&apos;ouvre avec le texte ; l&apos;horloge s&apos;arrête.</div>
-          <textarea className="inp" style={{ minHeight: 200 }} {...F("text")} />
-        </Modal>
-      )}
-      {modal === "ask" && (
-        <Modal title="Demander ce qui manque" onClose={() => setModal(null)} foot={<>
-          <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
-          <button className="btn a" disabled={pending} onClick={() => act(() => A.demanderManque(p.id, form.text ?? ""), (r) => { if (r.ok && r.url) { const texte = (form.text ?? "").replace("{lien}", r.url); const l = p.canal === "whatsapp" ? lienWhatsApp(p.tel, texte) : lienMail(p.email, "Votre projet de voyage en Algérie", texte); if (l) window.open(l, "_blank", "noopener"); else copier(texte); } setModal(null); })}><Icon n="send" s={12} /> Créer le lien et envoyer par {canalNom}</button>
-        </>}>
-          <div className="row wrap">{(p.manque.length ? p.manque : MANQUES).map((k) => <span key={k} className="miss">{k}</span>)}</div>
-          <div className="card soft" style={{ padding: "10px 12px" }}><div className="lbl">Lien voyageur · raccourci aux champs manquants</div><div className="mt" style={{ marginTop: 4 }}>Créé à l&apos;envoi, valable 30 jours. Il remplace {"{lien}"} dans le message.</div></div>
-          <textarea className="inp" style={{ minHeight: 140 }} {...F("text")} />
-        </Modal>
-      )}
+      {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}
+      {modal === "exchange" && <ExternalExchangeDialog p={p} updatedAt={lead.updated_at} now={now} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
+      {(modal === "first" || modal === "ask" || modal === "agency-email") && <div className="lead-mailing-dialog"><Modal title={modal === "first" ? "Premier contact · email" : modal === "ask" ? "Poursuivre la qualification · email" : `Brief agence · ${n(form.agence)}`} onClose={() => setModal(null)}><div className="lead-mailing-module"><LeadEmailComposer key={`${modal}:${form.propId ?? "client"}`} lead={lead} kind={modal === "first" ? "welcome" : modal === "ask" ? "qualification" : "agency_brief"} agencyId={modal === "agency-email" ? form.agence : undefined} proposalId={modal === "agency-email" ? form.propId : undefined} /></div><div className="row wrap"><span className="mt">Pour un échange WhatsApp ou un appel déjà effectué :</span><button className="btn s sm" onClick={() => setModal("exchange")}>Enregistrer l’échange</button></div></Modal></div>}
+      {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={lead.updated_at} onRecordExchange={() => setModal("exchange")} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
       {(modal === "complete" || modal === "qualif") && (
         <TrameForm
           initiale={p.trame ?? trameVide(p.texte ? p.texte.slice(0, 60) : undefined)}

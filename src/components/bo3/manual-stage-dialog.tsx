@@ -6,7 +6,7 @@ import { etapesManuellesSuivantes, MANUAL_CHANNELS, type ManualChannel, type Man
 import { STATUT_LABEL, type Projet } from "@/lib/bo3/types";
 import { Modal } from "./ui";
 
-export function ManualStageDialog({ p, updatedAt, onClose, onSaved }: { p: Projet; updatedAt: string; onClose: () => void; onSaved: (info: string) => void }) {
+export function ManualStageDialog({ p, updatedAt, onClose, onSaved, onRecordExchange }: { p: Projet; updatedAt: string; onClose: () => void; onSaved: (info: string) => void; onRecordExchange?: () => void }) {
   const etapes = etapesManuellesSuivantes(p.statut);
   const [stage, setStage] = useState<ManualStage | "">(etapes[0] ?? "");
   const [channel, setChannel] = useState<ManualChannel>(p.canal);
@@ -30,7 +30,8 @@ export function ManualStageDialog({ p, updatedAt, onClose, onSaved }: { p: Proje
         finally { submitting.current = false; }
       });
     }}>
-      <p>Un échange ou une étape a déjà été traité sur WhatsApp, par téléphone ou hors du desk ? Indiquez où en est le dossier.</p>
+      <p>Choisissez une étape réellement terminée hors du desk. Son avancement sera ajouté à l’historique.</p>
+      {onRecordExchange && <button type="button" className="btn s sm" disabled={pending} onClick={onRecordExchange}>Enregistrer seulement un échange</button>}
       <div className="card soft" style={{ padding: "10px 12px" }}>Étape actuelle : <b>{STATUT_LABEL[p.statut]}</b></div>
       <label className="field"><span className="lbl">Étape atteinte</span>
         <select className="inp" value={stage} disabled={pending} required onChange={e => setStage(e.target.value as ManualStage)} autoFocus>

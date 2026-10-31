@@ -79,7 +79,7 @@ function statutDe(db: string, trame: Trame | null, manque: string[], consultatio
   if (db === "won" || db === "lost") return "clos";
   if (db === "quote" || db === "negotiation") return "proposee";
   if (db === "co_construction") return "proposition";
-  if (db === "agency_assignment") return consultations.length ? "envoye" : "brief_pret";
+  if (db === "agency_assignment") return consultations.some((c) => !!c.envoye) ? "envoye" : "brief_pret";
   return !trame || manque.length ? "a_completer" : "recu";
 }
 
@@ -103,7 +103,7 @@ function devisDe(q: Row): DevisDA {
 }
 
 /** Évènements du journal qui sont des messages (payload.k) ou des jalons du dossier. */
-const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced", "lead_reset"];
+const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced", "lead_reset", "external_exchange", "email_sent", "email_sent_externally", "traveler_link_created"];
 
 export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {}): Promise<Projet[]> {
   const rows = await tout((de, a) => {
@@ -144,7 +144,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
     const manque = manqueDe(trame);
     const acts = A.get(id) ?? [];
     const cycleActs = acts.slice(acts.findLastIndex((a) => a.kind === "lead_reset") + 1);
-    const premiere = cycleActs.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)));
+    const premiere = cycleActs.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)) || (["email_sent", "email_sent_externally"].includes(s(a.kind)) && ["welcome", "qualification"].includes(s(o(a.payload).email_kind))));
     const consultations: Consultation[] = (P.get(id) ?? []).map((c) => {
       const pl = o(c.agency_proposal_payload);
       const recu = c.proposal_received_at ? s(c.proposal_received_at) : null;
@@ -186,7 +186,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
       statut: etapeAvecAvancementManuel(statutDe(dbStatus, trame, manque, consultations), dbStatus, acts),
       dbStatus,
       recu: s(r.created_at),
-      premiereReponse: premiere ? s(premiere.created_at) : r.welcome_email_sent_at ? s(r.welcome_email_sent_at) : null,
+      premiereReponse: premiere ? (s(o(premiere.payload).occurred_at) || s(premiere.created_at)) : r.welcome_email_sent_at ? s(r.welcome_email_sent_at) : null,
       agenceChoisie: choisie || null,
       trame,
       texte,

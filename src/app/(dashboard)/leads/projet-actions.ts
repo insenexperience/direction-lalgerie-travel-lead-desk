@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { contexteBo3, type Bo3Contexte } from "@/lib/bo3/acces";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { chargerAgences, chargerProjets, resoudreAgenceChoisie } from "@/lib/bo3/load";
-import { briefToMarkdown, buildBrief, fuitesBrief, manqueDe } from "@/lib/bo3/projet";
+import { briefToMarkdown, buildBrief, fuitesBrief, manqueDe, portionFor } from "@/lib/bo3/projet";
 import { colonnesDepuisTrame } from "@/lib/bo3/trame";
 import type { BriefSection, Mention, Message, Projet, Trame } from "@/lib/bo3/types";
 
@@ -93,8 +93,8 @@ export async function demanderManque(id: string, texte: string) {
     const base = (process.env.NEXT_PUBLIC_TRAVELER_BASE_URL || "https://app.directionlalgerie.com").replace(/\/$/, "");
     const champs = p.manque.length ? `?champs=${p.manque.join(",")}` : "";
     const url = `${base}/q/${token}${champs}`;
-    await journal(ctx, id, "traveler_link_sent", { k: "out", s: "Lien voyageur envoyé", b: texte.replace("{lien}", url).trim() }, { champs: p.manque });
-    return { ok: true, info: "Lien créé. Ce message vaut première réponse.", url };
+    await journal(ctx, id, "traveler_link_created", { k: "out", s: "Lien voyageur envoyé", b: texte.replace("{lien}", url).trim() }, { champs: p.manque });
+    return { ok: true, info: "Lien créé. Copiez-le dans votre message, puis déclarez l’échange après l’envoi.", url };
   });
 }
 
@@ -179,6 +179,47 @@ export async function envoyerBrief(id: string, envois: { agence: string; portion
     await journal(ctx, id, "brief_sent", { k: "sys", s: "Brief envoyé", b: `${nouveaux.length} agence${nouveaux.length > 1 ? "s" : ""} · réponse attendue sous 48 h.` });
     return { ok: true, info: `Brief marqué envoyé à ${nouveaux.length} agence${nouveaux.length > 1 ? "s" : ""}. Horloge agence démarrée.` };
   });
+}
+
+/** Prepare an agency consultation. Only the mail composer's explicit dispatch starts its clock. */
+export async function preparerEmailAgence(id: string, agencyId: string, mode: "portion" | "pilote" = "portion"): Promise<{ ok: true; proposalId: string } | { ok: false; error: string }> {
+  try {
+    const loaded = await charger(id);
+    if (estErreur(loaded)) return { ok: false, error: loaded.ok ? "Dossier indisponible." : loaded.erreur };
+    const { ctx, p } = loaded;
+    if (p.statut === "clos") return { ok: false, error: "Ce dossier est clos." };
+    if (!["portion", "pilote"].includes(mode)) return { ok: false, error: "Mode de routage invalide." };
+    await prendreDossier(ctx, id);
+    if (!p.brief?.sections.length) return { ok: false, error: "Générez et relisez le brief avant de préparer son email." };
+    const fuites = fuitesBrief(p.brief.sections, p);
+    if (fuites.length) return { ok: false, error: `Retirez les données personnelles du brief : ${fuites.join(", ")}.` };
+    const agencies = await chargerAgences(ctx);
+    if (!agencies.some((a) => a.id === agencyId)) return { ok: false, error: "Agence introuvable ou suspendue." };
+    const portion = mode === "pilote" ? "tout" : portionFor(p, agencies.find(a => a.id === agencyId)!) || "tout";
+    const existing = p.consultations.find((c) => c.agence === agencyId);
+    if (existing) return { ok: true, proposalId: existing.id };
+    const { data: draft } = await ctx.supabase.from("lead_circuit_proposals").select("id,agency_proposal_payload").eq("lead_id", id).eq("agency_id", agencyId).eq("status", "pending_send").maybeSingle();
+    if (draft) {
+      const previous = draft.agency_proposal_payload?.portion || "tout";
+      if (previous !== portion) return { ok: false, error: `Le brouillon existant concerne « ${previous} ». Choisissez ce même périmètre pour le reprendre.` };
+      return { ok: true, proposalId: String(draft.id) };
+    }
+    const { data, error } = await ctx.supabase.from("lead_circuit_proposals").insert({
+      lead_id: id, agency_id: agencyId, title: p.trame?.titre || "Proposition de voyage",
+      circuit_outline: briefToMarkdown(p.brief.sections), status: "pending_send", brief_sent_at: null,
+      created_by_profile_id: ctx.userId, agency_proposal_payload: { portion, reminders: [], mail_workflow: "reviewed" },
+    }).select("id").single();
+    if (error?.code === "23505") {
+      const { data: concurrent } = await ctx.supabase.from("lead_circuit_proposals").select("id").eq("lead_id", id).eq("agency_id", agencyId).contains("agency_proposal_payload", { mail_workflow: "reviewed" }).maybeSingle();
+      if (concurrent) return { ok: true, proposalId: String(concurrent.id) };
+    }
+    if (error) throw new Error(error.message);
+    await statut(ctx, id, "agency_assignment", ["new", "qualification", "refinement"]);
+    rafraichir(id);
+    return { ok: true, proposalId: String(data.id) };
+  } catch {
+    return { ok: false, error: "La consultation n’a pas pu être préparée. Aucun email envoyé." };
+  }
 }
 
 // ---------------------------------------------------------------- agences

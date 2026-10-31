@@ -36,6 +36,7 @@ export const LEAD_SELECT_V2 = [
   "qualification_validation_status",
   "manual_takeover",
   "submission_id",
+  "intake_payload",
   "workflow_launched_at",
   "workflow_launched_by",
   "workflow_mode",
@@ -130,6 +131,9 @@ export function mapRowToSupabaseLeadRow(
       parseCrmConversionBand(String(row.crm_conversion_band ?? "")) ?? "medium",
     crm_follow_up_strategy:
       parseCrmFollowUpStrategy(String(row.crm_follow_up_strategy ?? "")) ?? "none",
+    intake_payload: row.intake_payload && typeof row.intake_payload === "object" && !Array.isArray(row.intake_payload)
+      ? row.intake_payload as Record<string, unknown>
+      : null,
     // Page voyageur — non inclus dans LEAD_SELECT_* (requête isolée dans la page) :
     // null par défaut ici, surchargé après coup si la migration est appliquée.
     public_token: row.public_token != null ? String(row.public_token) : null,

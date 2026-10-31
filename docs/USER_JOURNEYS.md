@@ -294,6 +294,18 @@ Le jalon manuel complète le calcul des étapes BO3 et apparaît dans **Voyageur
 
 La case facultative **La première réponse au voyageur a déjà été faite** ajoute un jalon `first_response` dans la même transaction, uniquement si aucune première réponse n’est connue. Elle arrête le compteur des 48 h à la date de l’enregistrement ; une première réponse existante conserve sa date. La déclaration ne contacte pas elle-même le voyageur.
 
+## Premier contact et modes de communication — 31 octobre 2026
+
+Le premier échange est indépendant de la qualification. **Échange déjà effectué** permet de déclarer un contact par WhatsApp, e-mail, téléphone ou autre voie, avec un résumé et sa date réelle (heure d’Alger). La case de première réponse arrête le compteur des 48 h à cette date ; l’étape et les informations de qualification restent inchangées. La déclaration est enregistrée atomiquement, avec auteur, version du dossier et contrôle du référent ou de l’administrateur. Un dossier clos ou archivé est refusé.
+
+**Préparer un email** ouvre un modèle relisible et modifiable. L’opérateur peut l’envoyer depuis le desk avec Resend, le copier puis déclarer son envoi par ses propres moyens, ou enregistrer l’échange WhatsApp/téléphone séparément. Préparer, enregistrer un brouillon, copier du texte ou créer un lien voyageur ne constitue pas un envoi et n’arrête pas le compteur. Les emails welcome/qualification réellement envoyés ou déclarés externes comptent comme premier contact, sans déclarer la qualification terminée.
+
+Les consultations agence restent en brouillon jusqu’à l’envoi réel ou déclaré. Les brouillons sont recherchés directement par leur action de préparation et sont exclus des consultations envoyées, des horloges, de l’historique des briefs envoyés et des indicateurs globaux. Le périmètre du routage (portion ou voyage entier) est calculé côté serveur, stocké et repris dans le modèle, y compris après régénération. Un brouillon déjà préparé avec un périmètre différent doit être repris dans ce même mode.
+
+Les envois ou nouvelles déclarations d’envoi sont refusés après clôture, côté serveur et par un trigger SQL pour les appels directs. Une confirmation prestataire déjà en cours peut encore finaliser son journal après clôture ; les règles existantes d’archivage et de RLS restent applicables. La migration additive 20261031180000_lead_external_exchange.sql contient ce contrôle et la fonction de déclaration d’un échange. Les six migrations mailing historiques déjà appliquées en production sont aussi présentes dans les sources.
+
+L’en-tête de la fiche possède une couche explicite au-dessus des cartes animées pour que le menu Actions soit entièrement visible et cliquable. Les emails se chargent dans une fenêtre large, avec aperçu et choix du mode d’envoi.
+
 ## Règle d’évolution (obligatoire)
 
 Toute PR qui modifie **pipeline**, **workflow voyageur**, **gates brief**, **référent**, **intake** ou **RLS** sur les leads doit **mettre à jour ce fichier** (diagrammes, tableau C1–C8, ou changelog) dans la **même PR**, sauf urgence avec PR de suivi sous 48 h et todo explicite.
