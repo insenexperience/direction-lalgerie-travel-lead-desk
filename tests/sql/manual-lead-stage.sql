@@ -67,6 +67,12 @@ begin
   assert (select count(*) = c from public.activities where lead_id = fixture), 'Refused declarations leave no audit row';
   assert (select status = 'agency_assignment' from public.leads where id = fixture), 'Refused declarations leave status unchanged';
 
+  -- Same raw status in a new processing cycle must not revive old declarations.
+  insert into public.activities(lead_id,actor_id,kind,detail,created_at)
+    values(fixture,auth.uid(),'lead_reset','TEST new cycle',clock_timestamp());
+  perform public.advance_lead_manual_stage(fixture,'envoye','whatsapp','Nouvel envoi après remise à zéro.',stamp,true);
+  assert (select count(*) = 2 from public.activities where lead_id = fixture and kind = 'first_response'), 'New cycle can declare its own first response';
+
   begin
     perform public.advance_lead_manual_stage('8da31a00-0000-4000-8000-000000000012','envoye','whatsapp','Other referent.',stamp,false);
     raise exception 'TEST: other referent accepted';

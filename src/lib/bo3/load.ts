@@ -103,7 +103,7 @@ function devisDe(q: Row): DevisDA {
 }
 
 /** Évènements du journal qui sont des messages (payload.k) ou des jalons du dossier. */
-const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced"];
+const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced", "lead_reset"];
 
 export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {}): Promise<Projet[]> {
   const rows = await tout((de, a) => {
@@ -143,7 +143,8 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
     const trame = trameInterne(o(r.ai_qualification_payload).trame_v3) ?? trameDepuisSite(intake.trame);
     const manque = manqueDe(trame);
     const acts = A.get(id) ?? [];
-    const premiere = acts.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)));
+    const cycleActs = acts.slice(acts.findLastIndex((a) => a.kind === "lead_reset") + 1);
+    const premiere = cycleActs.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)));
     const consultations: Consultation[] = (P.get(id) ?? []).map((c) => {
       const pl = o(c.agency_proposal_payload);
       const recu = c.proposal_received_at ? s(c.proposal_received_at) : null;

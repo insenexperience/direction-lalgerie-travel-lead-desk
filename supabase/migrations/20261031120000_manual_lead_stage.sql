@@ -17,6 +17,7 @@ declare
   target_index integer := array_position(stages, p_stage);
   current_index integer;
   declared_index integer;
+  cycle_start timestamptz;
   next_status public.lead_status;
   stage_label text;
   channel_label text;
@@ -49,8 +50,11 @@ begin
       select 1 from public.lead_circuit_proposals where lead_id = p_lead_id and brief_sent_at is not null
     ) then 4 else 3 end
     else 1 end;
+  select coalesce(max(created_at), '-infinity'::timestamptz) into cycle_start
+    from public.activities where lead_id = p_lead_id and kind = 'lead_reset';
   select max(array_position(stages, payload ->> 'stage')) into declared_index
     from public.activities where lead_id = p_lead_id and kind = 'manual_stage_advanced'
+      and created_at > cycle_start
       and payload ->> 'db_status' = dossier.status::text
       and payload ->> 'stage' in ('recu','brief_pret','envoye','proposition','proposee');
   if target_index <= greatest(current_index, coalesce(declared_index, 1)) then
@@ -79,7 +83,7 @@ begin
       'channel',p_channel,'first_response',p_first_response), stamp
   );
   if p_first_response and dossier.welcome_email_sent_at is null and not exists (
-    select 1 from public.activities where lead_id = p_lead_id and (
+    select 1 from public.activities where lead_id = p_lead_id and created_at > cycle_start and (
       kind in ('first_response','traveler_link_sent')
       or (kind in ('email_sent','email_sent_externally') and payload ->> 'email_kind' in ('welcome','qualification'))
     )

@@ -80,6 +80,20 @@ test('des données de jalon invalides sont ignorées', async () => {
   assert.equal(p.statut, 'brief_pret');
 });
 
+test('un ancien jalon ne se réactive pas quand un dossier réinitialisé revient au même statut', async () => {
+  const old = manual('envoye', 'agency_assignment');
+  const reset = { lead_id: id, kind: 'lead_reset', created_at: '2026-10-31T11:00:00.000Z', payload: {} };
+  const first = { lead_id: id, kind: 'first_response', created_at: stamp, payload: { k: 'sys', s: 'Première réponse déclarée', b: 'Ancien échange' } };
+  const app = database({ activities: [old, first, reset] });
+  const [p] = await load('src/lib/bo3/load.ts', app.mocks).chargerProjets({ supabase: app.db }, { id });
+  assert.equal(p.statut, 'brief_pret');
+  assert.equal(p.premiereReponse, null);
+  assert(p.messages.some(m => m.b === 'Ancien échange'), 'Historique conservé');
+  const next = database({ activities: [old, first, reset, { ...manual('envoye', 'agency_assignment'), created_at: '2026-10-31T12:00:00.000Z' }] });
+  const [advanced] = await load('src/lib/bo3/load.ts', next.mocks).chargerProjets({ supabase: next.db }, { id });
+  assert.equal(advanced.statut, 'envoye');
+});
+
 const input = (extra = {}) => ({ stage: 'envoye', channel: 'whatsapp', note: '  Brief traité par WhatsApp.  ', expectedUpdatedAt: stamp, firstResponse: true, ...extra });
 
 test('l’action transmet une déclaration explicite à une seule transaction et ne contacte aucun voyageur', async () => {
