@@ -3,6 +3,7 @@
 import { LIEUX, ZONES, type Zone } from "./geo";
 import type { Agence, BriefSection, Consultation, Manque, Projet, Trame } from "./types";
 import { STATUT_LABEL } from "./types";
+import { dureeTrame } from "./trame";
 
 export const H = 36e5;
 const TZ = "Africa/Algiers";
@@ -50,7 +51,7 @@ export function manqueDe(trame: Trame | null): Manque[] {
   if (!trame.cadre.mois.trim()) m.push("dates");
   if (!trame.groupe.type.trim() && !trame.groupe.nombre) m.push("groupe");
   if (trame.budget === null || !trame.budget.trim()) m.push("budget");
-  if (!trame.jours.some((j) => j.lieux.length)) m.push("lieux");
+  if (!trame.jours.some((j) => j.lieux.length) && !trame.destinations?.length && !trame.regions?.length) m.push("lieux");
   return m;
 }
 export const complet = (p: Projet) => !!p.trame && p.manque.length === 0;
@@ -183,7 +184,7 @@ export function buildBrief(p: Projet): BriefSection[] {
   const nb = g.nombre ?? 0;
   const pers = nb ? `${nb} ${nb > 1 ? "voyageurs" : "voyageur"}` : g.type || "groupe à préciser";
   return [
-    { id: "voyage", title: "Le voyage en une ligne", text: `« ${t.titre} » · ${t.jours.length} jours · ${t.cadre.mois || "mois à préciser"} · ${pers}${g.enfants ? ` dont ${g.enfants} enfants` : ""}` },
+    { id: "voyage", title: "Le voyage en une ligne", text: `« ${t.titre} » · ${dureeTrame(t)} · ${t.cadre.mois || "période à préciser"} · ${pers}${g.enfants ? ` dont ${g.enfants} enfants` : ""}` },
     { id: "itin", title: "Itinéraire jour par jour, composé par le voyageur", text: t.jours.map((j) => `J${j.n} ${j.lieux.map(nomLieu).join(" · ")}${j.e ? ` : ${j.e}` : ""}`).join("\n") || "—" },
     { id: "cadre", title: "Cadre", text: [t.cadre.rythme && `Rythme ${t.cadre.rythme}`, t.cadre.hebergement, [t.cadre.mois, t.cadre.souplesse].filter(Boolean).join(", "), t.cadre.duree && `Durée souhaitée : ${t.cadre.duree}`].filter(Boolean).join(" · ") + "." },
     { id: "groupe", title: "Groupe", text: `${[g.type, nb ? `${nb} personne${nb > 1 ? "s" : ""}` : ""].filter(Boolean).join(", ")}${g.enfants ? `, dont ${g.enfants} enfants` : ""}.` },

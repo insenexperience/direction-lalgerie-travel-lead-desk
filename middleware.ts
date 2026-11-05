@@ -1,12 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-/** Page voyageur publique (/q/<token> + API) : aucune session Supabase à rafraîchir. */
+/** Pages voyageur et workers authentifiés par leur secret : aucune session à rafraîchir. */
 function isTravelerPath(pathname: string): boolean {
   return (
     pathname === "/q" ||
     pathname.startsWith("/q/") ||
-    pathname.startsWith("/api/q/")
+    pathname.startsWith("/api/q/") ||
+    pathname === "/api/traveler-project-status" ||
+    pathname === "/api/project-status-emails" ||
+    pathname === "/api/cron/keepalive"
   );
 }
 

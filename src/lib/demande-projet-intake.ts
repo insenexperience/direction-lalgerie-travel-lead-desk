@@ -60,7 +60,7 @@ export function readDemandeProjet(intakePayload: unknown): DemandeProjetIntake |
   }) : [];
   const regions = strings(ou.superRegions), regionNames = strings(ou.nomsSuperRegions);
   return {
-    destination: { unknown: ou.jeNeSaisPas === true, names: strings(ou.noms), territories: strings(ou.territoires), regions, regionNames: regionNames.length ? regionNames : regions.map(id => REGIONS[id] || id) },
+    destination: { unknown: ou.jeNeSaisPas === true, names: strings(ou.noms), territories: strings(ou.territoires), regions, regionNames: regionNames.length ? regionNames : regions.map(id => Object.hasOwn(REGIONS, id) ? REGIONS[id] : id) },
     timing: { mode, months, start, end, approximate, duration, period, label: [period, duration].filter(Boolean).join(" · ") },
     travelers: { type: groupType, adults, children, label: [groupType, composition].filter(Boolean).join(" · ") },
     wishes: { selection, styles: strings(envies.libelles), styleIds: strings(envies.manieres), comfort: text(envies.confort), message: text(envies.message) },

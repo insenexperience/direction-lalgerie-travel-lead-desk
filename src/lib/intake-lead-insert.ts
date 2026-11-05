@@ -2,15 +2,24 @@
  * Construction de l’objet `leads` à partir d’un payload « intake » (JSON formulaire
  * Squarespace ou champs alignés dashboard). Utilisé par `/api/intake` et `createLeadFromIntake`.
  */
+import { demandeProjetDescription, readDemandeProjet } from "@/lib/demande-projet-intake";
 
 export function intakeStr(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-/**
- * Nom affiché / voyageur : `full_name` si présent, sinon « prénom + nom »
- * (`first`/`last` sur le formulaire site, aligné avec le modal dashboard).
- */
+/** Un objet simple, et non un tableau ni null : ce que la trame du site doit être pour être lue. */
+function record(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Limite également les appels directs au CRM. */
+function trameBornee(value: unknown): Record<string, unknown> | null {
+  if (!record(value)) return null;
+  try { return JSON.stringify(value).length <= 60_000 ? value : null; } catch { return null; }
+}
+
+/** Nom voyageur : full_name, ou prénom + nom pour les formulaires historiques. */
 export function resolveFullNameFromIntakeBody(body: Record<string, unknown>): string {
   const single = intakeStr(body.full_name);
   if (single) return single;
@@ -18,15 +27,6 @@ export function resolveFullNameFromIntakeBody(body: Record<string, unknown>): st
   const last =
     intakeStr(body.last) || intakeStr(body.nom) || intakeStr(body.family_name) || intakeStr(body.surname);
   return [first, last].filter(Boolean).join(" ").trim();
-}
-
-function trameBornee(v: unknown): Record<string, unknown> | null {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  try {
-    return JSON.stringify(v).length <= 60_000 ? (v as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Normalise le body JSON (champs optionnels → chaînes, dates flex, etc.). */
@@ -60,10 +60,12 @@ export function buildIntakeRecordFromBody(body: Record<string, unknown>): Record
     budget_max: intakeStr(body.budget_max),
     budget_total: intakeStr(body.budget_total),
     notes_longues: notesLong,
+    // Trame structurée du site (relais /api/projet) : conservée telle quelle, pour que la demande arrive entière
+    // dans intake_payload. Sans cela, le composeur et la demande de projet envoyaient un objet que rien ne lisait.
+    // Garder la limite aussi pour les appels directs à l’API CRM.
+    trame: trameBornee(body.trame),
     submission_id: intakeStr(body.submission_id),
     page_origin: intakeStr(body.page_origin),
-    // Trame structurée du site (contrat v1, docs refonte v3 §7) : gardée telle quelle, bornée à 60 Ko.
-    trame: trameBornee(body.trame),
     submitted_at:
       typeof body.submitted_at === "string" && body.submitted_at
         ? body.submitted_at
@@ -97,17 +99,17 @@ export function buildLeadInsertFromIntake(
   const travelerName = intakeStr(intake.full_name) || intakeStr(intake.email);
   const email = intakeStr(intake.email);
   const mode = String(intake.dates_mode ?? "").toLowerCase();
+  const demande = readDemandeProjet(intake);
 
   let tripDates = "—";
   if (mode.includes("flex")) {
     const parts = [intake.flex_month, intake.flex_duration]
       .map((x) => (x != null ? String(x).trim() : ""))
       .filter(Boolean);
-    tripDates = parts.length ? parts.join(" · ") : "Période flexible";
+    tripDates = parts.length ? parts.join(" · ") : intakeStr(intake.flex_period) || "Période flexible";
   } else if (intake.date_start || intake.date_end) {
     tripDates = `${intake.date_start || "—"} → ${intake.date_end || "—"}`;
   } else if (intakeStr(intake.flex_period)) {
-    // Le site envoie mois et durée sans `dates_mode` : sans ce repli, la période était perdue.
     tripDates = intakeStr(intake.flex_period);
   }
 
@@ -136,11 +138,45 @@ export function buildLeadInsertFromIntake(
     .filter(Boolean)
     .join("\n");
 
-  // Les notes internes restent à l'opérateur : le récapitulatif du voyageur va dans la description
-  // du projet ; la page d'origine et l'identifiant d'envoi restent dans `intake_payload`.
+  // Demande de projet du site (trame « demande-projet-voyage ») : le conseiller lit d'abord où et avec qui. Sans
+  // trame, tout ce qui suit reste vide et le lead est construit comme avant.
+  const trame = record(intake.trame) ? (intake.trame as Record<string, unknown>) : null;
+  const ou = trame && record(trame.ou) ? (trame.ou as Record<string, unknown>) : null;
+  const lieux = demande
+    ? demande.destination.unknown ? [] : demande.destination.names.length ? demande.destination.names
+      : demande.destination.territories.length ? demande.destination.territories : demande.destination.regionNames
+    : Array.isArray(ou?.noms) ? (ou!.noms as unknown[]).map(v => intakeStr(v)).filter(Boolean) : [];
+  const groupe = trame && record(trame.voyageurs) ? (trame.voyageurs as Record<string, unknown>) : null;
+  const entier = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : null);
+  const adultes = demande ? demande.travelers.adults : entier(groupe?.adultes);
+  const enfants = demande ? demande.travelers.children : entier(groupe?.enfants);
+  const description = demande ? demandeProjetDescription(demande) : "";
+  const style = demande ? demande.wishes.styles.join(" · ") : intakeStr(intake.vision);
+  const knownChoice = (value: string) => value === "Je ne sais pas encore" ? "" : value;
+  const preferredChannel = demande?.contact.channel === "WhatsApp" ? "whatsapp" as const
+    : demande?.contact.channel === "E-mail" ? "email" as const : null;
+  const qualificationFromDemande = demande ? [
+    intake.planning_stage && `Plan : ${intake.planning_stage}`,
+    demande.wishes.comfort && `Hébergements : ${demande.wishes.comfort}`,
+    style && `Manières de voyager : ${style}`,
+    demande.wishes.selection.length ? `Envies gardées : ${demande.wishes.selection.map(e => e.name).join(" · ")}` : "",
+  ].filter(Boolean).join("\n") : qualification;
+  // Facts are explicit traveler answers only. Wishes are interests, never a confirmed itinerary.
+  const payload = demande ? {
+    ...intake,
+    qualification_facts: {
+      ...(record(intake.qualification_facts) ? intake.qualification_facts : {}),
+      travelers_adults: adultes,
+      travelers_children: enfants,
+      ...(knownChoice(demande.timing.duration) ? { duration: demande.timing.duration } : {}),
+      ...(demande.timing.mode === "mois" && demande.timing.period ? { travel_period: demande.timing.period } : {}),
+      ...(knownChoice(demande.wishes.comfort) ? { accommodation: demande.wishes.comfort } : {}),
+    },
+  } : intake;
+
+  // Le récit voyageur va dans la description ; les notes internes restent à l’équipe.
   const internalBits = intake.follow_prefs ? `Préférences de suivi : ${intake.follow_prefs}` : "";
-  const trame = (intake.trame ?? null) as Record<string, unknown> | null;
-  const titreTrame = trame && typeof trame.nom === "string" ? trame.nom.trim() : "";
+  const titreTrame = intakeStr(trame?.nom);
 
   return {
     traveler_name: travelerName,
@@ -150,21 +186,36 @@ export function buildLeadInsertFromIntake(
     status: "new" as const,
     source: (intake.page_origin as string) || sourceDefault,
     trip_summary:
-      titreTrame ||
-      intakeStr(intake.project_notes_short) ||
+      (!demande ? titreTrame || intakeStr(intake.project_notes_short) : "") ||
       (intake.planning_stage as string) ||
+      (lieux.length ? lieux.join(" · ") : "") ||
       `Demande web — ${travelerName}`,
     project_description: intakeStr(intake.notes_longues) || intakeStr(intake.project_notes_short) || null,
-    travel_style: (intake.vision as string) || "—",
-    travelers: travelersLine || "—",
+    destination_main: lieux[0] || null,
+    travel_style: style || "—",
+    travelers: (demande ? demande.travelers.label : travelersLine) || "—",
+    ...(adultes === null ? {} : { travelers_adults: adultes }),
+    ...(enfants === null ? {} : { travelers_children: enfants }),
     budget: budgetLine || "—",
-    trip_dates: tripDates,
-    qualification_summary: qualification || "—",
+    trip_dates: (demande ? demande.timing.label : tripDates) || "—",
+    ...(demande ? {
+      travel_period: demande.timing.mode === "mois" ? demande.timing.period || null : null,
+      travel_start_date: demande.timing.start,
+      travel_end_date: demande.timing.end,
+      project_description: description || null,
+      travel_desire_narrative: [
+        style,
+        demande.wishes.selection.length ? `Envies gardées : ${demande.wishes.selection.map(e => e.name).join(" · ")}` : "",
+        demande.wishes.message,
+      ].filter(Boolean).join("\n\n") || null,
+      ...(preferredChannel ? { preferred_channel: preferredChannel } : {}),
+    } : {}),
+    qualification_summary: qualificationFromDemande || "—",
     internal_notes: internalBits,
     quote_status: "Nouveau",
     starred: false,
     priority,
-    intake_payload: intake,
+    intake_payload: payload,
     submission_id: String(intake.submission_id),
     page_origin: (intake.page_origin as string) || null,
     referent_id: null,

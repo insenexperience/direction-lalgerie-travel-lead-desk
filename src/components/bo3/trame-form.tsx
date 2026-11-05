@@ -20,6 +20,10 @@ function etapesDe(t: Trame): Etape[] {
   return out;
 }
 const nomLieu = (id: string) => LIEUX_TRIES.find((l) => l.id === id)?.nom ?? id;
+const DUREES = ["2–4 jours", "1 semaine", "10–12 jours", "2 semaines et +"];
+const HEBERGEMENTS = ["bivouac & belle étoile", "simple et local", "confort d'abord", "chez l'habitant"];
+const optionsAvecValeur = (options: string[], valeur: string) =>
+  (valeur && !options.includes(valeur) ? [valeur, ...options] : options).map((option) => <option key={option}>{option}</option>);
 
 /**
  * Compléter (seulement les champs manquants) ou construire une trame complète.
@@ -52,15 +56,15 @@ export function TrameForm({ initiale, champs, titre, onClose, onSave, pending }:
       )}
       {voir("dates") && (
         <div className="fgrid">
-          <div className="field"><span className="lbl">Mois</span><select className="inp" value={t.cadre.mois} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, mois: e.target.value } })}><option value="">à préciser</option>{MOIS.map((m) => <option key={m}>{m}</option>)}</select></div>
+          <div className="field"><span className="lbl">Période</span><select className="inp" value={t.cadre.mois} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, mois: e.target.value } })}><option value="">à préciser</option>{optionsAvecValeur(MOIS, t.cadre.mois)}</select></div>
           <div className="field"><span className="lbl">Souplesse</span><select className="inp" value={t.cadre.souplesse} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, souplesse: e.target.value } })}><option value="">—</option><option>dates fixes</option><option>à quelques jours près</option><option>flexibles</option></select></div>
-          {tout && <div className="field"><span className="lbl">Durée souhaitée</span><select className="inp" value={t.cadre.duree} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, duree: e.target.value } })}><option value="">—</option><option>2–4 jours</option><option>1 semaine</option><option>10–12 jours</option><option>2 semaines et +</option></select></div>}
+          {tout && <div className="field"><span className="lbl">Durée souhaitée</span><select className="inp" value={t.cadre.duree} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, duree: e.target.value } })}><option value="">—</option>{optionsAvecValeur(DUREES, t.cadre.duree)}</select></div>}
         </div>
       )}
       {tout && (
         <div className="fgrid">
           <div className="field"><span className="lbl">Rythme</span><select className="inp" value={t.cadre.rythme} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, rythme: e.target.value } })}><option value="">—</option><option>contemplatif</option><option>équilibré</option><option>soutenu</option></select></div>
-          <div className="field"><span className="lbl">Hébergement</span><select className="inp" value={t.cadre.hebergement} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, hebergement: e.target.value } })}><option value="">—</option><option>bivouac & belle étoile</option><option>simple et local</option><option>confort d&apos;abord</option><option>chez l&apos;habitant</option></select></div>
+          <div className="field"><span className="lbl">Hébergement</span><select className="inp" value={t.cadre.hebergement} onChange={(e) => setT({ ...t, cadre: { ...t.cadre, hebergement: e.target.value } })}><option value="">—</option>{optionsAvecValeur(HEBERGEMENTS, t.cadre.hebergement)}</select></div>
         </div>
       )}
       {voir("groupe") && (
