@@ -101,13 +101,6 @@
 .bo3 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
 .bo3 .fact{padding:10px 14px;border-right:1px solid var(--line-2);border-bottom:1px solid var(--line-2);min-width:0}.bo3 .fact .v{font-weight:600;margin-top:3px;font-size:12.5px;overflow-wrap:anywhere}.bo3 .fact .v .dl{min-width:0}
 .bo3 .seg{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden}.bo3 .seg button{padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:inline-flex;gap:6px;align-items:center;transition:color .15s}.bo3 .seg button:hover{color:var(--ink)}.bo3 .seg button.on{color:var(--ink);border-bottom-color:var(--amber)}.bo3 .seg button b{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--line-2);color:var(--muted)}
-/* copilot strip */
-.bo3 .cop{display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:linear-gradient(135deg,var(--amber-tint),var(--surface) 60%)}
-.bo3[data-theme=dark] .cop{background:linear-gradient(135deg,rgba(246,167,45,.10),var(--surface) 60%)}
-.bo3 .cop__ic{width:34px;height:34px;border-radius:9px;background:var(--dark);color:#fff;display:grid;place-items:center}.bo3[data-theme=dark] .cop__ic{background:var(--amber);color:var(--amber-ink)}
-.bo3 .cop__t{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700}.bo3 .cop__t .tag{font-weight:600}
-.bo3 .cop__items{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:8px}
-.bo3 .cop__it{padding:9px 11px;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--line-2);font-size:12px;display:flex;flex-direction:column;gap:6px}.bo3 .cop__it b{font-size:11px}.bo3 .cop__it .row{justify-content:flex-end}
 /* map, days */
 .bo3 .map{position:relative;background:#F3F6F8;border:1px solid var(--line-2);border-radius:var(--r-sm);height:280px;overflow:hidden}.bo3 .map svg{position:absolute;inset:0;width:100%;height:100%}.bo3 .map__lg{position:absolute;left:10px;bottom:8px;font-size:11px;color:var(--muted);font-weight:600}
 .bo3 .map .route{animation:bo3-march 30s linear infinite}@keyframes bo3-march{to{stroke-dashoffset:-180}}

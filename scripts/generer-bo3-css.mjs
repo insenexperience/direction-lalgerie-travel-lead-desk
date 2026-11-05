@@ -30,7 +30,18 @@ function scope(sel) {
   return `.bo3 ${sel}`;
 }
 
+racine.walkComments((comment) => {
+  if (comment.text === "copilot strip") comment.remove();
+});
+
 racine.walkRules((rule) => {
+  // Le Desk n'affiche plus le panneau de suggestions du prototype.
+  const selectors = rule.selectors.filter((selector) => !/\.cop(?:__[\w-]+)?(?![\w-])/.test(selector));
+  if (!selectors.length) {
+    rule.remove();
+    return;
+  }
+  rule.selectors = selectors;
   if (rule.parent?.type === "atrule" && rule.parent.name === "keyframes") return;
   rule.selectors = [...new Set(rule.selectors.map(scope))];
 });
