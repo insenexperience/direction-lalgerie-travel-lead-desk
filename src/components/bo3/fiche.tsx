@@ -56,6 +56,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const fuites = p.brief ? fuitesBrief(sections, p) : [];
   const stepIdx = STATUTS.indexOf(p.statut);
   const demande = p.source === "demande-projet" ? readDemandeProjet(lead.intake_payload) : null;
+  const canalAffiche = demande ? demande.contact.channel : canalNom;
 
   /** Exécute une action serveur, affiche son résultat, recharge la fiche. */
   const act = useCallback((fn: () => Promise<Res>, apres?: (r: Res) => void) => {
@@ -129,7 +130,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
       {/* En-tête */}
       <div className="hdr lead-desk-header">
         <div>
-          <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span><span>{canalNom}</span></div>
+          <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span>{canalAffiche && <span>{canalAffiche}</span>}</div>
           <h1 className="t">{p.nom}</h1>
           <div className="sub">{p.trame ? `« ${p.trame.titre} »${p.trame.jours.length ? ` · ${p.trame.jours.length} jours` : p.trame.cadre.duree ? ` · ${p.trame.cadre.duree}` : ""}${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
         </div>
@@ -393,7 +394,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         </>
       )}
 
-      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
+      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} canalDeclare={demande?.contact.channel ?? null} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
 
       {/* Fenêtres */}
       {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}
@@ -543,7 +544,7 @@ function DevisCard({ p, agences, pending, onModifier, onEnvoyer, onRelancer, onG
   );
 }
 
-function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Projet; canalNom: string; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
+function OngletVoyageur({ p, canalNom, canalDeclare, onPremiere, pending, onNote }: { p: Projet; canalNom: string; canalDeclare: string | null; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
   const [note, setNote] = useState(p.notesInternes);
   const ini = p.nom.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   return (
@@ -551,7 +552,13 @@ function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Proje
       <div className="stack">
         <Card t="Contact">
           <div className="row"><span className="av">{ini}</span><div><div className="nm">{p.nom}</div><div className="mt">{p.email || "pas d'e-mail"} · {p.tel || "pas de téléphone"}</div></div></div>
-          <div className="row wrap" style={{ marginTop: 10 }}><span className={`tag ${p.canal === "whatsapp" ? "dark" : ""}`}>WhatsApp</span><span className={`tag ${p.canal === "email" ? "dark" : ""}`}>e-mail</span><span className="mt">canal préféré : {canalNom}</span></div>
+          <div className="row wrap" style={{ marginTop: 10 }}>
+            {canalDeclare === null ? (
+              <><span className={`tag ${p.canal === "whatsapp" ? "dark" : ""}`}>WhatsApp</span><span className={`tag ${p.canal === "email" ? "dark" : ""}`}>e-mail</span><span className="mt">canal préféré : {canalNom}</span></>
+            ) : (
+              <span className="mt">{canalDeclare ? `Canal souhaité · ${canalDeclare}` : "Canal souhaité non renseigné"}</span>
+            )}
+          </div>
         </Card>
         <Card t="Notes internes" right={note !== p.notesInternes ? <button className="btn p xs" disabled={pending} onClick={() => onNote(note)}>Enregistrer</button> : null}>
           <textarea className="inp" placeholder="Jamais transmises aux agences ni au voyageur." style={{ minHeight: 70 }} value={note} onChange={(e) => setNote(e.target.value)} />

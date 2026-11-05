@@ -128,6 +128,7 @@ test("la fiche BO3 affiche le récap initial complet, même après une correctio
   const overview = markup.match(/<section[^>]*aria-label="Coordonnées et profil du voyageur"[^>]*>(.*?)<\/section>/s);
   assert(overview, "les coordonnées et le profil sont réunis dans le bandeau");
   assert(markup.indexOf(overview[0]) < markup.indexOf('class="stepper"'), "le bandeau est visible avant les étapes");
+  assert.match(markup, /class="meta"[^>]*>[^]*?<span>Téléphone<\/span><\/div>/, "l’en-tête indique le canal déclaré");
   for (const value of ['href="mailto:ada@example.invalid"', 'href="tel:+33612345678"', "2 adultes", "1 enfant", "Téléphone", "France", "Bon confort"]) {
     assert(overview[1].includes(value), value);
   }
