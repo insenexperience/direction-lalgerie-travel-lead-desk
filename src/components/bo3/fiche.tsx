@@ -9,12 +9,13 @@ import {
   portionFor, prenom, r1, statutLabel, suggestions, travelerClock, zonesJours, type Action, H,
 } from "@/lib/bo3/projet";
 import { MANQUES, SOURCES, STATUT_LABEL, STATUTS, type Agence, type BriefSection, type Consultation, type Mention, type Projet, type Trame } from "@/lib/bo3/types";
-import { trameVide } from "@/lib/bo3/trame";
+import { dureeTrame, trameVide } from "@/lib/bo3/trame";
 import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
 import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
 import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
+import { LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
@@ -74,11 +75,12 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const ouvrirConversion = (c: Consultation) => {
     const pr = c.proposition!;
     const d = p.devis && p.devis.source === c.agence ? p.devis : null;
+    const duree = pr.duree || p.trame?.jours.length;
     setForm({
       propId: c.id, agence: c.agence,
-      titre: d?.titre ?? `${p.trame?.titre ?? "Votre voyage"} · ${pr.duree ?? p.trame?.jours.length ?? ""} jours`,
+      titre: d?.titre ?? `${p.trame?.titre ?? "Votre voyage"}${duree ? ` · ${duree} jour${duree > 1 ? "s" : ""}` : ""}`,
       prix: String(d?.prix ?? pr.prix ?? ""),
-      lignes: d ? d.lignes.join("\n") : [`Circuit ${pr.duree ?? ""} jours : ${pr.resume}`, p.trame?.cadre.hebergement ? `Hébergement : ${p.trame.cadre.hebergement}` : "", "Guide francophone et transport sur place", "Non inclus : vols internationaux, visa, repas hors petit-déjeuner"].filter(Boolean).join("\n"),
+      lignes: d ? d.lignes.join("\n") : [`Circuit${pr.duree ? ` ${pr.duree} jour${pr.duree > 1 ? "s" : ""}` : ""} : ${pr.resume}`, p.trame?.cadre.hebergement ? `Hébergement : ${p.trame.cadre.hebergement}` : "", "Guide francophone et transport sur place", "Non inclus : vols internationaux, visa, repas hors petit-déjeuner"].filter(Boolean).join("\n"),
       validite: String(d?.validite ?? 15), mention: d?.mention ?? "discrete",
       note: d?.note ?? (pr.ecarts && pr.ecarts !== "—" ? `Ajustement par rapport à votre trame : ${pr.ecarts}.` : ""),
     });
@@ -95,7 +97,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
       case "scroll-brief": setTab("agences"); setBriefOpen(true); break;
       case "scroll-prop": case "scroll-devis": setTab("props"); break;
       case "remind": { const c = p.consultations.find((x) => x.agence === (extra ?? na.agence)) ?? pend[0]; if (c) act(() => A.relancerAgence(p.id, c.id)); setTab("agences"); break; }
-      case "proposal": setForm({ propId: pend[0]?.id ?? "", prix: "", duree: String(p.trame?.jours.length ?? ""), resume: "", ecarts: "" }); setModal("proposal"); break;
+      case "proposal": setForm({ propId: pend[0]?.id ?? "", prix: "", duree: String(p.trame?.jours.length || ""), resume: "", ecarts: "" }); setModal("proposal"); break;
       case "remind-traveler": act(() => A.relancerVoyageur(p.id)); break;
       case "close": setForm({ motif: "Sans réponse" }); setModal("lost"); break;
       case "lost": setForm({ motif: "Budget" }); setModal("lost"); break;
@@ -186,15 +188,21 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         <Tb id="voyageur" l="Voyageur & messages" c={p.messages.length} />
       </div>
 
+      {tab === "trame" && p.source === "demande-projet" && (
+        <div className="lead-mailing-module" style={{ marginBottom: 16 }}>
+          <LeadDemandeProjetSummary intakePayload={lead.intake_payload} />
+        </div>
+      )}
+
       {tab === "trame" && (p.trame ? (
         <>
-          <Card t="La trame, telle que le voyageur l'a composée" right={<div className="row">{p.trame.circuit && <span className="tag">socle : {p.trame.circuit}</span>}{p.statut !== "clos" && <button className="btn s xs" onClick={() => setModal("qualif")}><Icon n="pencil" s={11} /> Modifier</button>}</div>}>
+          <Card t={p.source === "demande-projet" ? "La trame de travail" : "La trame, telle que le voyageur l'a composée"} right={<div className="row">{p.trame.circuit && <span className="tag">socle : {p.trame.circuit}</span>}{p.statut !== "clos" && <button className="btn s xs" onClick={() => setModal("qualif")}><Icon n="pencil" s={11} /> Modifier</button>}</div>}>
             <div className="grid2" style={{ gridTemplateColumns: "minmax(0,1fr) 260px" }}>
               <TrameMap trame={p.trame} />
               <div className="stack">
                 <div className="kv">
-                  <div><div className="lbl">Durée</div><div className="v">{p.trame.cadre.duree || `${p.trame.jours.length} jours`}</div></div>
-                  <div><div className="lbl">Mois</div><div className="v">{p.trame.cadre.mois ? [p.trame.cadre.mois, p.trame.cadre.souplesse].filter(Boolean).join(" · ") : <span className="miss">manquant</span>}</div></div>
+                  <div><div className="lbl">Durée</div><div className="v">{p.trame.cadre.duree || dureeTrame(p.trame)}</div></div>
+                  <div><div className="lbl">Période</div><div className="v">{p.trame.cadre.mois ? [p.trame.cadre.mois, p.trame.cadre.souplesse].filter(Boolean).join(" · ") : <span className="miss">manquant</span>}</div></div>
                   <div><div className="lbl">Rythme</div><div className="v">{p.trame.cadre.rythme || "—"}</div></div>
                   <div><div className="lbl">Hébergement</div><div className="v">{p.trame.cadre.hebergement || "—"}</div></div>
                   <div><div className="lbl">Groupe</div><div className="v">{p.trame.groupe.type || p.trame.groupe.nombre ? <>{[p.trame.groupe.type, p.trame.groupe.nombre ? `${p.trame.groupe.nombre} pers.` : ""].filter(Boolean).join(" · ")}{p.trame.groupe.enfants ? ` · ${p.trame.groupe.enfants} enfants` : ""}</> : <span className="miss">manquant</span>}</div></div>
@@ -211,7 +219,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
               {p.trame.jours.map((j) => (
                 <div key={j.n} className="day"><div className="day__n">J{j.n}</div><div><div className="day__t">{j.lieux.map((id) => LIEUX[id]?.nom ?? id).join(" · ")}<span className="day__z">{ZONES[LIEUX[j.lieux[0]]?.zone as Zone] ?? ""}</span></div>{j.e && <div className="day__e">{j.e}</div>}</div></div>
               ))}
-              {!p.trame.jours.length && <span className="miss">aucun lieu</span>}
+              {!p.trame.jours.length && <span className="mt">Itinéraire à construire</span>}
             </div>
             <div className="grid2" style={{ marginTop: 16 }}>
               <div><div className="lbl" style={{ marginBottom: 6 }}>Points à ajuster</div><div className="card dash" style={{ padding: "10px 12px" }}>{p.trame.ajuster.map((a, i) => <div key={i}>• {a}</div>)}{!p.trame.ajuster.length && <span className="mt">aucun</span>}</div></div>
@@ -332,7 +340,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
                     {!c.proposition && !c.refus && p.statut !== "clos" ? (
                       <div className="row wrap" style={{ justifyContent: "flex-end" }}>
                         {!c.accuse && <button className="btn s xs" disabled={pending} onClick={() => act(() => A.accuseAgence(p.id, c.id))}>Accusé reçu</button>}
-                        <button className="btn s xs" onClick={() => { setForm({ propId: c.id, prix: "", duree: String(p.trame?.jours.length ?? ""), resume: "", ecarts: "" }); setModal("proposal"); }}>Saisir la proposition</button>
+                        <button className="btn s xs" onClick={() => { setForm({ propId: c.id, prix: "", duree: String(p.trame?.jours.length || ""), resume: "", ecarts: "" }); setModal("proposal"); }}>Saisir la proposition</button>
                         <button className="btn p xs" disabled={pending} onClick={() => act(() => A.relancerAgence(p.id, c.id))}>Relancer</button>
                         <button className="btn d xs" disabled={pending} onClick={() => act(() => A.refusAgence(p.id, c.id))}>Refus</button>
                       </div>
@@ -454,7 +462,16 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
 const resume3 = (p: Projet) => {
   const t = p.trame;
   if (!t) return p.texte;
-  return `${[t.groupe.type, t.groupe.nombre ? `${t.groupe.nombre} pers.` : ""].filter(Boolean).join(", ")}, ${t.jours.length} j${t.cadre.mois ? ` en ${t.cadre.mois}` : ""}${t.cadre.rythme ? `, rythme ${t.cadre.rythme}` : ""}${t.cadre.hebergement ? `, ${t.cadre.hebergement}` : ""}. ${t.envies.grandes.join(" · ")}. ${t.budget ? `Budget ${t.budget}.` : "Budget non précisé."}`;
+  const cadre = [
+    t.groupe.type,
+    t.groupe.nombre ? `${t.groupe.nombre} pers.` : "",
+    dureeTrame(t),
+    t.cadre.mois,
+    t.cadre.rythme ? `rythme ${t.cadre.rythme}` : "",
+    t.cadre.hebergement,
+  ].filter(Boolean).join(", ");
+  const envies = t.envies.grandes.join(" · ");
+  return `${cadre}. ${envies ? `${envies}. ` : ""}${t.budget ? `Budget ${t.budget}.` : "Budget non précisé."}`;
 };
 
 /** Suggestions de règles, pas d'IA générative : le copilote propose, l'opérateur décide. */

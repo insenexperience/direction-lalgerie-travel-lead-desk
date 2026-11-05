@@ -3,12 +3,42 @@
 import { DZ_PATH, LIEUX, ZONES } from "@/lib/bo3/geo";
 import { zonesJours } from "@/lib/bo3/projet";
 import type { Trame } from "@/lib/bo3/types";
+import { CONTOUR_DEMANDE, regionDemande, territoireDemande } from "@/lib/bo3/geo-demande";
 
 type Item = { id: string; p: (typeof LIEUX)[string] };
 type Label = Item & { left: boolean; lx: number; ly: number };
 
+/** Les repères sont une sélection de destinations, sans ordre ni liaison de voyage. */
+function DestinationsMap({ trame }: { trame: Trame }) {
+  const destinations = trame.destinations ?? [];
+  const regions = trame.regions ?? [];
+  const points = destinations.flatMap((d, i) => {
+    const territoire = territoireDemande(d.id);
+    return territoire ? [{ ...territoire, id: d.id, nom: d.nom || territoire.nom, numero: i + 1 }] : [];
+  });
+  return (
+    <div>
+      <div className="map">
+        <svg viewBox="-20 -20 1040 1020" preserveAspectRatio="xMidYMid meet" role="img" aria-label={`Destinations souhaitées : ${[...regions, ...destinations].map((d) => d.nom).join(", ")}`}>
+          <path d={CONTOUR_DEMANDE} fill="#fff" stroke="#C9D6DD" strokeWidth="2" />
+          {regions.map((r) => {
+            const region = regionDemande(r.id);
+            return region ? <path key={r.id} d={region.contour} fill="#F6A72D" fillOpacity=".17" stroke="#C9D6DD" strokeWidth="1"><title>{r.nom}</title></path> : null;
+          })}
+          {points.map((p) => <g key={p.id} data-destination={p.id} transform={`translate(${p.x} ${p.y})`}><title>{p.nom}</title><circle r="15" fill="#0F1C24" stroke="#fff" strokeWidth="3" /><text y="5" textAnchor="middle" fontSize="15" fontWeight="700" fontFamily="Poppins, sans-serif" fill="#fff">{p.numero}</text></g>)}
+        </svg>
+        <div className="map__lg">Destinations souhaitées · {destinations.length ? `${destinations.length} territoire${destinations.length > 1 ? "s" : ""}` : `${regions.length} grande${regions.length > 1 ? "s" : ""} région${regions.length > 1 ? "s" : ""}`}</div>
+      </div>
+      <div className="row wrap" style={{ gap: 6, marginTop: 8 }} aria-label="Sélection géographique du voyageur">
+        {(destinations.length ? destinations : regions).map((d, i) => <span className="tag" key={d.id}>{destinations.length ? `${i + 1} · ` : ""}{d.nom}</span>)}
+      </div>
+    </div>
+  );
+}
+
 /** Carte du trajet : lieux dans l'ordre des jours, libellés rangés pour ne jamais couvrir un point. */
 export function TrameMap({ trame }: { trame: Trame }) {
+  if (!trame.jours.length && (trame.destinations?.length || trame.regions?.length)) return <DestinationsMap trame={trame} />;
   const seq: string[] = [];
   trame.jours.forEach((j) => j.lieux.forEach((id) => { if (LIEUX[id] && seq[seq.length - 1] !== id) seq.push(id); }));
   if (!seq.length) return <div className="map"><div className="empty">Aucun lieu placé sur la carte.</div></div>;

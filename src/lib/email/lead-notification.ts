@@ -1,4 +1,5 @@
-import { sendTransactionalHtmlEmail } from "@/lib/email/resend-client";
+import { sendTransactionalHtmlEmail, type EmailSendResult } from "@/lib/email/resend-client";
+import { buildDemandeEmailSummary } from "@/lib/email/demande-receipt";
 
 /**
  * Prévient l'équipe qu'un lead vient d'arriver.
@@ -31,7 +32,7 @@ function lienDossier(leadId: string): string {
   return `${base}/leads/${encodeURIComponent(leadId)}`;
 }
 
-/** Échéance de la première réponse (48 h), à l'heure d'Alger. */
+/** Échéance de la première réponse (48 h), à l’heure d’Alger. */
 function echeance(): string {
   return new Intl.DateTimeFormat("fr-FR", { timeZone: "Africa/Algiers", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }).format(new Date(Date.now() + 48 * 36e5));
 }
@@ -53,9 +54,11 @@ const LIGNES: Array<[string, string]> = [
 export async function notifierNouveauLead(input: {
   leadId: string;
   intake: Record<string, unknown>;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<EmailSendResult> {
   const { leadId, intake } = input;
   const nom = echapper(intake.full_name) || "(sans nom)";
+  const summary = buildDemandeEmailSummary(intake);
+  const deadline = `Première réponse au voyageur attendue avant le ${echeance()}.`;
 
   const lignes = LIGNES.filter(([, cle]) => String(intake[cle] ?? "").trim())
     .map(
@@ -75,19 +78,24 @@ export async function notifierNouveauLead(input: {
     <p style="margin:0 0 4px;color:#6b7780;font-size:13px">Nouveau projet de voyage</p>
     <h1 style="margin:0 0 18px;font-size:22px">${nom}</h1>
     <table style="border-collapse:collapse;font-size:14px">${lignes}</table>
-    ${blocNotes}
+    ${summary ? `<h2 style="font-size:18px;margin-top:22px">Demande du voyageur</h2>${summary.html}` : blocNotes}
     <p style="margin:24px 0 0">
       <a href="${lienDossier(leadId)}" style="background:#182b35;color:#fff;padding:11px 18px;text-decoration:none;border-radius:4px;display:inline-block">Ouvrir le dossier</a>
     </p>
-    <p style="margin:18px 0 0;color:#6b7780;font-size:12px">Première réponse au voyageur attendue avant le ${echeance()}.</p>
+    <p style="margin:18px 0 0;color:#6b7780;font-size:12px">${echapper(deadline)}</p>
   </div>`;
 
-  // L'objet est du texte brut : le nom n'y est pas échappé comme dans le HTML.
-  const nomBrut = String(intake.full_name ?? "").trim() || "(sans nom)";
+  const plainName = String(intake.full_name ?? "").replace(/[\r\n]+/g, " ").trim() || "(sans nom)";
+  const text = ["Nouveau projet de voyage", plainName,
+    LIGNES.filter(([, key]) => String(intake[key] ?? "").trim()).map(([label, key]) => `${label} : ${String(intake[key])}`).join("\n"),
+    summary?.text || notes, `Ouvrir le dossier : ${lienDossier(leadId)}`, deadline].filter(Boolean).join("\n\n");
   const resultat = await sendTransactionalHtmlEmail({
     to: destinataire(),
-    subject: `Nouveau projet — ${nomBrut}`,
+    subject: `Nouveau projet — ${plainName}`.slice(0, 250),
     html,
+    text,
+    idempotencyKey: `intake-team-${leadId}`,
+    timeoutMs: 5000,
   });
 
   if (!resultat.ok) {
@@ -95,10 +103,9 @@ export async function notifierNouveauLead(input: {
     console.error(
       "[lead-notification] ÉCHEC de l'alerte pour le lead",
       leadId,
-      "—",
-      resultat.error,
+      resultat.deliveryUnknown ? "— confirmation prestataire inconnue" : "— échec de transmission",
     );
-    return { ok: false, error: resultat.error };
+    return resultat;
   }
-  return { ok: true };
+  return resultat;
 }

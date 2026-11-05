@@ -2,6 +2,8 @@
 // ou ce que l'opérateur a construit pour un lead WhatsApp / saisi à la main.
 import { LIEUX } from "./geo";
 import type { Trame } from "./types";
+import { demandeProjetDescription, readDemandeProjet } from "../demande-projet-intake";
+import { regionDemande, territoireDemande } from "./geo-demande";
 
 type Brut = Record<string, unknown>;
 const txt = (v: unknown) => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
@@ -23,6 +25,29 @@ export function nombreDepuis(libelle: string): number | null {
 export function trameDepuisSite(v: unknown): Trame | null {
   const t = obj(v);
   if (!Object.keys(t).length) return null;
+  if (t.type === "demande-projet-voyage") {
+    if (t.version !== 1) return null;
+    const demande = readDemandeProjet({ trame: t });
+    if (!demande) return null;
+    const { timing, travelers, wishes } = demande;
+    const groupe = travelers.type.toLowerCase();
+    const type = GROUPES.find((label) => groupe.includes(label)) || travelers.type;
+    const selection = (famille: string) => wishes.selection.filter((e) => e.key.startsWith(famille + ":")).map((e) => e.name);
+    return {
+      titre: txt(t.nom) || "Projet de voyage en Algérie",
+      circuit: null,
+      cadre: { duree: timing.duration, rythme: "", hebergement: wishes.comfort, mois: timing.mode === "nsp" ? "" : timing.period, souplesse: "" },
+      groupe: { type, nombre: travelers.adults === null ? null : travelers.adults + (travelers.children ?? 0), enfants: travelers.children },
+      budget: null,
+      envies: { grandes: wishes.styles, experiences: selection("experiences"), activites: selection("activites"), pepites: selection("pepites") },
+      // Des envies de lieux ou de circuits ne constituent pas encore un itinéraire.
+      jours: [],
+      destinations: demande.destination.unknown ? [] : demande.destination.territories.map((id, i) => ({ id, nom: demande.destination.names[i] || territoireDemande(id)?.nom || id })),
+      regions: demande.destination.unknown ? [] : demande.destination.regions.map((id, i) => ({ id, nom: demande.destination.regionNames[i] || regionDemande(id)?.nom || id })),
+      ajuster: [],
+      precisions: demandeProjetDescription(demande),
+    };
+  }
   const cadre = obj(t.cadre);
   const groupe = obj(t.groupe);
   const budget = obj(t.budget);
@@ -51,6 +76,12 @@ export function trameDepuisSite(v: unknown): Trame | null {
   };
 }
 
+/** Une demande peut avoir une durée souhaitée sans journées déjà composées. */
+export function dureeTrame(trame: Trame): string {
+  const jours = trame.jours.length;
+  return jours ? `${jours} jour${jours > 1 ? "s" : ""}` : trame.cadre.duree || "Durée à préciser";
+}
+
 /** Trame stockée par le back office (déjà au format interne). */
 export function trameInterne(v: unknown): Trame | null {
   const t = obj(v);
@@ -64,6 +95,8 @@ export function trameInterne(v: unknown): Trame | null {
     budget: txt(t.budget) || null,
     envies: { grandes: liste(e.grandes), experiences: liste(e.experiences), activites: liste(e.activites), pepites: liste(e.pepites) },
     jours: arr(t.jours).map((j, i) => { const o = obj(j); return { n: Number(o.n) || i + 1, lieux: arr(o.lieux).map(txt).filter(Boolean), e: txt(o.e) }; }),
+    ...(Array.isArray(t.destinations) ? { destinations: arr(t.destinations).map((v) => ({ id: txt(obj(v).id), nom: txt(obj(v).nom) || txt(obj(v).id) })).filter((v) => v.id || v.nom) } : {}),
+    ...(Array.isArray(t.regions) ? { regions: arr(t.regions).map((v) => ({ id: txt(obj(v).id), nom: txt(obj(v).nom) || txt(obj(v).id) })).filter((v) => v.id || v.nom) } : {}),
     ajuster: arr(t.ajuster).map(txt).filter(Boolean),
     precisions: txt(t.precisions),
   };

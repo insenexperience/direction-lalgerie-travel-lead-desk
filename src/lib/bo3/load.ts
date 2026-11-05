@@ -67,6 +67,8 @@ const LEAD_COLS =
   "id, updated_at, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
 
 function sourceDe(r: Row): Source {
+  const trame = o(o(r.intake_payload).trame);
+  if (trame.type === "demande-projet-voyage" && trame.version === 1) return "demande-projet";
   const origine = s(r.page_origin) + " " + s(r.source);
   if (/composer/i.test(origine)) return "composer";
   if (/mon-projet/i.test(origine)) return "mon-projet";

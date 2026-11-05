@@ -31,11 +31,12 @@ export const STATUT_LABEL: Record<Statut, string> = {
   clos: "Gagné / Perdu",
 };
 
-export type Source = "composer" | "mon-projet" | "whatsapp" | "manuel";
+export type Source = "composer" | "mon-projet" | "demande-projet" | "whatsapp" | "manuel";
 
 export const SOURCES: Record<Source, string> = {
   composer: "Composer",
   "mon-projet": "Mon projet",
+  "demande-projet": "Demande de projet",
   whatsapp: "WhatsApp",
   manuel: "Saisie manuelle",
 };
@@ -56,6 +57,9 @@ export type Trame = {
   envies: { grandes: string[]; experiences: string[]; activites: string[]; pepites: string[] };
   /** lieux = identifiants de LIEUX (geo.ts). */
   jours: { n: number; lieux: string[]; e: string }[];
+  /** Sélection géographique souhaitée : elle ne constitue pas un itinéraire composé. */
+  destinations?: { id: string; nom: string }[];
+  regions?: { id: string; nom: string }[];
   ajuster: string[];
   precisions: string;
 };

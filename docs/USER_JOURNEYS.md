@@ -306,6 +306,14 @@ Les envois ou nouvelles déclarations d’envoi sont refusés après clôture, c
 
 L’en-tête de la fiche possède une couche explicite au-dessus des cartes animées pour que le menu Actions soit entièrement visible et cliquable. Les emails se chargent dans une fenêtre large, avec aperçu et choix du mode d’envoi.
 
+## Raccord carte, formulaire et Desk — 5 novembre 2026
+
+Les demandes `demande-projet-voyage` version 1 conservent leur trame initiale complète et affichent un récapitulatif distinct de la qualification opérateur : territoires et grandes régions, dates et flexibilité, durée, adultes/enfants, manières de voyager, confort et envies enregistrées. Le Desk distingue cette provenance du Composer historique. Les destinations sélectionnées s’affichent sur la carte sans créer de journées ni de trajet ; elles satisfont le contrôle de présence de lieux. Une trame modifiée par l’opérateur reste prioritaire, tandis que la demande initiale demeure consultable. Un budget absent reste à préciser.
+
+L’intake projette ces réponses explicites dans les colonnes typées et `qualification_facts`, en conservant les champs inconnus de la trame. Les réessais, y compris concurrents, retrouvent le même dossier sans renvoyer de notifications. La preuve privée de suivi n’est conservée que sous forme de hash et ne figure ni dans les emails ni dans les réponses publiques. Une ancienne demande sans preuve n’acquiert pas d’accès par rejeu.
+
+Les routes de suivi et de traitement des notifications sont restaurées avec leur authentification serveur, indépendamment de la session opérateur. La migration outbox déjà présente en base est réintégrée aux sources sans réinstallation. La reprise des notifications historiques doit être décidée avant réactivation de leur traitement en production.
+
 ## Règle d’évolution (obligatoire)
 
 Toute PR qui modifie **pipeline**, **workflow voyageur**, **gates brief**, **référent**, **intake** ou **RLS** sur les leads doit **mettre à jour ce fichier** (diagrammes, tableau C1–C8, ou changelog) dans la **même PR**, sauf urgence avec PR de suivi sous 48 h et todo explicite.
