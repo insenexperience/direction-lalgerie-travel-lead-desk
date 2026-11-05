@@ -221,13 +221,3 @@ test("le formulaire affiche les valeurs de période, durée et confort reçues",
     assert(html.includes("Période"));
   }
 });
-
-test("le résumé du Copilote affiche la durée souhaitée quand aucun jour n’est construit", () => {
-  const raw = request();
-  const p = projet(trameDepuisSite(raw));
-  const lead = { id: p.id, traveler_name: p.nom, email: p.email, phone: p.tel, status: "new", intake_payload: { trame: raw }, updated_at: p.recu };
-  const { FicheView } = load("src/components/bo3/fiche.tsx");
-  const html = renderToStaticMarkup(React.createElement(FicheView, { p, lead, agences: [], now: Date.parse(p.recu), signature: "Équipe" }));
-  assert(!html.includes("0 j en"));
-  assert(html.includes("3 pers., Dix jours"));
-});

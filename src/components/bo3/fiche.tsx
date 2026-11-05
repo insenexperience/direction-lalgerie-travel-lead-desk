@@ -175,8 +175,6 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         </div>
       )}
 
-      {p.statut !== "clos" && <Copilote p={p} agences={agences} now={now} onUse={(a) => (a ? run(a) : copier(resume3(p)).then(() => toast("Résumé copié.")))} />}
-
       {/* Quatre faits */}
       <div className="facts">
         <div className="fact"><div className="lbl">Complétude</div><div className="v"><Completude p={p} /></div></div>
@@ -461,44 +459,6 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
           <div className="mt">Le motif alimente le pilotage. Aucune relance ne part après la clôture.</div>
         </Modal>
       )}
-    </div>
-  );
-}
-
-const resume3 = (p: Projet) => {
-  const t = p.trame;
-  if (!t) return p.texte;
-  const cadre = [
-    t.groupe.type,
-    t.groupe.nombre ? `${t.groupe.nombre} pers.` : "",
-    dureeTrame(t),
-    t.cadre.mois,
-    t.cadre.rythme ? `rythme ${t.cadre.rythme}` : "",
-    t.cadre.hebergement,
-  ].filter(Boolean).join(", ");
-  const envies = t.envies.grandes.join(" · ");
-  return `${cadre}. ${envies ? `${envies}. ` : ""}${t.budget ? `Budget ${t.budget}.` : "Budget non précisé."}`;
-};
-
-/** Suggestions de règles, pas d'IA générative : le copilote propose, l'opérateur décide. */
-function Copilote({ p, agences, now, onUse }: { p: Projet; agences: Agence[]; now: number; onUse: (a: Action | null) => void }) {
-  const sug = suggestions(p, agences)[0];
-  const items: { t: string; b: string; a: string | null; act: Action | null }[] = [];
-  if (p.trame) items.push({ t: "Résumé en 3 lignes", b: resume3(p), a: "Copier", act: null });
-  if (p.manque.length && p.trame) items.push({ t: "Ce qui manque", b: `${p.manque.join(", ")} : le lien voyageur peut être raccourci à ces champs.`, a: "Préparer la demande", act: "ask" });
-  if (!p.premiereReponse) items.push({ t: "Brouillon de première réponse", b: `Bonjour ${prenom(p)}, votre projet est bien arrivé…${sug && sug.jours ? ` Il part chez ${sug.a.n}.` : ""}`, a: "Ouvrir le brouillon", act: "first" });
-  if (p.trame && sug && sug.jours) items.push({ t: "Agence suggérée", b: `${sug.a.n} : ${sug.jours} jour${sug.jours > 1 ? "s" : ""} sur ${sug.total} dans sa zone${p.agenceChoisie && p.agenceChoisie !== sug.a.id ? ` · le voyageur a choisi ${nomAgence(agences, p.agenceChoisie)}` : ""}.`, a: "Voir le routage", act: "scroll-brief" });
-  if (p.trame && p.trame.ajuster.length) items.push({ t: "Points de vigilance", b: p.trame.ajuster.join(" · "), a: null, act: null });
-  const pend = p.consultations.filter((c) => !c.proposition && !c.refus && !c.accuse && hrs(c.envoye, now) > 24);
-  if (pend.length) items.push({ t: "Relance agence", b: `${nomAgence(agences, pend[0].agence)} n'a pas accusé réception depuis ${r1(hrs(pend[0].envoye, now))} h.`, a: "Relancer", act: "remind" });
-  if (!items.length) return null;
-  return (
-    <div className="cop">
-      <div className="cop__ic"><Icon n="sparkles" s={16} /></div>
-      <div className="grow">
-        <div className="cop__t">Copilote <span className="tag amber">propose · vous décidez</span><span className="mt" style={{ fontWeight: 500 }}>Rien n&apos;est envoyé sans votre clic.</span></div>
-        <div className="cop__items">{items.slice(0, 4).map((it, k) => <div key={k} className="cop__it"><b>{it.t}</b><span className="mt">{it.b}</span>{it.a && <div className="row"><button className="btn s xs" onClick={() => onUse(it.act)}>{it.a}</button></div>}</div>)}</div>
-      </div>
     </div>
   );
 }
