@@ -125,6 +125,13 @@ test("la fiche BO3 affiche le récap initial complet, même après une correctio
   const { FicheView } = load("src/components/bo3/fiche.tsx");
   const markup = renderToStaticMarkup(React.createElement(FicheView, { p, lead, agences: [], now: Date.parse(p.recu), signature: "Équipe" }));
   for (const value of ["Demande initiale du voyageur", "Envie reçue 0", "Envie reçue 119", "Téléphone", "France", "2027-02-10", "2027-02-20", "2 adultes", "1 enfant", "Bon confort", "ada@example.invalid", "+33 612345678", raw.envies.message]) assert(markup.includes(value), value);
+  const overview = markup.match(/<section[^>]*aria-label="Coordonnées et profil du voyageur"[^>]*>(.*?)<\/section>/s);
+  assert(overview, "les coordonnées et le profil sont réunis dans le bandeau");
+  assert(markup.indexOf(overview[0]) < markup.indexOf('class="stepper"'), "le bandeau est visible avant les étapes");
+  assert.match(markup, /class="meta"[^>]*>[^]*?<span>Téléphone<\/span><\/div>/, "l’en-tête indique le canal déclaré");
+  for (const value of ['href="mailto:ada@example.invalid"', 'href="tel:+33612345678"', "2 adultes", "1 enfant", "Téléphone", "France", "Bon confort"]) {
+    assert(overview[1].includes(value), value);
+  }
   assert(!markup.includes("0 jours"));
   assert(markup.includes("Échange déjà effectué"), "production contact actions remain present");
   assert(markup.includes("Préparer un email"), "production email dialog entry remains present");

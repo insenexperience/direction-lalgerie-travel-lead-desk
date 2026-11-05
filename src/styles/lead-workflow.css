@@ -3,6 +3,24 @@
 .bo3 .lead-desk-header { position:relative; z-index:10; }
 .bo3 .lead-desk-header .menu__list { min-width:280px; max-width:min(360px,calc(100vw - 40px)); }
 .bo3 .lead-contact-actions { gap:10px; }
+.bo3 .lead-traveler-overview {
+  gap:0;
+  border:1px solid var(--line);
+  border-inline-start:3px solid var(--amber);
+  border-radius:var(--r);
+  background:var(--surface);
+}
+.bo3 .lead-traveler-overview > div { min-width:0; padding:14px 18px; }
+.bo3 .lead-traveler-overview > div + div { border-inline-start:1px solid var(--line); }
+.bo3 .lead-traveler-overview h2 { margin:0 0 10px; color:var(--ink); font-size:14px; font-weight:700; }
+.bo3 .lead-traveler-overview dl { display:grid; gap:8px 16px; margin:0; }
+.bo3 .lead-traveler-contact { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.bo3 .lead-traveler-overview dt { color:var(--muted); font-size:11px; }
+.bo3 .lead-traveler-overview dd { margin:2px 0 0; color:var(--ink); font-size:13px; font-weight:600; overflow-wrap:anywhere; }
+.bo3 .lead-traveler-overview a { color:var(--teal); text-decoration:underline; text-underline-offset:3px; }
+@media (max-width:760px) {
+  .bo3 .lead-traveler-overview > div + div { border-inline-start:0; border-top:1px solid var(--line); }
+}
 .bo3 .lead-mailing-dialog { position:relative; z-index:50; animation:none; transform:none; }
 .bo3 .lead-mailing-dialog .mod { max-width:1120px; }
 .bo3 .lead-mailing-dialog .mod__bd { padding:16px; }

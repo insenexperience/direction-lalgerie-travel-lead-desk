@@ -15,8 +15,9 @@ import { TrameMap } from "./trame-map";
 import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
 import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
-import { LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
+import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { readDemandeProjet } from "@/lib/demande-projet-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
@@ -54,6 +55,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const n = (id: string | null | undefined) => nomAgence(agences, id);
   const fuites = p.brief ? fuitesBrief(sections, p) : [];
   const stepIdx = STATUTS.indexOf(p.statut);
+  const demande = p.source === "demande-projet" ? readDemandeProjet(lead.intake_payload) : null;
+  const canalAffiche = demande ? demande.contact.channel : canalNom;
 
   /** Exécute une action serveur, affiche son résultat, recharge la fiche. */
   const act = useCallback((fn: () => Promise<Res>, apres?: (r: Res) => void) => {
@@ -127,7 +130,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
       {/* En-tête */}
       <div className="hdr lead-desk-header">
         <div>
-          <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span><span>{canalNom}</span></div>
+          <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span>{canalAffiche && <span>{canalAffiche}</span>}</div>
           <h1 className="t">{p.nom}</h1>
           <div className="sub">{p.trame ? `« ${p.trame.titre} »${p.trame.jours.length ? ` · ${p.trame.jours.length} jours` : p.trame.cadre.duree ? ` · ${p.trame.cadre.duree}` : ""}${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
         </div>
@@ -147,6 +150,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
           ]} />
         </div>
       </div>
+
+      {demande && <LeadDemandeProjetProfile demande={demande} email={p.email} phone={p.tel} />}
 
       {/* Étapes */}
       <div className="stepper">
@@ -177,7 +182,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         <div className="fact"><div className="lbl">Complétude</div><div className="v"><Completude p={p} /></div></div>
         <div className="fact"><div className="lbl">{p.consultations.length ? "Agences consultées" : "Agence pressentie"}</div><div className="v">{p.consultations.length ? p.consultations.map((c) => n(c.agence)).join(" · ") : p.trame && sug[0]?.jours ? `${sug[0].a.n} · ${sug[0].jours} j / ${sug[0].total}` : "à déterminer"}</div></div>
         <div className="fact"><div className="lbl">Horloge agence</div><div className="v">{pend.length ? pend.map((c) => <div key={c.id}><Deadline c={agencyClock(c, now)} small /></div>) : props.length ? <span className="tag green">{props.length} {props.length > 1 ? "propositions reçues" : "proposition reçue"}</span> : <span className="mt">démarre à l&apos;envoi du brief</span>}</div></div>
-        <div className="fact"><div className="lbl">Voyageur</div><div className="v">{p.email || "pas d'e-mail"}<div className="mt">{p.tel ?? "pas de téléphone"}{p.agenceChoisie ? ` · a choisi ${n(p.agenceChoisie)}` : ""}</div></div></div>
+        {!demande && <div className="fact"><div className="lbl">Voyageur</div><div className="v">{p.email || "pas d'e-mail"}<div className="mt">{p.tel ?? "pas de téléphone"}{p.agenceChoisie ? ` · a choisi ${n(p.agenceChoisie)}` : ""}</div></div></div>}
+        {demande && p.agenceChoisie && <div className="fact"><div className="lbl">Agence choisie par le voyageur</div><div className="v">{n(p.agenceChoisie)}</div></div>}
       </div>
 
       {/* Onglets */}
@@ -188,9 +194,9 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         <Tb id="voyageur" l="Voyageur & messages" c={p.messages.length} />
       </div>
 
-      {tab === "trame" && p.source === "demande-projet" && (
+      {tab === "trame" && demande && (
         <div className="lead-mailing-module" style={{ marginBottom: 16 }}>
-          <LeadDemandeProjetSummary intakePayload={lead.intake_payload} />
+          <LeadDemandeProjetSummary demande={demande} />
         </div>
       )}
 
@@ -388,7 +394,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         </>
       )}
 
-      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
+      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} canalDeclare={demande?.contact.channel ?? null} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
 
       {/* Fenêtres */}
       {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}
@@ -538,7 +544,7 @@ function DevisCard({ p, agences, pending, onModifier, onEnvoyer, onRelancer, onG
   );
 }
 
-function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Projet; canalNom: string; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
+function OngletVoyageur({ p, canalNom, canalDeclare, onPremiere, pending, onNote }: { p: Projet; canalNom: string; canalDeclare: string | null; onPremiere: () => void; pending: boolean; onNote: (t: string) => void }) {
   const [note, setNote] = useState(p.notesInternes);
   const ini = p.nom.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   return (
@@ -546,7 +552,13 @@ function OngletVoyageur({ p, canalNom, onPremiere, pending, onNote }: { p: Proje
       <div className="stack">
         <Card t="Contact">
           <div className="row"><span className="av">{ini}</span><div><div className="nm">{p.nom}</div><div className="mt">{p.email || "pas d'e-mail"} · {p.tel || "pas de téléphone"}</div></div></div>
-          <div className="row wrap" style={{ marginTop: 10 }}><span className={`tag ${p.canal === "whatsapp" ? "dark" : ""}`}>WhatsApp</span><span className={`tag ${p.canal === "email" ? "dark" : ""}`}>e-mail</span><span className="mt">canal préféré : {canalNom}</span></div>
+          <div className="row wrap" style={{ marginTop: 10 }}>
+            {canalDeclare === null ? (
+              <><span className={`tag ${p.canal === "whatsapp" ? "dark" : ""}`}>WhatsApp</span><span className={`tag ${p.canal === "email" ? "dark" : ""}`}>e-mail</span><span className="mt">canal préféré : {canalNom}</span></>
+            ) : (
+              <span className="mt">{canalDeclare ? `Canal souhaité · ${canalDeclare}` : "Canal souhaité non renseigné"}</span>
+            )}
+          </div>
         </Card>
         <Card t="Notes internes" right={note !== p.notesInternes ? <button className="btn p xs" disabled={pending} onClick={() => onNote(note)}>Enregistrer</button> : null}>
           <textarea className="inp" placeholder="Jamais transmises aux agences ni au voyageur." style={{ minHeight: 70 }} value={note} onChange={(e) => setNote(e.target.value)} />

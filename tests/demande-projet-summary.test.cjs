@@ -19,8 +19,15 @@ function loadModule(relative) {
   return loaded.exports;
 }
 
-const { LeadDemandeProjetSummary } = loadModule("src/components/leads/lead-demande-projet-summary.tsx");
-const render = intakePayload => renderToStaticMarkup(React.createElement(LeadDemandeProjetSummary, { intakePayload }));
+const { LeadDemandeProjetProfile, LeadDemandeProjetSummary } = loadModule("src/components/leads/lead-demande-projet-summary.tsx");
+const { readDemandeProjet } = loadModule("src/lib/demande-projet-intake.ts");
+const render = intakePayload => {
+  const demande = readDemandeProjet(intakePayload);
+  return renderToStaticMarkup(React.createElement(React.Fragment, null,
+    demande && React.createElement(LeadDemandeProjetProfile, { demande, email: "voyageur@example.invalid", phone: null }),
+    React.createElement(LeadDemandeProjetSummary, { demande }),
+  ));
+};
 const request = () => ({
   trame: {
     type: "demande-projet-voyage", version: 1,

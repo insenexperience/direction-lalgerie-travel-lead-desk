@@ -1,4 +1,5 @@
-import { readDemandeProjet } from "@/lib/demande-projet-intake";
+import type { ReactNode } from "react";
+import type { DemandeProjetIntake } from "@/lib/demande-projet-intake";
 
 const selectionTypes: Record<string, string> = {
   regions: "Région",
@@ -11,7 +12,7 @@ const selectionTypes: Record<string, string> = {
   pepites: "Pépite",
 };
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
@@ -22,9 +23,41 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
+export function LeadDemandeProjetProfile({
+  demande, email, phone,
+}: { demande: DemandeProjetIntake; email: string | null; phone: string | null }) {
+  const address = email?.trim();
+  const number = phone?.trim();
+  const dialNumber = number?.replace(/[\s().-]/g, "") ?? "";
+  const emailLink = address && /^[^\s@,;?:#<>]+@[^\s@,;?:#<>]+$/.test(address)
+    ? `mailto:${encodeURIComponent(address).replace("%40", "@")}`
+    : null;
+
+  return (
+    <section className="lead-traveler-overview grid2" aria-label="Coordonnées et profil du voyageur">
+      <div>
+        <h2>Coordonnées</h2>
+        <dl className="lead-traveler-contact">
+          <Detail label="E-mail" value={emailLink ? <a href={emailLink}>{address}</a> : address} />
+          <Detail label="Téléphone" value={/^\+?\d{6,15}$/.test(dialNumber) ? <a href={`tel:${dialNumber}`}>{number}</a> : number} />
+          <Detail label="Canal souhaité" value={demande.contact.channel} />
+          <Detail label="Pays de résidence" value={demande.contact.country} />
+        </dl>
+      </div>
+      <div>
+        <h2>Profil voyageur</h2>
+        <dl className="lead-traveler-profile">
+          <Detail label="Groupe déclaré" value={demande.travelers.label} />
+          <Detail label="Manières de voyager" value={demande.wishes.styles.join(" · ")} />
+          <Detail label="Confort souhaité" value={demande.wishes.comfort} />
+        </dl>
+      </div>
+    </section>
+  );
+}
+
 /** La demande à réception reste distincte des corrections et de la qualification du conseiller. */
-export function LeadDemandeProjetSummary({ intakePayload }: { intakePayload: unknown }) {
-  const demande = readDemandeProjet(intakePayload);
+export function LeadDemandeProjetSummary({ demande }: { demande: DemandeProjetIntake | null }) {
   if (!demande) return null;
 
   const selection = demande.wishes.selection;
@@ -64,10 +97,6 @@ export function LeadDemandeProjetSummary({ intakePayload }: { intakePayload: unk
       <dl className="mt-4 grid gap-4 sm:grid-cols-2">
         <Detail label="Destinations souhaitées" value={destination} />
         <Detail label="Période · durée" value={demande.timing.label} />
-        <Detail label="Voyageurs" value={demande.travelers.label} />
-        <Detail label="Manières de voyager" value={demande.wishes.styles.join(" · ")} />
-        <Detail label="Confort souhaité" value={demande.wishes.comfort} />
-        <Detail label="Contact souhaité · pays de résidence" value={[demande.contact.channel, demande.contact.country].filter(Boolean).join(" · ")} />
         {demande.wishes.message ? (
           <div className="sm:col-span-2">
             <Detail label="Message du voyageur" value={demande.wishes.message} />
