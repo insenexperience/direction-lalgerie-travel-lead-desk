@@ -15,8 +15,9 @@ import { TrameMap } from "./trame-map";
 import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
 import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
-import { LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
+import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { readDemandeProjet } from "@/lib/demande-projet-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
@@ -54,6 +55,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const n = (id: string | null | undefined) => nomAgence(agences, id);
   const fuites = p.brief ? fuitesBrief(sections, p) : [];
   const stepIdx = STATUTS.indexOf(p.statut);
+  const demande = p.source === "demande-projet" ? readDemandeProjet(lead.intake_payload) : null;
 
   /** Exécute une action serveur, affiche son résultat, recharge la fiche. */
   const act = useCallback((fn: () => Promise<Res>, apres?: (r: Res) => void) => {
@@ -148,6 +150,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         </div>
       </div>
 
+      {demande && <LeadDemandeProjetProfile demande={demande} email={p.email} phone={p.tel} />}
+
       {/* Étapes */}
       <div className="stepper">
         <div className="stepper__bar">{STATUTS.map((s, k) => <i key={s} className={k < stepIdx ? "done" : k === stepIdx ? "cur" : ""} />)}</div>
@@ -177,7 +181,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         <div className="fact"><div className="lbl">Complétude</div><div className="v"><Completude p={p} /></div></div>
         <div className="fact"><div className="lbl">{p.consultations.length ? "Agences consultées" : "Agence pressentie"}</div><div className="v">{p.consultations.length ? p.consultations.map((c) => n(c.agence)).join(" · ") : p.trame && sug[0]?.jours ? `${sug[0].a.n} · ${sug[0].jours} j / ${sug[0].total}` : "à déterminer"}</div></div>
         <div className="fact"><div className="lbl">Horloge agence</div><div className="v">{pend.length ? pend.map((c) => <div key={c.id}><Deadline c={agencyClock(c, now)} small /></div>) : props.length ? <span className="tag green">{props.length} {props.length > 1 ? "propositions reçues" : "proposition reçue"}</span> : <span className="mt">démarre à l&apos;envoi du brief</span>}</div></div>
-        <div className="fact"><div className="lbl">Voyageur</div><div className="v">{p.email || "pas d'e-mail"}<div className="mt">{p.tel ?? "pas de téléphone"}{p.agenceChoisie ? ` · a choisi ${n(p.agenceChoisie)}` : ""}</div></div></div>
+        {!demande && <div className="fact"><div className="lbl">Voyageur</div><div className="v">{p.email || "pas d'e-mail"}<div className="mt">{p.tel ?? "pas de téléphone"}{p.agenceChoisie ? ` · a choisi ${n(p.agenceChoisie)}` : ""}</div></div></div>}
+        {demande && p.agenceChoisie && <div className="fact"><div className="lbl">Agence choisie par le voyageur</div><div className="v">{n(p.agenceChoisie)}</div></div>}
       </div>
 
       {/* Onglets */}
@@ -188,9 +193,9 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         <Tb id="voyageur" l="Voyageur & messages" c={p.messages.length} />
       </div>
 
-      {tab === "trame" && p.source === "demande-projet" && (
+      {tab === "trame" && demande && (
         <div className="lead-mailing-module" style={{ marginBottom: 16 }}>
-          <LeadDemandeProjetSummary intakePayload={lead.intake_payload} />
+          <LeadDemandeProjetSummary demande={demande} />
         </div>
       )}
 
