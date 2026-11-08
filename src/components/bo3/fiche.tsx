@@ -17,9 +17,11 @@ import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
 import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { DeskGmailMessages } from "@/components/assistant/desk-gmail-messages";
 import { ASSISTANT_OPEN_COMPOSER, type AssistantDraft } from "@/lib/assistant/types";
 import { parseQualificationImport, qualificationLabels } from "@/lib/assistant/qualification";
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
+import type { DeskInboundMail } from "@/lib/email/gmail-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
@@ -32,7 +34,7 @@ const lienWhatsApp = (tel: string | null, texte: string) => { const d = (tel ?? 
 const lienMail = (email: string | null, sujet: string, texte: string) => (email ? `mailto:${email}?subject=${encodeURIComponent(sujet)}&body=${encodeURIComponent(texte)}` : null);
 const copier = async (t: string) => { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } };
 
-export function FicheView({ p, lead, agences, now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; now: number; signature: string }) {
+export function FicheView({ p, lead, agences, inboundMail = [], now: depart, signature }: { p: Projet; lead: SupabaseLeadRow; agences: Agence[]; inboundMail?: DeskInboundMail[]; now: number; signature: string }) {
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
@@ -68,6 +70,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const sug = useMemo(() => suggestions(p, agences), [p, agences]);
   const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus);
   const props = p.consultations.filter((c) => c.envoye && c.proposition);
+  const detectedOffers = inboundMail.filter((mail) => mail.kind === "agency_proposal");
   const tc = travelerClock(p, now);
   const canalNom = p.canal === "whatsapp" ? "WhatsApp" : "e-mail";
   const n = (id: string | null | undefined) => nomAgence(agences, id);
@@ -206,7 +209,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
       <div className="seg" role="tablist">
         <Tb id="trame" l={p.trame ? "Trame" : "Qualification"} />
         <Tb id="agences" l="Brief & agences" c={p.consultations.length} />
-        <Tb id="props" l="Propositions & devis" c={props.length} />
+        <Tb id="props" l="Propositions & devis" c={props.length + detectedOffers.length} />
         <Tb id="voyageur" l="Voyageur & messages" c={p.messages.length} />
       </div>
 
@@ -385,7 +388,8 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
 
       {tab === "props" && (
         <>
-          {!props.length && <Card><div className="empty"><b>Aucune proposition pour l&apos;instant</b>{pend.length ? `Réponse attendue de ${pend.map((c) => n(c.agence)).join(" et ")}.` : "Envoyez d'abord le brief à une agence."}</div></Card>}
+          {detectedOffers.length > 0 && <Card t="Propositions détectées dans Gmail"><DeskGmailMessages messages={detectedOffers} /></Card>}
+          {!props.length && !detectedOffers.length && <Card><div className="empty"><b>Aucune proposition pour l&apos;instant</b>{pend.length ? `Réponse attendue de ${pend.map((c) => n(c.agence)).join(" et ")}.` : "Envoyez d'abord le brief à une agence."}</div></Card>}
           {props.map((c) => {
             const pr = c.proposition!;
             const max = Number(((p.trame?.budget ?? "").match(/(\d[\d\s]*)\s*€(?![^€]*\d[\d\s]*\s*€)/) ?? [])[1]?.replace(/\s/g, "") ?? 0);
@@ -418,7 +422,10 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
         </>
       )}
 
-      {tab === "voyageur" && <OngletVoyageur p={p} canalNom={canalNom} canalDeclare={demande?.contact.channel ?? null} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />}
+      {tab === "voyageur" && <>
+        {inboundMail.length > 0 && <Card t="E-mails reçus dans Gmail"><DeskGmailMessages messages={inboundMail} /></Card>}
+        <OngletVoyageur p={p} canalNom={canalNom} canalDeclare={demande?.contact.channel ?? null} onPremiere={() => run("first")} pending={pending} onNote={(t) => act(() => A.noteInterne(p.id, t))} />
+      </>}
 
       {/* Fenêtres */}
       {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}

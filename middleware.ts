@@ -9,7 +9,8 @@ function isTravelerPath(pathname: string): boolean {
     pathname.startsWith("/api/q/") ||
     pathname === "/api/traveler-project-status" ||
     pathname === "/api/project-status-emails" ||
-    pathname === "/api/cron/keepalive"
+    pathname === "/api/cron/keepalive" ||
+    pathname === "/api/cron/gmail"
   );
 }
 

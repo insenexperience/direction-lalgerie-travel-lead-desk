@@ -6,6 +6,9 @@ import { chatWithAssistant, confirmAssistantDraft, confirmAssistantEdit, confirm
 import { ASSISTANT_DRAFT_SAVED, ASSISTANT_OPEN_COMPOSER, type AssistantDraft, type AssistantDraftKind, type AssistantEditPreview, type AssistantTurn } from "@/lib/assistant/types";
 import { AssistantConnection, useAssistantConnection } from "./assistant-connection";
 import { qualificationLabels, type QualificationPreview } from "@/lib/assistant/qualification";
+import { readDeskGmail } from "@/app/(dashboard)/leads/gmail-actions";
+import { isGmailReadRequest, type DeskInboundMail } from "@/lib/email/gmail-intake";
+import { DeskGmailMessages } from "./desk-gmail-messages";
 
 type Lead = { id: string; ref: string };
 type Agency = { id: string; n: string };
@@ -72,6 +75,7 @@ export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Age
 function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead; agencies: Agency[]; onOpenComposer: () => void }) {
   const router = useRouter();
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
+  const [mail, setMail] = useState<DeskInboundMail[] | null>(null);
   const [message, setMessage] = useState("");
   const [agencyId, setAgencyId] = useState("");
   const [preview, setPreview] = useState<AssistantDraft | null>(null);
@@ -83,7 +87,7 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
   const [pending, start] = useTransition();
   const latest = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, editPreview, qualificationPreview, notice]);
+  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, editPreview, qualificationPreview, mail, notice]);
 
   async function prepare(kind: AssistantDraftKind) {
     setEditPreview(null);
@@ -124,11 +128,28 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
     });
   }
 
+  function openMail() {
+    setMail(null);
+    run(async () => {
+      const result = await readDeskGmail(lead.id);
+      if (!result.ok) {
+        setError("Les e-mails de ce dossier ne sont pas accessibles.");
+        return;
+      }
+      setMail(result.messages);
+      setMessage("");
+    });
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = message.trim();
     if (!content || pending) return;
-    if (!importing) { send(content); return; }
+    if (!importing) {
+      if (isGmailReadRequest(content)) openMail();
+      else send(content);
+      return;
+    }
     setPreview(null);
     setEditPreview(null);
     setQualificationPreview(null);
@@ -148,12 +169,18 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
           <h2>Comment avancer sur ce dossier ?</h2>
           <div className="row wrap">{suggestions.map(({ label, prompt }) =>
             <button key={label} type="button" className="btn s xs" disabled={pending} onClick={() => send(prompt)}>{label}</button>
-          )}<button type="button" className="btn p xs" disabled={pending} onClick={() => setImporting(true)}>Coller une qualification</button></div>
+          )}<button type="button" className="btn p xs" disabled={pending} onClick={() => setImporting(true)}>Coller une qualification</button>
+            <button type="button" className="btn s xs" disabled={pending} onClick={openMail}>Lire les e-mails du dossier</button>
+          </div>
         </div>}
         {turns.map(({ role, content }, index) => (
           <div key={index} className="desk-assistant__message" data-role={role}><b>{role === "user" ? "Vous" : "Claude"}</b><div>{content}</div></div>
         ))}
       </div>
+      {mail && <section aria-label="E-mails reçus">
+        <b>E-mails reçus dans Gmail</b>
+        {mail.length ? <DeskGmailMessages messages={mail} /> : <p>Aucun e-mail rapproché de ce dossier.</p>}
+      </section>}
       <details className="desk-assistant__shortcuts"><summary>Brouillons d’e-mail</summary>
       <fieldset className="desk-assistant__draft-controls" disabled={pending} aria-label="Préparer un brouillon">
         <div className="row wrap">

@@ -2,8 +2,23 @@ import Link from "next/link";
 import { Building2, Waypoints } from "lucide-react";
 import { TopHeader } from "@/components/top-header";
 import { AssistantConnection } from "@/components/assistant/assistant-connection";
+import { contexteBo3 } from "@/lib/bo3/acces";
+import { DESK_MAILBOX } from "@/lib/email/gmail-intake";
+import { deskGmailConfiguration } from "@/lib/email/gmail-sync";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const context = await contexteBo3();
+  const showGmail = context?.role === "admin" && !context.apercu;
+  const config = deskGmailConfiguration();
+  const gmail = showGmail && config === "configured"
+    ? await context.supabase.from("desk_gmail_sync").select("synced_at,last_error").eq("id", true).maybeSingle()
+    : null;
+  const gmailLabel = config === "disabled" ? "Synchronisation désactivée"
+    : config === "unconfigured" ? "Autorisation Google à configurer"
+      : gmail?.error ? "État de synchronisation indisponible"
+        : gmail?.data?.last_error === "history_expired" ? "Historique Gmail expiré. Une reprise est nécessaire."
+          : gmail?.data?.last_error ? "Dernière synchronisation en échec"
+            : gmail?.data ? "Synchronisation active" : "En attente de la première synchronisation";
   return (
     <div className="space-y-8">
       <TopHeader title="Réglages" description="Préférences compte et raccourcis vers la gestion des données." />
@@ -53,6 +68,14 @@ export default function SettingsPage() {
         <h2 className="mb-3 text-sm font-semibold text-foreground">DA Sales</h2>
         <AssistantConnection refresh />
       </section>
+      {showGmail && <section className="rounded-md border border-border bg-panel p-4 sm:p-6">
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Gmail du Desk</h2>
+        <p>{DESK_MAILBOX} · Lecture seule</p>
+        <p>{gmailLabel}</p>
+        {gmail?.data?.synced_at && <p>Dernière synchronisation réussie · {new Intl.DateTimeFormat("fr-FR", {
+          dateStyle: "short", timeStyle: "short", timeZone: "Africa/Algiers",
+        }).format(new Date(gmail.data.synced_at))}</p>}
+      </section>}
     </div>
   );
 }

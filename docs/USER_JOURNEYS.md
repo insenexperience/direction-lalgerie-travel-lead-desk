@@ -38,6 +38,10 @@ flowchart LR
 - `src/app/api/intake/`, `src/app/api/whatsapp/webhook/`
 - `supabase/migrations/`, [`RLS_PROD_CHECKLIST.md`](./RLS_PROD_CHECKLIST.md)
 
+### E-mails entrants du Desk
+
+Après activation de Gmail, un e-mail entrant dont l’objet cite une seule référence de dossier peut être rattaché si son expéditeur est le voyageur du dossier ou un destinataire d’une consultation agence enregistrée. Les réponses s’affichent dans **Voyageur & messages** et dans DA Sales avec « Lis les derniers e-mails de ce dossier ». Une offre repérée apparaît aussi dans **Propositions & devis** comme **Proposition à vérifier**. Le référent ou l’administration relit le mail source et saisit la proposition par le parcours habituel. Voir le [raccordement et le contrôle de la synchronisation](./GMAIL_DESK.md).
+
 ---
 
 ## Modèle d’état multi-couches
