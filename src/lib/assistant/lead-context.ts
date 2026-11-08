@@ -1,12 +1,13 @@
 import { anonymizeAgencyText, buildLeadEmailTemplate, type LeadEmailTemplateInput } from "@/lib/email/lead-email-template";
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
 
-export function assistantLeadContext(lead: LeadEmailTemplateInput) {
+export function assistantLeadContext(lead: LeadEmailTemplateInput & { priority?: unknown }) {
   const { analysis } = buildLeadEmailTemplate(lead, "qualification");
   const request = readDemandeProjet(lead.intake_payload);
   const clean = (value?: string | null) => anonymizeAgencyText(value ?? "", lead).trim().slice(0, 600);
   return {
     language: analysis.language,
+    priority: lead.priority === "high" ? "high" : "normal",
     destinations: clean(lead.destination_main),
     preferences: clean(lead.travel_style),
     initialRequest: request ? {

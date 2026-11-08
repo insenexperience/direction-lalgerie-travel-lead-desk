@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { chatWithAssistant, confirmAssistantDraft, prepareAssistantDraft } from "@/app/(dashboard)/settings/assistant-actions";
-import { ASSISTANT_DRAFT_SAVED, ASSISTANT_OPEN_COMPOSER, type AssistantDraft, type AssistantDraftKind, type AssistantTurn } from "@/lib/assistant/types";
+import { chatWithAssistant, confirmAssistantDraft, confirmAssistantEdit, prepareAssistantDraft } from "@/app/(dashboard)/settings/assistant-actions";
+import { ASSISTANT_DRAFT_SAVED, ASSISTANT_OPEN_COMPOSER, type AssistantDraft, type AssistantDraftKind, type AssistantEditPreview, type AssistantTurn } from "@/lib/assistant/types";
 import { AssistantConnection, useAssistantConnection } from "./assistant-connection";
 
 type Lead = { id: string; ref: string };
@@ -14,6 +14,12 @@ const kindLabels: Record<AssistantDraftKind, string> = {
   qualification: "Prise de contact",
   agency_brief: "Brief agence",
 };
+const priorityLabel = (value: string | null) => value === "high" ? "Haute" : "Normale";
+const suggestions = [
+  { label: "Résumer la demande", prompt: "Résume la demande de voyage." },
+  { label: "Points à qualifier", prompt: "Quels points restent à qualifier sur ce dossier ?" },
+  { label: "Préparer une note", prompt: "Propose une note interne synthétique sur la demande et les points à qualifier." },
+];
 
 export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Agency[] }) {
   const [open, setOpen] = useState(false);
@@ -31,22 +37,25 @@ export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Age
 
   return (
     <div className="desk-assistant">
-      {open && <section id="desk-assistant-panel" className="desk-assistant__panel" role="dialog" aria-label="Assistant Claude"
+      <section id="desk-assistant-panel" className="desk-assistant__panel" hidden={!open} role="dialog" aria-label="Assistant Claude"
         onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); dismiss(); } }}>
         <div className="row b desk-assistant__header">
-          <b>Assistant Claude</b>
+          <div><b>Assistant du Desk</b><div className="desk-assistant__status">Claude{connection?.status?.state === "connected" ? " connecté" : ""}</div></div>
           <div className="row">
             {connection?.status?.state === "connected" && <button type="button" className="btn s xs" onClick={() => setSettings(!settings)}>{settings ? "Conversation" : "Réglages"}</button>}
-            <button type="button" ref={close} className="btn s xs" onClick={dismiss} aria-label="Fermer l’assistant">Fermer</button>
+            <button type="button" ref={close} className="btn s xs" onClick={dismiss} aria-label="Fermer l’assistant">×</button>
           </div>
         </div>
-        <div className="desk-assistant__body">
-          {settings || connection?.status?.state !== "connected"
-            ? <AssistantConnection />
-            : lead ? <AssistantConversation key={lead.id} lead={lead} agencies={agencies} onOpenComposer={() => setOpen(false)} />
-              : <p>Ouvrez un dossier pour demander à Claude de le lire ou de préparer un brouillon.</p>}
+        <div className="desk-assistant__body" hidden={!(settings || connection?.status?.state !== "connected")}>
+          <AssistantConnection />
         </div>
-      </section>}
+        {connection?.status?.state === "connected" && (
+          <div className="desk-assistant__body" hidden={settings}>
+            {lead ? <AssistantConversation key={lead.id} lead={lead} agencies={agencies} onOpenComposer={() => setOpen(false)} />
+              : <p>Ouvrez un dossier pour l’analyser avec Claude.</p>}
+          </div>
+        )}
+      </section>
       <button type="button" ref={trigger} className="desk-assistant__trigger" aria-expanded={open}
         aria-controls={open ? "desk-assistant-panel" : undefined}
         onClick={() => {
@@ -54,7 +63,7 @@ export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Age
           setSettings(false);
           setOpen(true);
           connection?.load();
-        }}>✦ <span>Assistant</span></button>
+        }}><span aria-hidden="true">✦</span> Assistant</button>
     </div>
   );
 }
@@ -65,14 +74,16 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
   const [message, setMessage] = useState("");
   const [agencyId, setAgencyId] = useState("");
   const [preview, setPreview] = useState<AssistantDraft | null>(null);
+  const [editPreview, setEditPreview] = useState<AssistantEditPreview | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const latest = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, notice]);
+  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, editPreview, notice]);
 
   async function prepare(kind: AssistantDraftKind) {
+    setEditPreview(null);
     if (kind === "agency_brief" && !agencyId) {
       setError("Choisissez l’agence destinataire du brief.");
       return;
@@ -90,39 +101,46 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
     });
   }
 
-  function send(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = message.trim();
+  function send(content: string) {
     if (!content || pending) return;
-    const input = [...turns.slice(-8), { role: "user", content } satisfies AssistantTurn];
+    const input = [...turns, { role: "user", content } satisfies AssistantTurn];
+    setPreview(null);
+    setEditPreview(null);
     run(async () => {
-      const result = await chatWithAssistant(lead.id, input);
+      const result = await chatWithAssistant(lead.id, input.slice(-9));
       if (!result.ok) { setError(result.error); return; }
       setTurns([...input, { role: "assistant", content: result.answer.reply }]);
       setMessage("");
+      setEditPreview(result.editPreview);
+      if (result.editError) setError(result.editError);
       if (result.answer.draftKind) {
-        setPreview(null);
         await prepare(result.answer.draftKind);
       }
     });
   }
 
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    send(message.trim());
+  }
+
   return (
-    <div className="stack" style={{ gap: 12 }}>
-      <p>Dossier <b>{lead.ref}</b></p>
+    <div className="desk-assistant__conversation">
+      <p className="desk-assistant__context">Dossier ouvert <b>{lead.ref}</b></p>
+      <div className="desk-assistant__history">
       <div className="desk-assistant__messages" role="log" aria-label="Conversation">
-        {turns.length === 0 && <p>Demandez un résumé du dossier, les points à qualifier ou un brouillon.</p>}
+        {turns.length === 0 && <div className="desk-assistant__welcome">
+          <h2>Comment avancer sur ce dossier ?</h2>
+          <div className="row wrap">{suggestions.map(({ label, prompt }) =>
+            <button key={label} type="button" className="btn s xs" disabled={pending} onClick={() => send(prompt)}>{label}</button>
+          )}</div>
+        </div>}
         {turns.map(({ role, content }, index) => (
-          <div key={index} className="desk-assistant__message"><b>{role === "user" ? "Vous" : "Claude"}</b><div>{content}</div></div>
+          <div key={index} className="desk-assistant__message" data-role={role}><b>{role === "user" ? "Vous" : "Claude"}</b><div>{content}</div></div>
         ))}
       </div>
-      <form className="stack" onSubmit={send}>
-        <label htmlFor="desk-assistant-message">Votre message</label>
-        <textarea id="desk-assistant-message" className="inp" rows={2} maxLength={1600} value={message} onChange={(event) => setMessage(event.target.value)} />
-        <div><button className="btn p" disabled={!message.trim() || pending}>{pending ? "Traitement…" : "Interroger Claude"}</button></div>
-      </form>
-      <fieldset className="desk-assistant__draft-controls" disabled={pending}>
-        <legend>Préparer un brouillon</legend>
+      <details className="desk-assistant__shortcuts"><summary>Brouillons d’e-mail</summary>
+      <fieldset className="desk-assistant__draft-controls" disabled={pending} aria-label="Préparer un brouillon">
         <div className="row wrap">
           <button type="button" className="btn s xs" onClick={() => { setPreview(null); run(() => prepare("welcome")); }}>Accusé</button>
           <button type="button" className="btn s xs" onClick={() => { setPreview(null); run(() => prepare("qualification")); }}>Qualification</button>
@@ -138,8 +156,28 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
             onClick={() => { setPreview(null); run(() => prepare("agency_brief")); }}>Brief agence</button>
         </div>
       </fieldset>
+      </details>
+      {editPreview && (
+        <section className="desk-assistant__proposal" aria-label="Modification à valider">
+          <b>{editPreview.edit.kind === "note" ? "Ajouter une note interne" : "Changer la priorité"}</b>
+          <div className="desk-assistant__draft-text">{editPreview.edit.kind === "note"
+            ? editPreview.edit.value
+            : `${priorityLabel(editPreview.previous)} → ${priorityLabel(editPreview.edit.value)}`}</div>
+          <div className="row wrap">
+            <button type="button" className="btn p" disabled={pending} onClick={() => run(async () => {
+              const result = await confirmAssistantEdit(editPreview);
+              if (!result.ok) { setError(result.error); return; }
+              setEditPreview(null);
+              setNotice(editPreview.edit.kind === "note" ? "Note interne ajoutée au dossier."
+                : `Priorité ${priorityLabel(editPreview.edit.value).toLowerCase()} enregistrée.`);
+              router.refresh();
+            })}>Appliquer au dossier</button>
+            <button type="button" className="btn s" disabled={pending} onClick={() => setEditPreview(null)}>Annuler</button>
+          </div>
+        </section>
+      )}
       {preview && (
-        <section className="desk-assistant__message" aria-label="Aperçu du brouillon">
+        <section className="desk-assistant__proposal" aria-label="Aperçu du brouillon">
           <b>{kindLabels[preview.kind]}</b>
           <div>Destinataire · {preview.recipient}</div>
           <div>Objet · {preview.subject}</div>
@@ -166,6 +204,13 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       <div ref={latest} />
+      </div>
+      <form className="desk-assistant__input" onSubmit={submit}>
+        <label htmlFor="desk-assistant-message">Votre message</label>
+        <textarea id="desk-assistant-message" className="inp" rows={2} maxLength={1600} value={message} disabled={pending}
+          onChange={(event) => setMessage(event.target.value)} placeholder="Ex. Marque ce dossier comme prioritaire." />
+        <button type="submit" className="btn p" disabled={!message.trim() || pending}>{pending ? "Traitement…" : "Interroger Claude"}</button>
+      </form>
     </div>
   );
 }

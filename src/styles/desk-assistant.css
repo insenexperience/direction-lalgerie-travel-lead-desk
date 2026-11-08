@@ -10,8 +10,8 @@
 .bo3 .desk-assistant__trigger {
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
+  background: var(--amber);
+  color: var(--amber-ink);
   padding: 10px 16px;
   font: inherit;
   font-weight: 600;
@@ -19,8 +19,8 @@
   box-shadow: var(--sh-2);
 }
 .bo3 .desk-assistant__panel {
-  width: min(400px, calc(100vw - 32px));
-  max-height: min(680px, calc(100dvh - 90px));
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(740px, calc(100dvh - 90px));
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -29,21 +29,49 @@
   color: var(--ink);
   box-shadow: var(--sh-3);
 }
+.bo3 .desk-assistant [hidden] { display: none; }
 .bo3 .desk-assistant__header {
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
 }
-.bo3 .desk-assistant__body { overflow: auto; padding: 14px; }
+.bo3 .desk-assistant__status { font-size: 11px; color: var(--muted); }
+.bo3 .desk-assistant__body { min-height: 0; display: flex; flex-direction: column; }
+.bo3 .desk-assistant__body > .stack,
+.bo3 .desk-assistant__body > p { padding: 14px; }
 .bo3 .desk-assistant__body p { margin: 0; }
-.bo3 .desk-assistant__messages { display: grid; gap: 8px; }
+.bo3 .desk-assistant__conversation { display: flex; flex-direction: column; min-height: 0; }
+.bo3 .desk-assistant__context { padding: 9px 14px; color: var(--muted); background: var(--surface-2); }
+.bo3 .desk-assistant__context b { color: var(--ink); margin-inline-start: 6px; }
+.bo3 .desk-assistant__history { display: grid; gap: 12px; overflow: auto; padding: 14px; }
+.bo3 .desk-assistant__messages { display: grid; gap: 10px; }
+.bo3 .desk-assistant__welcome h2 { margin: 0 0 12px; font: 700 24px/1.05 var(--serif); }
 .bo3 .desk-assistant__message {
   padding: 10px;
-  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  background: var(--surface-2);
 }
+.bo3 .desk-assistant__message[data-role="user"] { margin-inline-start: 24px; background: var(--teal-tint); }
+.bo3 .desk-assistant__message b { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.bo3 .desk-assistant__shortcuts summary { cursor: pointer; color: var(--ink-2); padding-block: 4px; }
+.bo3 .desk-assistant__proposal {
+  padding: 12px;
+  border: 1px solid var(--amber-line);
+  border-inline-start: 3px solid var(--amber);
+  border-radius: var(--r-sm);
+  background: var(--amber-tint);
+  overflow-wrap: anywhere;
+}
+.bo3 .desk-assistant__input {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+.bo3 .desk-assistant__input textarea { width: 100%; resize: vertical; max-height: 100px; }
 .bo3 .desk-assistant__draft-controls {
   display: grid;
   gap: 8px;
@@ -53,6 +81,6 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
 }
-.bo3 .desk-assistant__draft-text { margin: 8px 0; max-height: 180px; overflow: auto; }
+.bo3 .desk-assistant__draft-text { margin: 8px 0; max-height: 180px; overflow: auto; white-space: pre-wrap; }
 .bo3 .desk-assistant :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .bo3 .desk-assistant__draft-controls :disabled { cursor: not-allowed; opacity: .55; }

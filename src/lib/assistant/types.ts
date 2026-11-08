@@ -8,6 +8,21 @@ export type AssistantStatus = {
   testedAt: string | null;
 };
 export type AssistantTurn = { role: "user" | "assistant"; content: string };
+export type AssistantEdit = { kind: "note"; value: string } | { kind: "priority"; value: "normal" | "high" };
+export type AssistantEditPreview = {
+  leadId: string;
+  updatedAt: string;
+  edit: AssistantEdit;
+  previous: string | null;
+};
+
+export function parseAssistantEdit(kind: unknown, value: unknown): AssistantEdit | null {
+  if (kind === "priority" && (value === "normal" || value === "high")) return { kind, value };
+  if (kind === "note" && typeof value === "string" && value.trim() && value.trim().length <= 2000) {
+    return { kind, value: value.trim() };
+  }
+  return null;
+}
 export type AssistantDraft = {
   leadId: string;
   kind: AssistantDraftKind;

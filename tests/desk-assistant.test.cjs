@@ -39,10 +39,13 @@ test("Claude output cannot request sending or inject destination identifiers", (
   const { parseAssistantAnswer } = load("lib/assistant/claude");
   assert.equal(parseAssistantAnswer('{"reply":"Envoyer","draftKind":"send"}'), null);
   assert.equal(parseAssistantAnswer('{"reply":"Brouillon","draftKind":"welcome","leadId":"other"}'), null);
-  assert.deepEqual(parseAssistantAnswer('{"reply":"Voici une piste.","draftKind":"qualification"}'),
-    { reply: "Voici une piste.", draftKind: "qualification" });
-  assert.deepEqual(parseAssistantAnswer('{"reply":"Djanet.","draftKind":"none"}'),
-    { reply: "Djanet.", draftKind: null });
+  assert.deepEqual(parseAssistantAnswer('{"reply":"Voici une piste.","draftKind":"qualification","editKind":"none","editValue":""}'),
+    { reply: "Voici une piste.", draftKind: "qualification", edit: null });
+  assert.deepEqual(parseAssistantAnswer('{"reply":"Djanet.","draftKind":"none","editKind":"none","editValue":""}'),
+    { reply: "Djanet.", draftKind: null, edit: null });
+  assert.deepEqual(parseAssistantAnswer('{"reply":"Je propose une note.","draftKind":"none","editKind":"note","editValue":"Départ à confirmer."}')?.edit,
+    { kind: "note", value: "Départ à confirmer." });
+  assert.equal(parseAssistantAnswer('{"reply":"Je propose une suppression.","draftKind":"none","editKind":"delete","editValue":"all"}'), null);
 });
 
 const leadId = "00000000-0000-4000-8000-000000000001";
@@ -52,28 +55,42 @@ function fakeDesk() {
   const state = {
     enabled: false, role: "lead_referent", leadVisible: true, configured: true, connectionTests: 0,
     recipient: "camille@example.test", qualified: false, calls: 0, saved: [],
+    edit: null, writes: [],
+    lead: { id: leadId, referent_id: leadId, updated_at: "2026-11-08T12:00:00Z", internal_notes: "Note existante.", priority: "normal" },
   };
   const tables = {
     profiles: () => ({ role: state.role }),
     desk_assistant_settings: () => ({ enabled: state.enabled, tested_at: state.enabled ? "2026-11-08T12:00:00Z" : null }),
-    leads: () => state.leadVisible ? { id: leadId, destination_main: "Djanet" } : null,
+    leads: () => state.leadVisible ? { ...state.lead, destination_main: "Djanet" } : null,
   };
   const db = {
     auth: { getUser: async () => ({ data: { user: { id: leadId } } }) },
     from(table) {
+      let patch;
+      let expectedVersion;
       return {
-        select() { return this; }, eq() { return this; }, is() { return this; }, abortSignal() { return this; },
-        update(patch) { assert.equal(table, "desk_assistant_settings"); state.enabled = patch.enabled; return this; },
-        async maybeSingle() { return { data: tables[table](), error: null }; },
+        select() { return this; }, is() { return this; }, abortSignal() { return this; },
+        eq(key, value) { if (key === "updated_at") expectedVersion = value; return this; },
+        update(value) { patch = value; return this; },
+        async maybeSingle() {
+          if (patch && table === "desk_assistant_settings") state.enabled = patch.enabled;
+          if (patch && table === "leads") {
+            assert.equal(expectedVersion, state.lead.updated_at);
+            state.writes.push(patch);
+            state.lead = { ...state.lead, ...patch, updated_at: "2026-11-08T12:01:00Z" };
+          }
+          return { data: tables[table](), error: null };
+        },
       };
     },
   };
   const actions = load("app/(dashboard)/settings/assistant-actions", {
+    "next/cache": { revalidatePath() {} },
     "@/lib/supabase/server": { createClient: async () => db },
     "@/lib/assistant/claude": {
       claudeConfigured: () => state.configured,
       testClaudeConnection: async () => { state.connectionTests++; },
-      askClaude: async () => { state.calls++; return { reply: "Djanet.", draftKind: null }; },
+      askClaude: async () => { state.calls++; return { reply: "Djanet.", draftKind: null, edit: state.edit }; },
     },
     "@/app/(dashboard)/leads/email-actions": {
       getLeadEmailWorkspace: async () => ({
@@ -101,6 +118,35 @@ test("disabled and inaccessible dossiers never reach Claude, and activation requ
   state.leadVisible = true;
   assert.equal((await actions.chatWithAssistant(leadId, turns)).ok, true);
   assert.equal(state.calls, 1);
+});
+
+test("an internal note is appended only after confirmation and replay cannot duplicate it", async () => {
+  const { actions, state } = fakeDesk();
+  state.enabled = true;
+  state.edit = { kind: "note", value: "Budget à confirmer." };
+  const { editPreview } = await actions.chatWithAssistant(leadId, [{ role: "user", content: "Ajoute une note sur le budget." }]);
+  assert.equal(state.writes.length, 0);
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, true);
+  assert.equal(state.lead.internal_notes, "Note existante.\n\nBudget à confirmer.");
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, false);
+  assert.equal(state.writes.length, 1);
+});
+
+test("priority proposals cannot update a lead assigned to another operator or a closed lead", async () => {
+  const { actions, state } = fakeDesk();
+  state.enabled = true;
+  state.edit = { kind: "priority", value: "high" };
+  const { editPreview } = await actions.chatWithAssistant(leadId, [{ role: "user", content: "Passe la priorité à haute." }]);
+  assert.equal(editPreview.previous, "normal");
+  state.lead.referent_id = agencyId;
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, false);
+  state.lead.referent_id = leadId;
+  state.lead.closed_at = "2026-11-08T12:10:00Z";
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, false);
+  assert.equal(state.writes.length, 0);
+  state.lead.closed_at = null;
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, true);
+  assert.equal(state.lead.priority, "high");
 });
 
 test("the admin activation tests Claude only when configured and disabling makes no provider call", async () => {
