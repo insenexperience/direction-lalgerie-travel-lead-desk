@@ -64,7 +64,7 @@ export async function chargerAgences(ctx: Bo3Contexte): Promise<Agence[]> {
 
 // ---------------------------------------------------------------- projets
 const LEAD_COLS =
-  "id, updated_at, reference, traveler_name, email, phone, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
+  "id, updated_at, reference, traveler_name, email, phone, contact_id, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
 
 function sourceDe(r: Row): Source {
   const trame = o(o(r.intake_payload).trame);
@@ -183,6 +183,7 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
       nom: s(r.traveler_name) || s(r.email) || "Voyageur",
       email: s(r.email) || null,
       tel: s(r.phone) || null,
+      contactId: s(r.contact_id) || null,
       canal: (/whats/.test(canalPref) || sourceDe(r) === "whatsapp" ? "whatsapp" : "email") as Canal,
       source: sourceDe(r),
       statut: etapeAvecAvancementManuel(statutDe(dbStatus, trame, manque, consultations), dbStatus, acts),

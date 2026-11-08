@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LeadIntakeModal } from "@/components/leads/lead-intake-modal";
 import { AssistantBubble } from "@/components/assistant/assistant-bubble";
+import { deskScopeForPath, type DeskProjectTab } from "@/lib/assistant/scope";
 import { AssistantConnectionProvider } from "@/components/assistant/assistant-connection";
 import "@/styles/desk-assistant.css";
 import { createClient } from "@/lib/supabase/client";
 import { Icon, ToastProvider } from "./ui";
 
-export type PaletteProjet = { id: string; nom: string; ref: string; statut: string; titre: string | null };
+export type PaletteProjet = { id: string; nom: string; ref: string; statut: string; titre: string | null; tab: DeskProjectTab; closed: boolean };
 export type PaletteAgence = { id: string; n: string; zones: string };
 
 type Props = {
@@ -61,7 +62,7 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
 
   const v3 = V3.some((r) => r.test(pathname));
   const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname.startsWith("/radar") ? "/radar" : pathname;
-  const leadKey = /^\/leads\/([^/]+)$/.exec(pathname)?.[1];
+  const leadKey = /^\/leads\/([^/]+)(?:\/workflow)?$/.exec(pathname)?.[1];
   const assistantLead = leadKey ? projets.find(({ id, ref }) => id === leadKey || ref === leadKey) : undefined;
 
   return (
@@ -79,8 +80,8 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
               apercu={apercu}
             />
             <AssistantConnectionProvider>
-              {v3 ? children : <main className="legacy">{children}</main>}
-              {!apercu && <AssistantBubble lead={assistantLead} agencies={agences} />}
+              <div className="desk-main">{v3 ? children : <main className="legacy">{children}</main>}</div>
+              {!apercu && <AssistantBubble lead={assistantLead} projects={projets} agencies={agences} surface={deskScopeForPath(pathname)} onNewProject={() => setNouveau(true)} />}
             </AssistantConnectionProvider>
           </div>
         </div>

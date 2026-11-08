@@ -3,9 +3,8 @@ import { Cormorant_Garamond, Poppins } from "next/font/google";
 import { redirect } from "next/navigation";
 import { Bo3Shell } from "@/components/bo3/shell";
 import { donneesBo3 } from "@/lib/bo3/donnees";
-import { travelerClock } from "@/lib/bo3/projet";
+import { defaultTab, statutLabel, travelerClock } from "@/lib/bo3/projet";
 import { ZONES } from "@/lib/bo3/geo";
-import { statutLabel } from "@/lib/bo3/projet";
 import "@/styles/bo3.css";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +31,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         counts={counts}
         user={{ nom: ctx.nom, role: ctx.role, initiales }}
         apercu={ctx.apercu}
-        projets={projets.map((p) => ({ id: p.id, nom: p.nom, ref: p.ref, statut: statutLabel(p), titre: p.trame?.titre ?? null }))}
+        projets={projets.map((p) => ({ id: p.id, nom: p.nom, ref: p.ref, statut: statutLabel(p), titre: p.trame?.titre ?? null, tab: defaultTab(p), closed: p.statut === "clos" }))}
         agences={agences.map((a) => ({ id: a.id, n: a.n, zones: a.zones.map((z) => ZONES[z]).join(", ") }))}
       >
         {children}

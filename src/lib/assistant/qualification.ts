@@ -22,7 +22,8 @@ export type QualificationImport = Partial<Record<TextField, string>> & {
   budgetCurrency?: string;
   budgetUnit?: "per_person" | "total";
 };
-export type QualificationPreview = { leadId: string; updatedAt: string; qualification: QualificationImport };
+export type QualificationChange = { label: string; before: string | null; after: string | null };
+export type QualificationPreview = { leadId: string; updatedAt: string; qualification: QualificationImport; changes?: QualificationChange[] };
 
 const textKeys = Object.keys(QUALIFICATION_TEXT_FIELDS) as TextField[];
 const countKeys = ["travelers", "adults", "children", "pendingTravelers"] as const;

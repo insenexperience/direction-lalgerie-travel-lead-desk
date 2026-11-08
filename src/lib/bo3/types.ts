@@ -122,6 +122,7 @@ export type Projet = {
   nom: string;
   email: string | null;
   tel: string | null;
+  contactId?: string | null;
   canal: Canal;
   source: Source;
   statut: Statut;

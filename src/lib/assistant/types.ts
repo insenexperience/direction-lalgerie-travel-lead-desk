@@ -1,4 +1,4 @@
-export const ASSISTANT_DRAFT_KINDS = ["welcome", "qualification", "agency_brief"] as const;
+export const ASSISTANT_DRAFT_KINDS = ["welcome", "qualification", "agency_feasibility", "agency_brief"] as const;
 export const ASSISTANT_DRAFT_SAVED = "desk:assistant-draft-saved";
 export const ASSISTANT_OPEN_COMPOSER = "desk:assistant-open-composer";
 export type AssistantDraftKind = typeof ASSISTANT_DRAFT_KINDS[number];

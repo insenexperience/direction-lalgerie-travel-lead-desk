@@ -83,6 +83,16 @@ export function gmailMessageLink(threadId: string) {
   return "https://mail.google.com/mail/?authuser=" + encodeURIComponent(DESK_MAILBOX) + "#all/" + encodeURIComponent(threadId);
 }
 
+export function prefillGmailProposal(excerpt: string) {
+  const perPerson = /(?<![\d.,])((?:\d{1,3}(?:[ .\u00a0\u202f]\d{3})+|\d+)(?:[.,]\d{1,2})?)\s*(?:€|EUR\b)\s*(?:par\s+(?:personne|voyageur)|\/\s*(?:personne|pers)\b|per\s+person)/gi;
+  const prices = new Set([...excerpt.matchAll(perPerson)].map(([, amount]) =>
+    Number(amount.replace(/[ \u00a0\u202f]/g, "").replace(/\.(?=\d{3}(?:[.,]|$))/g, "").replace(",", ".")))
+    .filter(price => Number.isFinite(price) && price > 0));
+  const tripDays = /\b(?:dur[ée]e\s*(?:[:=]|de)?|(?:circuit|s[ée]jour|itin[ée]raire|trip)\s+(?:de\s+)?)\s*(\d{1,2})\s*(?:jours?|days?)\b/gi;
+  const durations = new Set([...excerpt.matchAll(tripDays)].map(([, days]) => Number(days)).filter(days => days > 0));
+  return { price: prices.size === 1 ? [...prices][0] : null, days: durations.size === 1 ? [...durations][0] : null };
+}
+
 export function isGmailReadRequest(message: string) {
   const normalized = message.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   return /\b(?:lis|lire|voir|affiche|montre|consulte|recus?|derniers?|nouveaux)\b/.test(normalized) &&

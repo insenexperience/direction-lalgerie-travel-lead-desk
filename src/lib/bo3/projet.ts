@@ -133,6 +133,9 @@ export function nextAction(p: Projet, agences: Agence[], now: number): NextActio
     case "brief_pret":
       return { t: "Relire et envoyer le brief", s: "Relecture obligatoire. L'horloge agence démarre à l'envoi.", act: "scroll-brief", a: true };
     case "envoye": {
+      if (!p.consultations.some(c => c.envoye)) {
+        return { t: "Suivre les retours d’agence", s: "Le brief est déclaré envoyé. Les destinataires et les réponses restent à renseigner dans le suivi.", act: "scroll-brief" };
+      }
       if (noAck) return { t: `Relancer ${n(noAck.agence)}`, s: `Sans accusé de réception depuis ${r1(hrs(noAck.envoye, now))} h.`, act: "remind", agence: noAck.agence, a: true };
       const got = p.consultations.filter((c) => c.proposition);
       if (got.length && !p.devis)

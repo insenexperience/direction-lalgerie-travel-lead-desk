@@ -1,15 +1,23 @@
 import { colonnesDepuisTrame, trameDepuisSite, trameInterne, trameVide } from "@/lib/bo3/trame";
-import { parseQualificationImport, qualificationLabels, type QualificationImport } from "@/lib/assistant/qualification";
+import { parseQualificationImport, qualificationLabels, type QualificationChange, type QualificationImport } from "@/lib/assistant/qualification";
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
-export function buildQualificationPatch(lead: {
+type QualificationLead = {
   intake_payload?: unknown; ai_qualification_payload?: unknown; trip_summary?: string | null;
-}, value: QualificationImport) {
+  travel_period?: string | null; travel_start_date?: string | null; travel_end_date?: string | null; budget?: string | null;
+  travelers_adults?: number | null; travelers_children?: number | null;
+};
+
+function leadTrame(lead: QualificationLead) {
+  return trameInterne(object(lead.ai_qualification_payload).trame_v3) ?? trameDepuisSite(object(lead.intake_payload).trame);
+}
+
+export function buildQualificationPatch(lead: QualificationLead, value: QualificationImport) {
   const intake = object(lead.intake_payload);
   const ai = object(lead.ai_qualification_payload);
-  const trame = trameInterne(ai.trame_v3) ?? trameDepuisSite(intake.trame) ?? trameVide(lead.trip_summary || undefined);
+  const trame = leadTrame(lead) ?? trameVide(lead.trip_summary || undefined);
   const facts: Record<string, unknown> = {};
   const columns: Record<string, unknown> = {};
   if (value.period) {
@@ -87,4 +95,37 @@ export function buildQualificationPatch(lead: {
     } },
     ai_qualification_payload: { ...ai, trame_v3: trame },
   };
+}
+
+export function qualificationChanges(lead: QualificationLead, value: QualificationImport): QualificationChange[] {
+  function fields(row: QualificationLead) {
+    const trame = leadTrame(row);
+    const imported = parseQualificationImport(object(row.intake_payload).da_sales_qualification) ?? {};
+    const values = new Map(qualificationLabels(imported).map(({ label, value }) => [label, value]));
+    const dates = [row.travel_start_date, row.travel_end_date].filter(Boolean).join(" → ");
+    const structured = {
+      "Période de voyage": trame?.cadre.mois || row.travel_period,
+      "Dates enregistrées": dates,
+      Durée: trame?.cadre.duree,
+      Hébergement: trame?.cadre.hebergement,
+      Flexibilité: trame?.cadre.souplesse === "flexibles" ? "Dates flexibles" : trame?.cadre.souplesse === "dates fixes" ? "Dates fixes" : trame?.cadre.souplesse,
+      "Voyageurs confirmés": trame?.groupe.nombre,
+      Adultes: imported.adults ?? row.travelers_adults,
+      Enfants: imported.children ?? trame?.groupe.enfants ?? row.travelers_children,
+      Activités: trame?.envies.activites.join(" · "),
+      Budget: trame?.budget || row.budget,
+    };
+    for (const [label, entry] of Object.entries(structured)) {
+      if (entry || entry === 0) values.set(label, String(entry));
+    }
+    return values;
+  }
+
+  const before = fields(lead);
+  const after = fields({ ...lead, ...buildQualificationPatch(lead, value) });
+  return [...new Set([...before.keys(), ...after.keys()])].flatMap(label => {
+    const previous = before.get(label) ?? null;
+    const next = after.get(label) ?? null;
+    return previous === next ? [] : [{ label, before: previous, after: next }];
+  });
 }

@@ -9,7 +9,9 @@ import { anonymizeAgencyText, type LeadEmailTemplateInput } from "@/lib/email/le
 import { isUuid } from "@/lib/is-uuid";
 import { getLeadEmailWorkspace, saveLeadEmailDraft } from "@/app/(dashboard)/leads/email-actions";
 import { parseQualificationImport, type QualificationPreview } from "@/lib/assistant/qualification";
-import { buildQualificationPatch } from "@/lib/assistant/qualification-patch";
+import { buildQualificationPatch, qualificationChanges } from "@/lib/assistant/qualification-patch";
+import { isDeskScope, isDeskTab, projectDeskLink, type DeskProjectTab, type DeskScope } from "@/lib/assistant/scope";
+import { isTokenExpired, TOKEN_TTL_DAYS } from "@/lib/traveler-requalification";
 
 const denied = { ok: false, error: "Cette action n’est pas accessible avec votre compte." } as const;
 const inactive = { ok: false, error: "Activez Claude pour utiliser l’assistant." } as const;
@@ -72,12 +74,12 @@ type ActiveSession = Extract<Awaited<ReturnType<typeof activeSession>>, { ok: tr
 const stale = { ok: false, error: "Le dossier a changé. Demandez une nouvelle proposition à Claude." } as const;
 const editDenied = { ok: false, error: "Prenez d’abord ce dossier dans le Desk. Seul le référent ou un administrateur peut modifier un dossier ouvert." } as const;
 
-function canEditLead(auth: ActiveSession, lead: { referent_id?: unknown; closed_at?: unknown; status?: unknown }) {
+function canEditLead(auth: Pick<ActiveSession, "admin" | "userId">, lead: { referent_id?: unknown; closed_at?: unknown; status?: unknown }) {
   return !lead.closed_at && lead.status !== "won" && lead.status !== "lost" &&
     Boolean(lead.referent_id && (auth.admin || lead.referent_id === auth.userId));
 }
 
-async function saveConfirmedPatch(auth: ActiveSession, leadId: string, updatedAt: string, patch: Record<string, unknown>) {
+async function saveConfirmedPatch(auth: Pick<ActiveSession, "db">, leadId: string, updatedAt: string, patch: Record<string, unknown>) {
   const result = await auth.db.from("leads").update(patch).eq("id", leadId)
     .eq("updated_at", updatedAt).is("deleted_at", null).is("closed_at", null).select("id").maybeSingle();
   if (result.error) return { ok: false as const, error: "Le dossier n’a pas pu être enregistré." };
@@ -92,8 +94,8 @@ function validTurns(turns: unknown): turns is AssistantTurn[] {
       typeof turn.content === "string" && Boolean(turn.content.trim()) && turn.content.length <= (i % 2 === 0 ? 1600 : 4000));
 }
 
-export async function chatWithAssistant(leadId: string, turns: AssistantTurn[]) {
-  if (typeof leadId !== "string" || !isUuid(leadId) || !validTurns(turns)) return invalid;
+export async function chatWithAssistant(leadId: string, turns: AssistantTurn[], tab?: DeskProjectTab) {
+  if (typeof leadId !== "string" || !isUuid(leadId) || !validTurns(turns) || (tab !== undefined && !isDeskTab(tab))) return invalid;
   const auth = await activeSession();
   if (!auth.ok) return auth;
   const { data, error } = await auth.db.from("leads").select("*").eq("id", leadId).is("deleted_at", null).maybeSingle();
@@ -103,7 +105,16 @@ export async function chatWithAssistant(leadId: string, turns: AssistantTurn[]) 
     const safeTurns = turns.map(({ role, content }) => ({
       role, content: anonymizeAgencyText(content, lead).trim() || "(message vide)",
     }));
-    const { edit, ...answer } = await askClaude(safeTurns, assistantLeadContext(lead));
+    let parcours;
+    if (tab) {
+      const { loadProjectForAssistant } = await import("@/lib/assistant/desk-data");
+      const { projectPrompt } = await import("@/lib/assistant/project-readout");
+      const project = await loadProjectForAssistant({
+        supabase: auth.db, userId: auth.userId, role: auth.admin ? "admin" : "lead_referent", nom: "", apercu: false,
+      }, leadId, lead);
+      if (project) parcours = projectPrompt(project);
+    }
+    const { edit, ...answer } = await askClaude(safeTurns, { ...assistantLeadContext(lead), onglet: tab, parcours });
     if (edit && (!canEditLead(auth, data) || typeof data.updated_at !== "string")) {
       return { ok: true as const, answer, editPreview: null, editError: editDenied.error };
     }
@@ -115,6 +126,103 @@ export async function chatWithAssistant(leadId: string, turns: AssistantTurn[]) 
   } catch {
     return { ok: false as const, error: "Claude est momentanément indisponible. Vous pouvez poursuivre dans le dossier." };
   }
+}
+
+export async function getAssistantDeskView(scope: DeskScope, question = "") {
+  if (!isDeskScope(scope) || typeof question !== "string" || question.length > 1600) return invalid;
+  try {
+    const { readDeskData } = await import("@/lib/assistant/desk-data");
+    const desk = await readDeskData(scope, question);
+    return desk ? { ok: true as const, view: desk.view } : denied;
+  } catch {
+    return { ok: false as const, error: "Les données du Desk sont momentanément indisponibles." };
+  }
+}
+
+export async function chatOnDeskScope(scope: DeskScope, turns: AssistantTurn[]) {
+  if (!isDeskScope(scope) || !validTurns(turns)) return invalid;
+  try {
+    const { cleanDeskText, readDeskData } = await import("@/lib/assistant/desk-data");
+    const desk = await readDeskData(scope, turns.at(-1)!.content);
+    if (!desk) return denied;
+    const { view } = desk;
+    const contextOnly = !desk.model || view.choices || Boolean(view.inbound) || view.items.some(item => item.draft);
+    if (contextOnly) return { ok: true as const, reply: view.summary, view };
+    const auth = await activeSession();
+    if (!auth.ok) return { ok: true as const, reply: view.summary, view };
+    const safeTurns = turns.map(({ role, content }) => ({ role, content: cleanDeskText(content, desk.projets).trim() || "(message vide)" }));
+    try {
+      const answer = await askClaude(safeTurns, { lectureSeule: true, ...desk.model });
+      return { ok: true as const, reply: answer.reply, view };
+    } catch {
+      return { ok: true as const, reply: view.summary, view };
+    }
+  } catch {
+    return { ok: false as const, error: "Les données du Desk sont momentanément indisponibles." };
+  }
+}
+
+async function deskActionTarget(leadId: string, kind: "claim" | "brief" | "link") {
+  if (!isUuid(leadId) || !["claim", "brief", "link"].includes(kind)) return invalid;
+  const auth = await session();
+  if (!auth) return denied;
+  const { data: lead } = await auth.db.from("leads").select("id,reference,updated_at,referent_id,closed_at,status,generated_brief,public_token,public_token_expires_at,traveler_responses_submitted_at")
+    .eq("id", leadId).is("deleted_at", null).maybeSingle();
+  if (!lead || lead.closed_at || ["won", "lost"].includes(lead.status)) return denied;
+  if (kind === "claim" && lead.referent_id) return { ok: false as const, error: "Ce dossier a déjà un référent. Consulte la fiche pour voir son attribution." };
+  if (kind !== "claim" && !canEditLead(auth, lead)) return editDenied;
+  const { chargerProjets } = await import("@/lib/bo3/load");
+  const [project] = kind === "claim" ? [] : await chargerProjets({
+    supabase: auth.db, userId: auth.userId, role: auth.admin ? "admin" : "lead_referent", nom: "", apercu: false,
+  }, { id: leadId });
+  if (kind !== "claim" && (!project || project.updatedAt !== lead.updated_at)) return stale;
+  if (kind === "brief" && (lead.generated_brief || project?.statut === "envoye")) return {
+    ok: false as const, error: "Le dossier a déjà un brief ou un envoi déclaré. Ouvre Brief & agences pour poursuivre.",
+  };
+  if (kind === "brief" && (!project?.trame || project.manque.length)) return {
+    ok: false as const, error: "Le brief attend une trame complète. À préciser dans la trame · " + (project?.manque.join(", ") || "parcours du voyage"),
+  };
+  if (kind === "link" && !project?.manque.length) return { ok: false as const, error: "La trame contient déjà les informations requises pour poursuivre." };
+  const existingLink = kind === "link" && typeof lead.public_token === "string" && isUuid(lead.public_token) &&
+    !lead.traveler_responses_submitted_at && !isTokenExpired(lead.public_token_expires_at) ? lead.public_token : null;
+  return { ok: true as const, auth, project, existingLink, preview: {
+    leadId, kind, version: lead.updated_at as string, reference: lead.reference || "DA-" + leadId.slice(0, 8).toUpperCase(),
+  } };
+}
+
+export async function previewAssistantDeskAction(leadId: string, kind: "claim" | "brief" | "link") {
+  const result = await deskActionTarget(leadId, kind);
+  return result.ok ? { ok: true as const, preview: result.preview } : result;
+}
+
+export async function confirmAssistantDeskAction(preview: { leadId: string; kind: "claim" | "brief" | "link"; version: string }) {
+  if (!preview || typeof preview.version !== "string") return invalid;
+  const current = await deskActionTarget(preview.leadId, preview.kind);
+  if (!current.ok) return current;
+  if (current.preview.version !== preview.version) return stale;
+  const { leadId, kind } = current.preview;
+  const { auth, project, existingLink } = current;
+  const now = new Date().toISOString();
+  const save = (patch: Record<string, unknown>) => saveConfirmedPatch(auth, leadId, preview.version, patch);
+  if (kind === "claim") {
+    const saved = await save({ referent_id: auth.userId, referent_assigned_at: now });
+    return saved.ok ? { ok: true as const, message: "Dossier pris en charge.", href: projectDeskLink(leadId) } : saved;
+  }
+  if (!project) return denied;
+  if (kind === "brief") {
+    const { briefToMarkdown, buildBrief } = await import("@/lib/bo3/projet");
+    const saved = await save({ generated_brief: briefToMarkdown(buildBrief(project)), brief_generated_at: now, brief_edited_at: now });
+    return saved.ok ? { ok: true as const, message: "Brief préparé depuis la trame. Il est prêt à relire.", href: projectDeskLink(leadId, "agences") } : saved;
+  }
+  const token = existingLink ?? crypto.randomUUID();
+  if (!existingLink) {
+    const saved = await save({ public_token: token, public_token_expires_at: new Date(Date.now() + TOKEN_TTL_DAYS * 86400000).toISOString(),
+      traveler_responses_submitted_at: null });
+    if (!saved.ok) return saved;
+  }
+  const base = (process.env.NEXT_PUBLIC_TRAVELER_BASE_URL || "https://app.directionlalgerie.com").replace(/\/$/, "");
+  const url = `${base}/q/${token}?champs=${project.manque.join(",")}`;
+  return { ok: true as const, message: "Lien de qualification prêt à copier.", url, href: projectDeskLink(leadId, "voyageur") };
 }
 
 export async function confirmAssistantEdit(preview: AssistantEditPreview) {
@@ -139,13 +247,13 @@ export async function previewAssistantQualification(leadId: string, notes: strin
   if (typeof leadId !== "string" || !isUuid(leadId) || typeof notes !== "string" || !notes.trim() || notes.length > 6000) return invalid;
   const auth = await activeSession();
   if (!auth.ok) return auth;
-  const { data, error } = await auth.db.from("leads").select("traveler_name,email,phone,updated_at,referent_id,closed_at,status")
+  const { data, error } = await auth.db.from("leads").select("traveler_name,email,phone,updated_at,referent_id,closed_at,status,intake_payload,ai_qualification_payload,trip_summary,travel_period,travel_start_date,travel_end_date,budget,travelers_adults,travelers_children")
     .eq("id", leadId).is("deleted_at", null).maybeSingle();
   if (error || !data || !canEditLead(auth, data)) return editDenied;
   try {
     const qualification = await extractClaudeQualification(anonymizeAgencyText(notes, data));
     if (!qualification) return { ok: false as const, error: "DA Sales n’a pas trouvé de champs à renseigner. Précisez les informations données par le voyageur." };
-    const preview: QualificationPreview = { leadId, updatedAt: data.updated_at, qualification };
+    const preview: QualificationPreview = { leadId, updatedAt: data.updated_at, qualification, changes: qualificationChanges(data, qualification) };
     return { ok: true as const, preview };
   } catch {
     return { ok: false as const, error: "DA Sales n’a pas pu analyser ces notes. Réessayez dans un instant." };
@@ -167,14 +275,16 @@ export async function confirmAssistantQualification(preview: QualificationPrevie
 }
 
 async function draftPreview(leadId: string, kind: AssistantDraftKind, agencyId: string | null) {
+  const agencyKind = kind === "agency_brief" || kind === "agency_feasibility";
   if (typeof leadId !== "string" || !isUuid(leadId) || !isAssistantDraftKind(kind) ||
-      (kind === "agency_brief" ? typeof agencyId !== "string" || !isUuid(agencyId) : agencyId !== null)) return invalid;
+      (agencyKind ? typeof agencyId !== "string" || !isUuid(agencyId) : agencyId !== null)) return invalid;
   const auth = await activeSession();
   if (!auth.ok) return auth;
   const { data: lead, error } = await auth.db.from("leads").select("id").eq("id", leadId).is("deleted_at", null).maybeSingle();
   if (error || !lead) return { ok: false as const, error: "Ce dossier n’est plus accessible." };
   const workspace = await getLeadEmailWorkspace(leadId, kind, agencyId);
   if (!workspace.ok) return workspace;
+  if (kind === "agency_feasibility" && !workspace.feasibilityReady) return { ok: false as const, error: workspace.feasibilityMessage };
   if (kind === "agency_brief" && !workspace.template.analysis.readyForAgencyBrief) {
     return { ok: false as const, error: "Terminez la qualification du dossier avant de préparer le brief pour chiffrage." };
   }

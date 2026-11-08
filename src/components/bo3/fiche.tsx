@@ -20,8 +20,9 @@ import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
 import { DeskGmailMessages } from "@/components/assistant/desk-gmail-messages";
 import { ASSISTANT_OPEN_COMPOSER, type AssistantDraft } from "@/lib/assistant/types";
 import { parseQualificationImport, qualificationLabels } from "@/lib/assistant/qualification";
+import { DESK_PROJECT_TAB_EVENT, isDeskTab, type DeskProjectTab } from "@/lib/assistant/scope";
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
-import type { DeskInboundMail } from "@/lib/email/gmail-intake";
+import { prefillGmailProposal, type DeskInboundMail } from "@/lib/email/gmail-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
 import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
@@ -41,7 +42,13 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
   const toast = useToast();
   const [pending, start] = useTransition();
   const [modal, setModal] = useState<string | null>(null);
-  const [tab, setTab] = useState(() => defaultTab(p));
+  const urlTab = params.get("tab");
+  const tab = isDeskTab(urlTab) ? urlTab : defaultTab(p);
+  const setTab = useCallback((next: DeskProjectTab) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url);
+  }, []);
   const [briefTab, setBriefTab] = useState<"edit" | "prev">("edit");
   const [briefOpen, setBriefOpen] = useState(p.statut === "brief_pret");
   const [sel, setSel] = useState<string[] | null>(null);
@@ -50,11 +57,19 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
   const daSalesQualification = parseQualificationImport((lead.intake_payload as { da_sales_qualification?: unknown } | null)?.da_sales_qualification);
   useEffect(() => {
+    window.dispatchEvent(new CustomEvent(DESK_PROJECT_TAB_EVENT, { detail: { leadId: p.id, tab } }));
+  }, [p.id, tab]);
+  useEffect(() => {
     function openAssistantDraft(event: Event) {
       const draft = (event as CustomEvent<Pick<AssistantDraft, "leadId" | "kind" | "agencyId" | "proposalId">>).detail;
       if (draft?.leadId !== p.id || p.statut === "clos") return;
       if (draft.kind === "welcome") setModal("first");
       if (draft.kind === "qualification") setModal("ask");
+      if (draft.kind === "agency_feasibility" && draft.agencyId) {
+        setForm({ agence: draft.agencyId });
+        setTab("agences");
+        setModal("agency-study");
+      }
       if (draft.kind === "agency_brief" && p.consultations.some((c) => c.id === draft.proposalId && c.agence === draft.agencyId)) {
         setForm({ agence: draft.agencyId!, propId: draft.proposalId! });
         setTab("agences");
@@ -63,7 +78,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
     }
     window.addEventListener(ASSISTANT_OPEN_COMPOSER, openAssistantDraft);
     return () => window.removeEventListener(ASSISTANT_OPEN_COMPOSER, openAssistantDraft);
-  }, [p.id, p.statut, p.consultations]);
+  }, [p.id, p.statut, p.consultations, setTab]);
   useEffect(() => setSections(p.brief?.sections ?? []), [p.brief]);
 
   const na = nextAction({ ...p, consultations: p.consultations.filter(c => c.envoye) }, agences, now);
@@ -94,6 +109,14 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
       if (!r.ok) { toast(r.error); return; }
       setForm({ agence: agencyId, propId: r.proposalId }); setModal("agency-email"); router.refresh();
     });
+  }
+
+  function prepareGmailProposal(mail: DeskInboundMail) {
+    const { price, days } = prefillGmailProposal(mail.excerpt);
+    const matching = pend.filter(consultation => agences.find(agency => agency.id === consultation.agence)?.contact.trim().toLowerCase() === mail.sender);
+    setForm({ propId: matching.length === 1 ? matching[0].id : "", prix: price?.toString() ?? "", duree: days?.toString() ?? "",
+      resume: "", ecarts: "", gmailSubject: mail.subject, gmailExcerpt: mail.excerpt });
+    setModal("proposal");
   }
 
   const ouvrirConversion = (c: Consultation) => {
@@ -129,18 +152,23 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
       case "lien": act(() => A.demanderManque(p.id, "Lien voyageur : {lien}"), (r) => { if (r.ok && r.url) copier(r.url); }); break;
       default: break;
     }
-  }, [p, agences, now, signature, act, na.agence, pend]);
+  }, [p, signature, act, na.agence, pend, setTab]);
 
   // Action demandée depuis la file de travail (?action=…), une seule fois.
   const intentFaite = useRef(false);
   useEffect(() => {
     const a = params.get("action") as Action | null;
-    if (a && !intentFaite.current) { intentFaite.current = true; run(a); router.replace(`/leads/${p.id}`, { scroll: false }); }
-  }, [params, run, router, p.id]);
+    if (!a || intentFaite.current) return;
+    intentFaite.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("action");
+    window.history.replaceState(null, "", url);
+    run(a);
+  }, [params, run]);
   useEffect(() => { if (p.statut === "brief_pret" && sel === null) setSel(sug.filter((s) => s.jours > 0).slice(0, 1).map((s) => s.a.id)); }, [p.statut, sel, sug]);
 
   const F = (k: string) => ({ value: form[k] ?? "", onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setForm({ ...form, [k]: e.target.value }) });
-  const Tb = ({ id, l, c }: { id: string; l: string; c?: number }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{l}{c ? <b>{c}</b> : null}</button>;
+  const Tb = ({ id, l, c }: { id: DeskProjectTab; l: string; c?: number }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{l}{c ? <b>{c}</b> : null}</button>;
   const echeanceAgence = fmtD(now + 48 * H);
   // Un texte par agence : son nom seul (aucune agence ne voit les autres), et sa portion en mode « un brief par agence ».
   const portionDe = (id: string) => (mode === "pilote" ? "tout" : portionFor(p, agences.find((a) => a.id === id)!) || "tout");
@@ -388,7 +416,10 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
 
       {tab === "props" && (
         <>
-          {detectedOffers.length > 0 && <Card t="Propositions détectées dans Gmail"><DeskGmailMessages messages={detectedOffers} /></Card>}
+          {detectedOffers.length > 0 && <Card t="Propositions détectées dans Gmail">
+            <DeskGmailMessages messages={detectedOffers} onProposal={pend.length && p.statut !== "clos" ? prepareGmailProposal : undefined} />
+            {p.statut !== "clos" && !pend.length && <p className="mt">Rattache une consultation en attente depuis Brief & agences pour saisir une offre.</p>}
+          </Card>}
           {!props.length && !detectedOffers.length && <Card><div className="empty"><b>Aucune proposition pour l&apos;instant</b>{pend.length ? `Réponse attendue de ${pend.map((c) => n(c.agence)).join(" et ")}.` : "Envoyez d'abord le brief à une agence."}</div></Card>}
           {props.map((c) => {
             const pr = c.proposition!;
@@ -431,6 +462,11 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
       {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}
       {modal === "exchange" && <ExternalExchangeDialog p={p} updatedAt={lead.updated_at} now={now} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
       {(modal === "first" || modal === "ask" || modal === "agency-email") && <div className="lead-mailing-dialog"><Modal title={modal === "first" ? "Premier contact · email" : modal === "ask" ? "Poursuivre la qualification · email" : `Brief agence · ${n(form.agence)}`} onClose={() => setModal(null)}><div className="lead-mailing-module"><LeadEmailComposer key={`${modal}:${form.propId ?? "client"}`} lead={lead} kind={modal === "first" ? "welcome" : modal === "ask" ? "qualification" : "agency_brief"} agencyId={modal === "agency-email" ? form.agence : undefined} proposalId={modal === "agency-email" ? form.propId : undefined} /></div><div className="row wrap"><span className="mt">Pour un échange WhatsApp ou un appel déjà effectué :</span><button className="btn s sm" onClick={() => setModal("exchange")}>Enregistrer l’échange</button></div></Modal></div>}
+      {modal === "agency-study" && <div className="lead-mailing-dialog">
+        <Modal title={`Étude de faisabilité · ${n(form.agence)}`} onClose={() => setModal(null)}>
+          <div className="lead-mailing-module"><LeadEmailComposer lead={lead} kind="agency_feasibility" agencyId={form.agence} /></div>
+        </Modal>
+      </div>}
       {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={lead.updated_at} onRecordExchange={() => setModal("exchange")} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
       {(modal === "complete" || modal === "qualif") && (
         <TrameForm
@@ -447,9 +483,12 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
           <button className="btn s" onClick={() => setModal(null)}>Annuler</button>
           <button className="btn p" disabled={!form.prix || !form.propId || pending} onClick={() => act(() => A.saisirProposition(p.id, form.propId, { prix: Number(form.prix), duree: Number(form.duree) || 0, resume: form.resume ?? "", ecarts: form.ecarts ?? "" }), () => { setModal(null); setTab("props"); })}>Enregistrer</button>
         </>}>
-          <div className="field"><span className="lbl">Agence</span><select className="inp" {...F("propId")}>{pend.map((c) => <option key={c.id} value={c.id}>{n(c.agence)}</option>)}</select></div>
+          {form.gmailSubject && <details className="desk-assistant__proposal"><summary>Source Gmail · {form.gmailSubject}</summary>
+            <div className="desk-assistant__draft-text">{form.gmailExcerpt || "L’offre est peut-être en pièce jointe. Consulte le fil dans Gmail."}</div>
+          </details>}
+          <div className="field"><span className="lbl">Agence</span><select className="inp" {...F("propId")}><option value="">Choisir la consultation</option>{pend.map((c) => <option key={c.id} value={c.id}>{n(c.agence)}</option>)}</select></div>
           <div className="fgrid">
-            <div className="field"><span className="lbl">Prix indicatif / pers. (€)</span><input className="inp" type="number" placeholder="ex. 1 380" {...F("prix")} /></div>
+            <div className="field"><span className="lbl">Prix indicatif / pers. (€)</span><input className="inp" type="number" step="0.01" min="0.01" placeholder="ex. 1 380" {...F("prix")} /></div>
             <div className="field"><span className="lbl">Durée (jours)</span><input className="inp" type="number" {...F("duree")} /></div>
           </div>
           <div className="field"><span className="lbl">Itinéraire proposé</span><textarea className="inp" placeholder="Djanet · Sefar · Tadrart · …" {...F("resume")} /></div>
