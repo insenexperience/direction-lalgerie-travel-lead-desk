@@ -20,9 +20,10 @@ export type LeadEmailTemplateInput = LeadQualificationInput & {
   preferred_language?: string | null;
 };
 
-export const LEAD_EMAIL_TEMPLATE_VERSION = "direction-algerie-2026-10-v2";
+export const LEAD_EMAIL_TEMPLATE_VERSION = "direction-algerie-2026-11-v3";
 const CONTACT = "contact@directionlalgerie.com";
 const SITE = "https://www.directionlalgerie.com";
+const PUBLIC_WHATSAPP_NUMBER = "213795274309";
 
 function recordedLanguage(lead: LeadEmailTemplateInput): LeadEmailLanguage {
   const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -108,7 +109,9 @@ export function renderLeadEmailHtml(input: {
     ? "Your travel project is in good hands." : "Votre projet de voyage est bien arrivé.";
   const mailto = input.mailtoHref?.startsWith("mailto:") ? input.mailtoHref : `mailto:${CONTACT}`;
   const whatsapp = input.whatsappHref && /^https:\/\/wa\.me\/\d{8,15}(?:\?|$)/.test(input.whatsappHref) ? input.whatsappHref : null;
-  const cta = agency ? "" : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0 20px;"><tr><td bgcolor="#f6a72d" style="background:#f6a72d;"><a href="${escapeHtml(mailto)}" style="display:inline-block;padding:16px 24px;color:#101e26;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;text-decoration:none;">${english ? "Contact our team" : "Écrire à notre équipe"}</a></td></tr></table>${whatsapp ? paragraph(`<a href="${escapeHtml(whatsapp)}" style="color:#132e3d;">${english ? "Continue on WhatsApp" : "Poursuivre sur WhatsApp"}</a>`) : ""}`;
+  const emailLabel = english ? "Write to us by email" : "Nous écrire par e-mail";
+  const primaryLabel = whatsapp ? (english ? "Suggest a time on WhatsApp" : "Proposer un créneau sur WhatsApp") : emailLabel;
+  const cta = agency ? "" : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px 0 20px;"><tr><td bgcolor="#f6a72d" style="background:#f6a72d;"><a href="${escapeHtml(whatsapp ?? mailto)}" style="display:inline-block;padding:16px 24px;color:#101e26;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;text-decoration:none;">${primaryLabel}</a></td></tr></table>${whatsapp ? paragraph(`<a href="${escapeHtml(mailto)}" style="color:#132e3d;">${emailLabel}</a>`) : ""}`;
   return `<!DOCTYPE html><html lang="${input.language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>@media screen and (max-width:540px){.email-pad{padding-left:24px!important;padding-right:24px!important}.welcome-title{font-size:34px!important}}</style></head><body style="margin:0;padding:0;background:#f5f6f2;"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(subtitle)}</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f5f6f2"><tr><td align="center" style="padding:32px 12px;"><!--[if mso]><table width="640"><tr><td><![endif]--><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="max-width:640px;background:#ffffff;"><tr><td align="center" bgcolor="#0d2431" style="padding:34px 24px;"><a href="${SITE}"><img src="${escapeHtml(DIRECTION_ALG_LOGO_URL)}" width="176" height="80" alt="Direction l’Algérie" style="display:block;width:176px;height:80px;border:0;"></a></td></tr><tr><td class="email-pad" bgcolor="#f5f6f2" style="padding:40px 40px 38px;"><table role="presentation" width="36" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;"><tr><td height="3" bgcolor="#f6a72d" style="font-size:0;line-height:0;">&nbsp;</td></tr></table><h1 class="welcome-title" style="margin:0 0 16px;color:#132e3d;font-family:Cormorant,Georgia,Times,serif;font-size:${agency ? 34 : 42}px;font-weight:normal;line-height:1.12;letter-spacing:-.7px;">${escapeHtml(title)}</h1><p style="margin:0;color:#64727a;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:14px;line-height:1.8;">${escapeHtml(subtitle)}</p></td></tr><tr><td class="email-pad" style="padding:38px 40px 14px;">${renderBody(input.bodyText)}${cta}</td></tr><tr><td class="email-pad" style="padding:26px 40px 32px;border-top:1px solid #d5dcdd;">${paragraph(english ? "Your point of contact in Algeria." : "Votre interlocuteur pour un voyage en Algérie.")}<a href="mailto:${CONTACT}" style="color:#132e3d;font:12px/1.8 Arial,sans-serif;">${CONTACT}</a><br><a href="${SITE}" style="color:#64727a;font:12px/1.8 Arial,sans-serif;text-decoration:none;">directionlalgerie.com</a></td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>`;
 }
 
@@ -122,7 +125,6 @@ export function buildLeadEmailTemplate(lead: LeadEmailTemplateInput, kind: LeadE
   const language = agency ? "fr" : analysis.language;
   const english = language === "en";
   const ref = lead.reference || (lead.id ? `DA-${lead.id.slice(0, 8).toUpperCase()}` : "Dossier à qualifier");
-  const questionText = analysis.questions.map((question) => `• ${question.label} : ${question.question}`).join("\n\n");
   const recap = [
     [english ? "Project" : "Projet", lead.trip_summary],
     [english ? "Travel dates" : "Période", lead.trip_dates],
@@ -175,17 +177,32 @@ export function buildLeadEmailTemplate(lead: LeadEmailTemplateInput, kind: LeadE
       "Bien cordialement,\nDirection l’Algérie",
     ].filter(Boolean).join("\n\n"), lead);
   } else {
+    const period = analysis.checklist.find((item) => item.id === "dates" && item.status === "complete")?.value;
+    const group = analysis.checklist.find((item) => item.id === "participants" && item.status === "complete")?.value;
+    const project = [lead.destination_main?.trim(), period, group].filter(Boolean).join(" · ");
+    const needsBudget = analysis.questions.some((question) => question.id === "budget" || question.id === "budget_scope");
     bodyText = [
       `${english ? "Dear" : "Bonjour"}${firstName(lead.traveler_name) ? ` ${firstName(lead.traveler_name)}` : ""},`,
-      kind === "welcome" ? english ? "Thank you for sharing your travel project. We have received your enquiry and our team will help shape it with local experts." : "Merci de nous avoir confié votre projet de voyage. Nous avons bien reçu votre demande et notre équipe va vous accompagner pour la préciser avec nos partenaires locaux." : english ? "We are continuing the preparation of your travel project. A few details will help us prepare an accurate brief for our local partners." : "Nous poursuivons la préparation de votre projet. Quelques précisions nous aideront à transmettre un brief complet et fidèle à nos partenaires locaux.",
-      questionText ? `${english ? "To begin, could you please confirm the following details?" : "Pour commencer, pourriez-vous nous préciser les points suivants ?"}\n\n${questionText}` : english ? "We have the main details needed to prepare your project. Please let us know if anything has changed." : "Nous disposons des principales informations pour préparer votre projet. N’hésitez pas à nous signaler toute évolution.",
-      recap ? `${english ? "Your project so far" : "Votre projet à ce stade"}\n${recap}` : "",
-      analysis.expedition ? english ? "We will first assess feasibility with local experts. No route, unsupported format or booking is confirmed at this stage." : "Nous commencerons par une étude de faisabilité avec les experts locaux. Aucun itinéraire, format en autonomie ou réservation n’est confirmé à ce stade." : "",
-      english ? "You can simply reply to this email point by point, even if some details are still open. Direction l’Algérie remains your point of contact." : "Vous pouvez simplement répondre à cet email point par point, même si certains éléments restent ouverts. Direction l’Algérie reste votre interlocuteur pour la suite.",
+      kind === "welcome"
+        ? (english ? "Thank you for sharing your travel plans with us. We’ve received your request." : "Merci de nous avoir confié votre projet de voyage. Nous avons bien reçu votre demande.")
+        : (english ? "We’d like to discuss the next steps for your trip with you." : "Nous aimerions échanger avec vous sur la suite de votre projet."),
+      project ? `${english ? "Your trip so far" : "Votre projet à ce stade"}\n${project}` : "",
+      english
+        ? `Could we arrange a 10–15 minute WhatsApp call to discuss your priorities${needsBudget ? " and your budget per person, including what it should cover" : ""}?`
+        : `Seriez-vous disponible pour un appel WhatsApp de 10 à 15 minutes pour préciser vos priorités${needsBudget ? " et votre budget par personne, en précisant ce qu’il doit couvrir" : ""} ?`,
+      english
+        ? "Please suggest one or two times and include your time zone. You can also reply to this email."
+        : "Proposez-nous un ou deux créneaux en indiquant votre fuseau horaire. Vous pouvez aussi répondre à cet e-mail.",
       english ? "Kind regards,\nDirection l’Algérie" : "Bien cordialement,\nDirection l’Algérie",
     ].filter(Boolean).join("\n\n");
   }
   if (options.bodyText !== undefined) bodyText = kind === "agency_feasibility" ? anonymizeAgencyText(options.bodyText, lead) : options.bodyText;
+  const configuredNumber = process.env.NEXT_PUBLIC_WHATSAPP_DA_NUMBER?.replace(/\D/g, "") ?? "";
+  const whatsappNumber = /^\d{8,15}$/.test(configuredNumber) ? configuredNumber : PUBLIC_WHATSAPP_NUMBER;
+  const whatsappMessage = english
+    ? "Hello, I’d like to arrange a call about my trip. My availability and time zone:"
+    : "Bonjour, je souhaite convenir d’un appel au sujet de mon voyage. Mes créneaux et mon fuseau horaire :";
+  const whatsappHref = agency ? undefined : `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappMessage)}`;
   return { subject, bodyText, language, reference: ref, questions: analysis.questions, analysis,
-    html: renderLeadEmailHtml({ kind, language, bodyText, travelerName: agency ? undefined : lead.traveler_name, reference: kind === "agency_feasibility" ? anonymizeAgencyText(ref, lead) : ref }) };
+    html: renderLeadEmailHtml({ kind, language, bodyText, travelerName: agency ? undefined : lead.traveler_name, reference: kind === "agency_feasibility" ? anonymizeAgencyText(ref, lead) : ref, whatsappHref }) };
 }

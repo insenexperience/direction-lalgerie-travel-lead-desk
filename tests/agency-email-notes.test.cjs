@@ -52,6 +52,25 @@ assert.equal(imported.intake_payload.language, "en");
 const welcome = buildLeadEmailTemplate(imported, "welcome");
 assert.equal(welcome.language, "en");
 assert(welcome.bodyText.startsWith("Dear Alex,"));
+
+const travelerProject = {
+  ...lead, traveler_name: "Camille Martin", destination_main: "Djanet",
+  trip_dates: "avril 2027", travelers: "2 adultes", travel_style: "Randonnée",
+  project_description: "Note interne qui ne doit pas figurer dans le premier email.",
+};
+for (const kind of ["welcome", "qualification"]) {
+  const message = buildLeadEmailTemplate(travelerProject, kind, { language: "fr" });
+  assert.match(message.bodyText, /Djanet.*avril 2027/s);
+  assert.match(message.bodyText, /appel WhatsApp de 10 à 15 minutes/);
+  assert.match(message.bodyText, /budget par personne/);
+  assert.doesNotMatch(message.bodyText, /Note interne|^•/m);
+  assert.match(message.html, /bgcolor="#f6a72d"[^>]*><a href="https:\/\/wa\.me\/\d+\?text=/);
+  assert.doesNotMatch(message.html, /traveler@example\.test|447700900123/);
+}
+assert.match(welcome.bodyText, /10–15 minute WhatsApp call/);
+assert.match(welcome.html, /Suggest a time on WhatsApp/);
+assert.doesNotMatch(buildLeadEmailTemplate(travelerProject, "agency_brief").html, /wa\.me\//);
+
 assert.equal(buildLeadEmailTemplate(imported, "agency_brief").language, "fr");
 
 assert.equal(isAgencyEmailKind("agency_feasibility"), true);

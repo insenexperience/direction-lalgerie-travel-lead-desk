@@ -31,6 +31,7 @@ export type LeadEmailDraftInput = {
   proposalId?: string | null;
   draftId?: string | null;
   expectedUpdatedAt?: string | null;
+  expectedRecipient?: string;
   subject: string;
   bodyText: string;
   language: LeadEmailLanguage;
@@ -164,6 +165,9 @@ export async function saveLeadEmailDraft(input: LeadEmailDraftInput): Promise<{ 
   if (input.kind === "agency_feasibility" && !hasFeasibilityTravelContent(context.lead)) return { ok: false, error: EMPTY_FEASIBILITY };
   const recipient = await resolveRecipient(context, input.kind, input.agencyId, input.proposalId);
   if (!recipient.ok) return recipient;
+  if (input.expectedRecipient !== undefined && input.expectedRecipient !== recipient.recipient) {
+    return { ok: false, error: "Le destinataire a changé. Rouvrez l’aperçu avant de valider." };
+  }
   if (isAgencyEmailKind(input.kind) && (anonymizeAgencyText(bodyText, context.lead) !== bodyText || anonymizeAgencyText(subject, context.lead) !== subject)) return { ok: false, error: "Le message agence contient un nom ou des coordonnées du voyageur. Retirez ces données personnelles avant de l’enregistrer." };
   const template = buildLeadEmailTemplate(context.lead, input.kind, { language: input.language, bodyText });
   const patch = { lead_id: input.leadId, kind: input.kind, agency_id: recipient.agencyId, proposal_id: recipient.proposalId,

@@ -17,6 +17,7 @@ import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
 import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { ASSISTANT_OPEN_COMPOSER, type AssistantDraft } from "@/lib/assistant/types";
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
@@ -44,6 +45,21 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const [mode, setMode] = useState<"portion" | "pilote">("portion");
   const [form, setForm] = useState<Record<string, string>>({});
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
+  useEffect(() => {
+    function openAssistantDraft(event: Event) {
+      const draft = (event as CustomEvent<Pick<AssistantDraft, "leadId" | "kind" | "agencyId" | "proposalId">>).detail;
+      if (draft?.leadId !== p.id || p.statut === "clos") return;
+      if (draft.kind === "welcome") setModal("first");
+      if (draft.kind === "qualification") setModal("ask");
+      if (draft.kind === "agency_brief" && p.consultations.some((c) => c.id === draft.proposalId && c.agence === draft.agencyId)) {
+        setForm({ agence: draft.agencyId!, propId: draft.proposalId! });
+        setTab("agences");
+        setModal("agency-email");
+      }
+    }
+    window.addEventListener(ASSISTANT_OPEN_COMPOSER, openAssistantDraft);
+    return () => window.removeEventListener(ASSISTANT_OPEN_COMPOSER, openAssistantDraft);
+  }, [p.id, p.statut, p.consultations]);
   useEffect(() => setSections(p.brief?.sections ?? []), [p.brief]);
 
   const na = nextAction({ ...p, consultations: p.consultations.filter(c => c.envoye) }, agences, now);

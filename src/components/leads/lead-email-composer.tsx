@@ -7,6 +7,7 @@ import { getLeadEmailWorkspace, saveLeadEmailDraft, sendLeadEmailDraft, markLead
 import { claimLead } from '@/app/(dashboard)/leads/actions';
 import { anonymizeAgencyText, buildLeadEmailTemplate, isAgencyEmailKind, type LeadEmailKind, type LeadEmailLanguage } from '@/lib/email/lead-email-template';
 import type { SupabaseLeadRow } from '@/lib/supabase-lead-row';
+import { ASSISTANT_DRAFT_SAVED } from '@/lib/assistant/types';
 
 type Props = { lead: SupabaseLeadRow; kind: LeadEmailKind; agencyId?: string | null; proposalId?: string | null; onDirtyChange?: (dirty: boolean) => void };
 type Workspace = Extract<Awaited<ReturnType<typeof getLeadEmailWorkspace>>, { ok: true }>;
@@ -23,6 +24,7 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
   const [draftId, setDraftId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +38,17 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   useEffect(() => {
+    function refreshDraft(event: Event) {
+      const target = (event as CustomEvent<{ leadId: string; kind: LeadEmailKind; agencyId: string | null }>).detail;
+      if (!dirty && target?.leadId === lead.id && target.kind === kind && target.agencyId === (agencyId ?? null)) {
+        setWorkspaceRevision((revision) => revision + 1);
+      }
+    }
+    window.addEventListener(ASSISTANT_DRAFT_SAVED, refreshDraft);
+    return () => window.removeEventListener(ASSISTANT_DRAFT_SAVED, refreshDraft);
+  }, [dirty, lead.id, kind, agencyId]);
+
+  useEffect(() => {
     let cancelled = false;
     getLeadEmailWorkspace(lead.id, kind, agencyId, proposalId).then(result => {
       if (cancelled) return;
@@ -47,7 +60,7 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
       setDraftId(result.draft?.id ?? null); setDirty(false);
     }).catch(() => { if (!cancelled) { setLoading(false); setError('Le brouillon n’a pas pu être chargé. Rechargez le dossier.'); } });
     return () => { cancelled = true; };
-  }, [lead.id, lead.updated_at, kind, agencyId, proposalId]);
+  }, [lead.id, lead.updated_at, kind, agencyId, proposalId, workspaceRevision]);
 
   function regenerate(nextLanguage = language) {
     if ((dirty || draftId) && !window.confirm('Remplacer le contenu actuel par un nouveau modèle basé sur les dernières informations du dossier ?')) return;
@@ -132,7 +145,7 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
           <button type="button" disabled={pending || loading} onClick={() => void copy('html')} className="rounded-md border border-border px-3 py-2 text-sm text-steel disabled:opacity-45">Copier le HTML</button><button type="button" disabled={pending || loading} onClick={() => void copy('text')} className="rounded-md border border-border px-3 py-2 text-sm text-steel disabled:opacity-45">Copier le texte</button>
           <button type="button" disabled={pending || loading} onClick={download} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-steel disabled:opacity-45"><Download className="size-4" aria-hidden />HTML</button>
         </div>
-        <div className="flex flex-wrap items-center gap-3"><button type="button" disabled={!canEdit || !workspace?.resendReady || agencyBlocked || feasibilityBlocked || deliveryBlocked || pending || loading} onClick={() => act('send')} className="inline-flex items-center gap-2 rounded-md bg-steel px-4 py-2.5 text-sm font-semibold text-steel-ink disabled:opacity-45"><Send className="size-4" aria-hidden />{pending ? 'Traitement…' : 'Envoyer depuis Travel Lead'}</button><button type="button" disabled={!canEdit || agencyBlocked || feasibilityBlocked || deliveryBlocked || pending || loading} onClick={() => act('external')} className="rounded-md border border-border px-3 py-2.5 text-sm font-semibold text-steel disabled:opacity-45">Déclarer cet email envoyé par mes soins</button></div>
+        <div className="flex flex-wrap items-center gap-3"><button type="button" disabled={!canEdit || !workspace?.resendReady || agencyBlocked || feasibilityBlocked || deliveryBlocked || pending || loading} onClick={() => act('send')} className="inline-flex items-center gap-2 rounded-md bg-steel px-4 py-2.5 text-sm font-semibold text-steel-ink disabled:opacity-45"><Send className="size-4" aria-hidden />{pending ? 'Traitement…' : kind === 'agency_brief' ? 'Envoyer le brief par e-mail' : 'Envoyer depuis Travel Lead'}</button><button type="button" disabled={!canEdit || agencyBlocked || feasibilityBlocked || deliveryBlocked || pending || loading} onClick={() => act('external')} className="rounded-md border border-border px-3 py-2.5 text-sm font-semibold text-steel disabled:opacity-45">Déclarer cet email envoyé par mes soins</button></div>
         {workspace?.deliveryMessage && <p className="text-xs text-muted-foreground">{workspace.deliveryMessage}</p>}{notice && <p role="status" className="text-sm text-emerald-800">{notice}</p>}{error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         {workspace && workspace.history.filter(row => row.status !== 'draft').length > 0 && <details className="border-t border-border pt-3"><summary className="cursor-pointer text-sm font-semibold text-steel">Historique des emails</summary><ul className="mt-3 space-y-3">{workspace.history.filter(row => row.status !== 'draft').map(row => <li key={row.id} className="rounded-md border border-border px-3 py-3 text-xs"><p className="font-semibold text-foreground">{row.subject}</p><p className="mt-1 text-muted-foreground">{statusLabels[row.status]} · {new Date(row.sent_at || row.created_at).toLocaleString('fr-FR')}</p><p className="mt-1 text-muted-foreground">{row.recipient}</p>{row.error && <p className="mt-1 text-destructive">{row.error}</p>}<details className="mt-2"><summary className="cursor-pointer text-steel">Voir le contenu enregistré</summary><p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">{row.body_text}</p></details></li>)}</ul></details>}
       </div>

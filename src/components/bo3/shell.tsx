@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LeadIntakeModal } from "@/components/leads/lead-intake-modal";
+import { AssistantBubble } from "@/components/assistant/assistant-bubble";
+import { AssistantConnectionProvider } from "@/components/assistant/assistant-connection";
+import "@/styles/desk-assistant.css";
 import { createClient } from "@/lib/supabase/client";
 import { Icon, ToastProvider } from "./ui";
 
@@ -58,6 +61,8 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
 
   const v3 = V3.some((r) => r.test(pathname));
   const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname.startsWith("/radar") ? "/radar" : pathname;
+  const leadKey = /^\/leads\/([^/]+)$/.exec(pathname)?.[1];
+  const assistantLead = leadKey ? projets.find(({ id, ref }) => id === leadKey || ref === leadKey) : undefined;
 
   return (
     <ToastProvider>
@@ -73,7 +78,10 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
               onNouveau={() => setNouveau(true)}
               apercu={apercu}
             />
-            {v3 ? children : <main className="legacy">{children}</main>}
+            <AssistantConnectionProvider>
+              {v3 ? children : <main className="legacy">{children}</main>}
+              {!apercu && <AssistantBubble lead={assistantLead} agencies={agences} />}
+            </AssistantConnectionProvider>
           </div>
         </div>
         <CommandPalette open={cmd} onClose={() => setCmd(false)} projets={projets} agences={agences} go={go}

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Building2, Settings, Waypoints } from "lucide-react";
+import { Building2, Waypoints } from "lucide-react";
 import { TopHeader } from "@/components/top-header";
+import { AssistantConnection } from "@/components/assistant/assistant-connection";
 
 export default function SettingsPage() {
   return (
@@ -48,12 +49,9 @@ export default function SettingsPage() {
         </ul>
       </section>
 
-      <section className="rounded-md border border-dashed border-border bg-panel-muted/30 px-4 py-8 text-center sm:px-6">
-        <Settings className="mx-auto size-10 text-muted-foreground" aria-hidden />
-        <p className="mt-3 text-sm font-semibold text-foreground">Autres paramètres</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Options avancées (notifications, intégrations) : à brancher.
-        </p>
+      <section className="rounded-md border border-border bg-panel p-4 sm:p-6">
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Assistant du Desk</h2>
+        <AssistantConnection refresh />
       </section>
     </div>
   );
