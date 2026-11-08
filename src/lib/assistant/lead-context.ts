@@ -8,10 +8,10 @@ export function assistantLeadContext(lead: LeadEmailTemplateInput & { priority?:
   return {
     language: analysis.language,
     priority: lead.priority === "high" ? "high" : "normal",
-    destinations: clean(lead.destination_main),
+    destinationPrincipale: clean(lead.destination_main),
     preferences: clean(lead.travel_style),
     initialRequest: request ? {
-      destinations: request.destination.names.slice(0, 20).map(clean),
+      destinationsSouhaitees: request.destination.names.slice(0, 20).map(clean),
       wishes: request.wishes.selection.slice(0, 12).map(({ name }) => clean(name)),
     } : undefined,
     confirmed: analysis.checklist
