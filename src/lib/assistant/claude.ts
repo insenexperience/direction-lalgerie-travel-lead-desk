@@ -39,7 +39,10 @@ async function requestClaude(payload: Record<string, unknown>): Promise<unknown>
     cache: "no-store",
     signal: AbortSignal.timeout(12_000),
   });
-  if (!response.ok) throw new Error("Claude est indisponible.");
+  if (!response.ok) {
+    console.warn("[DA Sales] Claude HTTP", response.status, response.headers.get("request-id"));
+    throw new Error("Claude est indisponible.");
+  }
   return response.json();
 }
 
@@ -83,17 +86,16 @@ export async function askClaude(turns: AssistantTurn[], context: unknown) {
 }
 
 export async function extractClaudeQualification(notes: string) {
-  const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: "null" }] });
-  const nullableText = nullable({ type: "string" });
-  const nullableCount = nullable({ type: "integer" });
+  const textField = { type: "string" };
+  const countField = { type: "integer" };
   const properties = {
-    ...Object.fromEntries(Object.keys(QUALIFICATION_TEXT_FIELDS).map((key) => [key, nullableText])),
-    travelers: nullableCount, adults: nullableCount, children: nullableCount, pendingTravelers: nullableCount,
-    flexibility: nullable({ type: "string", enum: ["flexible", "fixed"] }),
+    ...Object.fromEntries(Object.keys(QUALIFICATION_TEXT_FIELDS).map((key) => [key, textField])),
+    travelers: countField, adults: countField, children: countField, pendingTravelers: countField,
+    flexibility: { type: "string", enum: ["", "flexible", "fixed"] },
     activities: { type: "array", items: { type: "string" } },
-    budgetStatus: nullable({ type: "string", enum: ["unknown", "confirmed"] }),
-    budgetAmount: nullable({ type: "number" }), budgetCurrency: nullableText,
-    budgetUnit: nullable({ type: "string", enum: ["per_person", "total"] }),
+    budgetStatus: { type: "string", enum: ["", "unknown", "confirmed"] },
+    budgetAmount: { type: "number" }, budgetCurrency: textField,
+    budgetUnit: { type: "string", enum: ["", "per_person", "total"] },
   };
   const result = await requestClaude({
     max_tokens: 1100,
@@ -103,7 +105,7 @@ export async function extractClaudeQualification(notes: string) {
       "travelers désigne le total confirmé. pendingTravelers compte seulement les personnes supplémentaires à confirmer. Ne déduis pas adultes/enfants si les notes ne les précisent pas.",
       "activities contient les excursions et activités mentionnées. Ne construis aucun itinéraire. Préserve les nuances, notamment dates flexibles et vols intérieurs.",
       "Un prix vu en ligne, une offre comparative ou un exemple va uniquement dans budgetReference. Si le budget est non défini, budgetStatus=unknown. Utilise confirmed uniquement si un montant, une devise ISO et une base par personne ou totale sont explicites.",
-      "Utilise null pour les données absentes et [] pour les activités absentes. Ne transforme pas une information à confirmer en fait établi.",
+      "Pour les données absentes, utilise une chaîne vide pour le texte, -1 pour les nombres et [] pour les activités. Ne transforme pas une information à confirmer en fait établi.",
     ].join("\n"),
     messages: [{ role: "user", content: notes }],
     output_config: {
@@ -111,5 +113,7 @@ export async function extractClaudeQualification(notes: string) {
     },
   }) as { content?: { type: string; text?: string }[]; stop_reason?: string };
   const text = result.content?.find((block) => block.type === "text")?.text;
-  return text && result.stop_reason !== "refusal" ? parseQualificationImport(JSON.parse(text)) : null;
+  if (!text || result.stop_reason === "refusal") return null;
+  const output = JSON.parse(text) as Record<string, unknown>;
+  return parseQualificationImport(Object.fromEntries(Object.entries(output).filter(([, value]) => value !== -1)));
 }
