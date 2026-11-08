@@ -18,6 +18,7 @@ import { ExternalExchangeDialog } from "./external-exchange-dialog";
 import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
 import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
 import { ASSISTANT_OPEN_COMPOSER, type AssistantDraft } from "@/lib/assistant/types";
+import { parseQualificationImport, qualificationLabels } from "@/lib/assistant/qualification";
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
@@ -45,6 +46,7 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
   const [mode, setMode] = useState<"portion" | "pilote">("portion");
   const [form, setForm] = useState<Record<string, string>>({});
   const [sections, setSections] = useState<BriefSection[]>(p.brief?.sections ?? []);
+  const daSalesQualification = parseQualificationImport((lead.intake_payload as { da_sales_qualification?: unknown } | null)?.da_sales_qualification);
   useEffect(() => {
     function openAssistantDraft(event: Event) {
       const draft = (event as CustomEvent<Pick<AssistantDraft, "leadId" | "kind" | "agencyId" | "proposalId">>).detail;
@@ -275,6 +277,14 @@ export function FicheView({ p, lead, agences, now: depart, signature }: { p: Pro
           </div>
         </Card>
       ))}
+
+      {tab === "trame" && daSalesQualification && (
+        <Card t="Qualification confirmée">
+          <dl className="kv">{qualificationLabels(daSalesQualification).map(({ label, value }) => (
+            <div key={label}><dt className="lbl">{label}</dt><dd style={{ margin: 0 }}>{value}</dd></div>
+          ))}</dl>
+        </Card>
+      )}
 
       {tab === "agences" && (
         <>

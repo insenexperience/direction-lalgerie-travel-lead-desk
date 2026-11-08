@@ -2,12 +2,14 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import { askClaude, claudeConfigured, testClaudeConnection } from "@/lib/assistant/claude";
+import { askClaude, claudeConfigured, extractClaudeQualification, testClaudeConnection } from "@/lib/assistant/claude";
 import { assistantLeadContext } from "@/lib/assistant/lead-context";
 import { isAssistantDraftKind, parseAssistantEdit, type AssistantDraft, type AssistantDraftKind, type AssistantEditPreview, type AssistantStatus, type AssistantTurn } from "@/lib/assistant/types";
 import { anonymizeAgencyText, type LeadEmailTemplateInput } from "@/lib/email/lead-email-template";
 import { isUuid } from "@/lib/is-uuid";
 import { getLeadEmailWorkspace, saveLeadEmailDraft } from "@/app/(dashboard)/leads/email-actions";
+import { parseQualificationImport, type QualificationPreview } from "@/lib/assistant/qualification";
+import { buildQualificationPatch } from "@/lib/assistant/qualification-patch";
 
 const denied = { ok: false, error: "Cette action n’est pas accessible avec votre compte." } as const;
 const inactive = { ok: false, error: "Activez Claude pour utiliser l’assistant." } as const;
@@ -75,6 +77,15 @@ function canEditLead(auth: ActiveSession, lead: { referent_id?: unknown; closed_
     Boolean(lead.referent_id && (auth.admin || lead.referent_id === auth.userId));
 }
 
+async function saveConfirmedPatch(auth: ActiveSession, leadId: string, updatedAt: string, patch: Record<string, unknown>) {
+  const result = await auth.db.from("leads").update(patch).eq("id", leadId)
+    .eq("updated_at", updatedAt).is("deleted_at", null).is("closed_at", null).select("id").maybeSingle();
+  if (result.error) return { ok: false as const, error: "Le dossier n’a pas pu être enregistré." };
+  if (!result.data) return stale;
+  for (const path of [`/leads/${leadId}`, "/leads", "/inbox", "/dashboard"]) revalidatePath(path);
+  return { ok: true as const };
+}
+
 function validTurns(turns: unknown): turns is AssistantTurn[] {
   return Array.isArray(turns) && turns.length > 0 && turns.length <= 9 && turns.length % 2 === 1 &&
     turns.every((turn, i) => turn && turn.role === (i % 2 === 0 ? "user" : "assistant") &&
@@ -121,12 +132,38 @@ export async function confirmAssistantEdit(preview: AssistantEditPreview) {
   const patch = edit.kind === "note"
     ? { internal_notes: [data.internal_notes?.trimEnd(), edit.value].filter(Boolean).join("\n\n") }
     : { priority: edit.value };
-  const result = await auth.db.from("leads").update(patch).eq("id", preview.leadId)
-    .eq("updated_at", preview.updatedAt).is("deleted_at", null).is("closed_at", null).select("id").maybeSingle();
-  if (result.error) return { ok: false as const, error: "Le dossier n’a pas pu être enregistré." };
-  if (!result.data) return stale;
-  for (const path of [`/leads/${preview.leadId}`, "/leads", "/inbox", "/dashboard"]) revalidatePath(path);
-  return { ok: true as const };
+  return saveConfirmedPatch(auth, preview.leadId, preview.updatedAt, patch);
+}
+
+export async function previewAssistantQualification(leadId: string, notes: string) {
+  if (typeof leadId !== "string" || !isUuid(leadId) || typeof notes !== "string" || !notes.trim() || notes.length > 6000) return invalid;
+  const auth = await activeSession();
+  if (!auth.ok) return auth;
+  const { data, error } = await auth.db.from("leads").select("traveler_name,email,phone,updated_at,referent_id,closed_at,status")
+    .eq("id", leadId).is("deleted_at", null).maybeSingle();
+  if (error || !data || !canEditLead(auth, data)) return editDenied;
+  try {
+    const qualification = await extractClaudeQualification(anonymizeAgencyText(notes, data));
+    if (!qualification) return { ok: false as const, error: "DA Sales n’a pas trouvé de champs à renseigner. Précisez les informations données par le voyageur." };
+    const preview: QualificationPreview = { leadId, updatedAt: data.updated_at, qualification };
+    return { ok: true as const, preview };
+  } catch {
+    return { ok: false as const, error: "DA Sales n’a pas pu analyser ces notes. Réessayez dans un instant." };
+  }
+}
+
+export async function confirmAssistantQualification(preview: QualificationPreview) {
+  if (!preview || typeof preview.leadId !== "string" || !isUuid(preview.leadId) ||
+      typeof preview.updatedAt !== "string" || !Number.isFinite(Date.parse(preview.updatedAt))) return invalid;
+  const qualification = parseQualificationImport(preview.qualification);
+  if (!qualification) return invalid;
+  const auth = await activeSession();
+  if (!auth.ok) return auth;
+  const { data, error } = await auth.db.from("leads").select("intake_payload,ai_qualification_payload,trip_summary,updated_at,referent_id,closed_at,status")
+    .eq("id", preview.leadId).is("deleted_at", null).maybeSingle();
+  if (error || !data || !canEditLead(auth, data)) return editDenied;
+  if (data.updated_at !== preview.updatedAt) return stale;
+  return saveConfirmedPatch(auth, preview.leadId, preview.updatedAt, buildQualificationPatch(data, qualification));
 }
 
 async function draftPreview(leadId: string, kind: AssistantDraftKind, agencyId: string | null) {

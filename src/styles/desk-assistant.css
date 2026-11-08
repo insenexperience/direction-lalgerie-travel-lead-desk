@@ -72,6 +72,10 @@
   border-top: 1px solid var(--line);
 }
 .bo3 .desk-assistant__input textarea { width: 100%; resize: vertical; max-height: 100px; }
+.bo3 .desk-assistant__input-header { width: 100%; gap: 8px; }
+.bo3 .desk-assistant__facts { display: grid; gap: 7px; margin: 12px 0; }
+.bo3 .desk-assistant__facts dt { color: var(--muted); font-size: 11px; }
+.bo3 .desk-assistant__facts dd { margin: 0; }
 .bo3 .desk-assistant__draft-controls {
   display: grid;
   gap: 8px;

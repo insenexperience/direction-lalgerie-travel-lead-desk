@@ -223,6 +223,9 @@ export function analyzeLeadQualification(
   const responses = obj(lead.traveler_responses);
   const trame = trameEvidence(lead, intake);
   const operatorTrame = Array.isArray(obj(obj(lead.ai_qualification_payload).trame_v3).jours);
+  const intakeFacts = obj(intake.qualification_facts);
+  const daSalesKeys = Array.isArray(intakeFacts.da_sales_confirmed_keys) ? intakeFacts.da_sales_confirmed_keys : [];
+  const operatorFacts = Object.fromEntries(Object.entries(intakeFacts).filter(([key]) => daSalesKeys.includes(key)));
   // Original request answers are fallbacks; later operator/traveler facts, including
   // deliberately cleared values, remain authoritative.
   const facts: Obj = {
@@ -233,7 +236,7 @@ export function analyzeLeadQualification(
       accommodation: answer(demande.wishes.comfort),
       ...(demande.timing.mode === "mois" && demande.timing.period ? { travel_period: demande.timing.period } : {}),
     } : {}),
-    ...obj(intake.qualification_facts), ...obj(responses.qualification_facts),
+    ...intakeFacts, ...obj(responses.qualification_facts), ...operatorFacts,
   };
   const trameGroup = obj(trame.raw.groupe);
   const trameCadre = obj(trame.raw.cadre);
@@ -279,7 +282,7 @@ export function analyzeLeadQualification(
   const confirmedComposition = adults !== null && children !== null;
   const trameTotal = count(trameGroup.nombre);
   const trameChildren = count(trameGroup.enfants, true);
-  let total = confirmedComposition ? (adults ?? 0) + (children ?? 0) : canonicalComposition ? null : trameTotal ?? count(intake.travellers_count ?? intake.travelers_count);
+  let total = count(facts.confirmed_travelers) ?? (confirmedComposition ? (adults ?? 0) + (children ?? 0) : canonicalComposition ? null : trameTotal ?? count(intake.travellers_count ?? intake.travelers_count));
   if (!confirmedComposition && trameTotal !== null && trameChildren !== null && trameChildren <= trameTotal) {
     if (!explicitlyUnknownAdults) adults ??= trameTotal - trameChildren;
     if (!explicitlyUnknownChildren) children ??= trameChildren;
@@ -311,9 +314,12 @@ export function analyzeLeadQualification(
   }
   const groupComplete = adults !== null && children !== null && adults + children > 0 && (total === null || total === adults + children);
   const groupValue = groupComplete ? `${adults} ${language === "fr" ? "adulte(s)" : "adult(s)"}, ${children} ${language === "fr" ? "enfant(s)" : "child(ren)"}` : total !== null ? `${total} ${language === "fr" ? "participant(s)" : "participant(s)"}` : "";
-  const partialGroupQuestion: [string, string] | undefined = total !== null && !groupComplete
+  const pendingTravelers = count(facts.pending_travelers, true) ?? 0;
+  const partialGroupQuestion: [string, string] | undefined = pendingTravelers > 0
+    ? [`Pouvez-vous confirmer les ${pendingTravelers} participant(s) supplémentaire(s) et la composition finale du groupe ?`, `Can you confirm the ${pendingTravelers} additional traveler(s) and the final group composition?`]
+    : total !== null && !groupComplete
     ? [`Pour les ${total} participants annoncés, combien y aura-t-il d’adultes et d’enfants ? Merci de préciser l’âge de chaque enfant à la date du départ.`, `For the ${total} participants mentioned, how many are adults and children? Please include each child's age at departure.`] : undefined;
-  check("participants", groupComplete, true, groupValue, true, partialGroupQuestion);
+  check("participants", groupComplete && pendingTravelers === 0, true, groupValue, true, partialGroupQuestion);
   // The group question already requests ages when composition is still unknown.
   check("children_ages", children !== null && childAges.length === children, true, childAges.join(", "), groupComplete && (children ?? 0) > 0);
 

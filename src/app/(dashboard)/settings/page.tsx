@@ -50,7 +50,7 @@ export default function SettingsPage() {
       </section>
 
       <section className="rounded-md border border-border bg-panel p-4 sm:p-6">
-        <h2 className="mb-3 text-sm font-semibold text-foreground">Assistant du Desk</h2>
+        <h2 className="mb-3 text-sm font-semibold text-foreground">DA Sales</h2>
         <AssistantConnection refresh />
       </section>
     </div>

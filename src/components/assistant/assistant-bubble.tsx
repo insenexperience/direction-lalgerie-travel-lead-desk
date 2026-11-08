@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { chatWithAssistant, confirmAssistantDraft, confirmAssistantEdit, prepareAssistantDraft } from "@/app/(dashboard)/settings/assistant-actions";
+import { chatWithAssistant, confirmAssistantDraft, confirmAssistantEdit, confirmAssistantQualification, prepareAssistantDraft, previewAssistantQualification } from "@/app/(dashboard)/settings/assistant-actions";
 import { ASSISTANT_DRAFT_SAVED, ASSISTANT_OPEN_COMPOSER, type AssistantDraft, type AssistantDraftKind, type AssistantEditPreview, type AssistantTurn } from "@/lib/assistant/types";
 import { AssistantConnection, useAssistantConnection } from "./assistant-connection";
+import { qualificationLabels, type QualificationPreview } from "@/lib/assistant/qualification";
 
 type Lead = { id: string; ref: string };
 type Agency = { id: string; n: string };
@@ -37,10 +38,10 @@ export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Age
 
   return (
     <div className="desk-assistant">
-      <section id="desk-assistant-panel" className="desk-assistant__panel" hidden={!open} role="dialog" aria-label="Assistant Claude"
+      <section id="desk-assistant-panel" className="desk-assistant__panel" hidden={!open} role="dialog" aria-label="DA Sales"
         onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); dismiss(); } }}>
         <div className="row b desk-assistant__header">
-          <div><b>Assistant du Desk</b><div className="desk-assistant__status">Claude{connection?.status?.state === "connected" ? " connecté" : ""}</div></div>
+          <div><b>DA Sales</b><div className="desk-assistant__status">Claude{connection?.status?.state === "connected" ? " connecté" : ""}</div></div>
           <div className="row">
             {connection?.status?.state === "connected" && <button type="button" className="btn s xs" onClick={() => setSettings(!settings)}>{settings ? "Conversation" : "Réglages"}</button>}
             <button type="button" ref={close} className="btn s xs" onClick={dismiss} aria-label="Fermer l’assistant">×</button>
@@ -63,7 +64,7 @@ export function AssistantBubble({ lead, agencies }: { lead?: Lead; agencies: Age
           setSettings(false);
           setOpen(true);
           connection?.load();
-        }}><span aria-hidden="true">✦</span> Assistant</button>
+        }}><span aria-hidden="true">✦</span> DA Sales</button>
     </div>
   );
 }
@@ -75,15 +76,18 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
   const [agencyId, setAgencyId] = useState("");
   const [preview, setPreview] = useState<AssistantDraft | null>(null);
   const [editPreview, setEditPreview] = useState<AssistantEditPreview | null>(null);
+  const [qualificationPreview, setQualificationPreview] = useState<QualificationPreview | null>(null);
+  const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const latest = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, editPreview, notice]);
+  useEffect(() => { latest.current?.scrollIntoView({ block: "nearest" }); }, [turns, preview, editPreview, qualificationPreview, notice]);
 
   async function prepare(kind: AssistantDraftKind) {
     setEditPreview(null);
+    setQualificationPreview(null);
     if (kind === "agency_brief" && !agencyId) {
       setError("Choisissez l’agence destinataire du brief.");
       return;
@@ -106,6 +110,7 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
     const input = [...turns, { role: "user", content } satisfies AssistantTurn];
     setPreview(null);
     setEditPreview(null);
+    setQualificationPreview(null);
     run(async () => {
       const result = await chatWithAssistant(lead.id, input.slice(-9));
       if (!result.ok) { setError(result.error); return; }
@@ -121,7 +126,17 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    send(message.trim());
+    const content = message.trim();
+    if (!content || pending) return;
+    if (!importing) { send(content); return; }
+    setPreview(null);
+    setEditPreview(null);
+    setQualificationPreview(null);
+    run(async () => {
+      const result = await previewAssistantQualification(lead.id, content);
+      if (result.ok) setQualificationPreview(result.preview);
+      else setError(result.error);
+    });
   }
 
   return (
@@ -133,7 +148,7 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
           <h2>Comment avancer sur ce dossier ?</h2>
           <div className="row wrap">{suggestions.map(({ label, prompt }) =>
             <button key={label} type="button" className="btn s xs" disabled={pending} onClick={() => send(prompt)}>{label}</button>
-          )}</div>
+          )}<button type="button" className="btn p xs" disabled={pending} onClick={() => setImporting(true)}>Coller une qualification</button></div>
         </div>}
         {turns.map(({ role, content }, index) => (
           <div key={index} className="desk-assistant__message" data-role={role}><b>{role === "user" ? "Vous" : "Claude"}</b><div>{content}</div></div>
@@ -157,6 +172,27 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
         </div>
       </fieldset>
       </details>
+      {qualificationPreview && (
+        <section className="desk-assistant__proposal" aria-label="Qualification à valider">
+          <b>Champs à renseigner</b>
+          <dl className="desk-assistant__facts">
+            {qualificationLabels(qualificationPreview.qualification).map(({ label, value }) =>
+              <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <div className="row wrap">
+            <button type="button" className="btn p" disabled={pending} onClick={() => run(async () => {
+              const result = await confirmAssistantQualification(qualificationPreview);
+              if (!result.ok) { setError(result.error); return; }
+              setQualificationPreview(null);
+              setMessage("");
+              setImporting(false);
+              setNotice("Qualification enregistrée dans la trame et les champs du dossier.");
+              router.refresh();
+            })}>Enregistrer la qualification</button>
+            <button type="button" className="btn s" disabled={pending} onClick={() => setQualificationPreview(null)}>Annuler</button>
+          </div>
+        </section>
+      )}
       {editPreview && (
         <section className="desk-assistant__proposal" aria-label="Modification à valider">
           <b>{editPreview.edit.kind === "note" ? "Ajouter une note interne" : "Changer la priorité"}</b>
@@ -206,10 +242,27 @@ function AssistantConversation({ lead, agencies, onOpenComposer }: { lead: Lead;
       <div ref={latest} />
       </div>
       <form className="desk-assistant__input" onSubmit={submit}>
-        <label htmlFor="desk-assistant-message">Votre message</label>
-        <textarea id="desk-assistant-message" className="inp" rows={2} maxLength={1600} value={message} disabled={pending}
-          onChange={(event) => setMessage(event.target.value)} placeholder="Ex. Marque ce dossier comme prioritaire." />
-        <button type="submit" className="btn p" disabled={!message.trim() || pending}>{pending ? "Traitement…" : "Interroger Claude"}</button>
+        <div className="row b desk-assistant__input-header">
+          <label htmlFor="desk-assistant-message">{importing ? "Retour du voyageur" : "Votre message"}</label>
+          <button type="button" className="btn s xs" disabled={pending} onClick={() => { setImporting(!importing); setQualificationPreview(null); }}>
+            {importing ? "Revenir au chat" : "Coller une qualification"}
+          </button>
+        </div>
+        <textarea id="desk-assistant-message" className="inp" rows={importing ? 4 : 2} maxLength={importing ? 6000 : 1600} value={message} disabled={pending}
+          onPaste={(event) => {
+            const pasted = event.clipboardData.getData("text").trim();
+            if (importing || pasted.split(/\r?\n/).filter((line) => line.trim()).length < 3 ||
+                !/\b(?:dates|voyageurs|budget|vols|dur[ée]e|h[ée]bergement|excursions|formalit[ée]s)\b/i.test(pasted)) return;
+            event.preventDefault();
+            if (pasted.length > 6000) { setError("Collez au maximum 6 000 caractères par import."); return; }
+            setImporting(true);
+            setMessage(pasted);
+            setQualificationPreview(null);
+            setError(null);
+          }}
+          onChange={(event) => { setMessage(event.target.value); setQualificationPreview(null); }}
+          placeholder={importing ? "Collez les dates, le groupe, les vols, le budget et les autres précisions données par le voyageur." : "Ex. Marque ce dossier comme prioritaire."} />
+        <button type="submit" className="btn p" disabled={!message.trim() || pending}>{pending ? "Traitement…" : importing ? "Analyser la qualification" : "Interroger Claude"}</button>
       </form>
     </div>
   );
