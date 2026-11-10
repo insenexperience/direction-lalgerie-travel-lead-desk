@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -17,7 +18,7 @@ export type Bo3Contexte = {
  */
 export const apercuLocalActif = () => process.env.NODE_ENV === "development" && process.env.BO3_APERCU_LOCAL === "1";
 
-export async function contexteBo3(): Promise<Bo3Contexte | null> {
+export const contexteBo3 = cache(async (): Promise<Bo3Contexte | null> => {
   if (apercuLocalActif()) {
     const supabase = createServiceRoleClient();
     const { data } = await supabase.from("profiles").select("id, full_name, role").eq("role", "admin").limit(1).maybeSingle();
@@ -34,4 +35,4 @@ export async function contexteBo3(): Promise<Bo3Contexte | null> {
     role: (data?.role as string) ?? null,
     apercu: false,
   };
-}
+});

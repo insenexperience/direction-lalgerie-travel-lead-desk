@@ -1,7 +1,7 @@
 // Règles du back office v3 : horloges 48 h, prochaine action, files, routage, brief.
 // Fonctions pures, utilisables côté serveur comme côté client. `now` est toujours passé.
 import { LIEUX, ZONES, type Zone } from "./geo";
-import type { Agence, BriefSection, Consultation, Manque, Projet, Trame } from "./types";
+import type { Agence, BriefSection, Manque, Projet, ProjetListe, Trame } from "./types";
 import { STATUT_LABEL } from "./types";
 import { dureeTrame } from "./trame";
 
@@ -11,9 +11,9 @@ const TZ = "Africa/Algiers";
 export const hrs = (a: string, b: string | number) => (new Date(b).getTime() - new Date(a).getTime()) / H;
 export const r1 = (x: number) => Math.round(x);
 
+const formatDate = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const parts = (iso: string | number) => {
-  const f = new Intl.DateTimeFormat("fr-FR", { timeZone: TZ, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  const o = Object.fromEntries(f.formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+  const o = Object.fromEntries(formatDate.formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
   return o as Record<string, string>;
 };
 export const fmtD = (iso: string | number) => { const o = parts(iso); return `${o.day}/${o.month} ${o.hour}:${o.minute}`; };
@@ -33,8 +33,8 @@ export function clockState(start: string, done: string | null, now: number): Clo
   if (rem < 0) return { state: "red", label: `Dépassée de ${r1(-rem)} h`, pct: 100, sub: `échéance ${dl}`, rem };
   return { state: rem < 3 ? "red" : rem < 12 ? "amber" : "", label: `Reste ${r1(rem)} h`, pct: ((48 - rem) / 48) * 100, sub: `échéance ${dl}`, rem };
 }
-export const travelerClock = (p: Projet, now: number) => clockState(p.recu, p.premiereReponse, now);
-export function agencyClock(c: Consultation, now: number): Clock {
+export const travelerClock = (p: Pick<Projet, "recu" | "premiereReponse">, now: number) => clockState(p.recu, p.premiereReponse, now);
+export function agencyClock(c: ProjetListe["consultations"][number], now: number): Clock {
   if (!c.envoye) return { state: "off", label: "Brouillon", pct: 0, sub: "Délai démarré à l’envoi du brief" };
   if (c.refus) return { state: "off", label: "Refus", pct: 100, sub: fmtD(c.refus) };
   if (c.proposition) {
@@ -57,7 +57,7 @@ export function manqueDe(trame: Trame | null): Manque[] {
 export const complet = (p: Projet) => !!p.trame && p.manque.length === 0;
 
 // ---------------------------------------------------------------- routage par zone
-export function zonesJours(trame: Trame | null): Partial<Record<Zone, number>> {
+export function zonesJours(trame: ProjetListe["trame"]): Partial<Record<Zone, number>> {
   const z: Partial<Record<Zone, number>> = {};
   if (!trame) return z;
   for (const j of trame.jours) {
@@ -68,7 +68,7 @@ export function zonesJours(trame: Trame | null): Partial<Record<Zone, number>> {
 }
 export type Suggestion = { a: Agence; jours: number; total: number };
 /** Agences triées par nombre de jours de la trame dans leur zone ; à égalité, le choix du voyageur passe devant. */
-export function suggestions(p: Projet, agences: Agence[]): Suggestion[] {
+export function suggestions(p: Pick<ProjetListe, "trame" | "agenceChoisie">, agences: Agence[]): Suggestion[] {
   const zj = zonesJours(p.trame);
   const total = p.trame ? p.trame.jours.length : 0;
   return agences
@@ -86,21 +86,20 @@ export const nomAgence = (agences: Agence[], id: string | null | undefined) => a
 
 // ---------------------------------------------------------------- tri et files
 /** Dépassés d'abord, puis temps restant croissant ; agences sans accusé > 24 h remontées ; dossiers répondus ensuite. */
-export function urgency(p: Projet, now: number): number {
+export function urgency(p: ProjetListe, now: number): number {
   if (p.statut === "clos") return 9e9;
-  const t = travelerClock(p, now);
   // Première réponse faite, à l'heure ou en retard : plus d'urgence côté voyageur.
-  let u = p.premiereReponse ? 5000 : t.rem ?? -1;
+  let u = p.premiereReponse ? 5000 : 48 - hrs(p.recu, now);
   const ag = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus).map((c) => 48 - hrs(c.envoye, now));
   if (ag.length) u = Math.min(u, Math.min(...ag) + 0.5);
   if (p.consultations.some((c) => !c.accuse && c.envoye && !c.proposition && !c.refus && hrs(c.envoye, now) > 24)) u = Math.min(u, 6);
   return u;
 }
 
-export type Filtre = { id: string; l: string; f: (p: Projet, now: number) => boolean };
+export type Filtre = { id: string; l: string; f: (p: ProjetListe, now: number) => boolean };
 export const FILTERS: Filtre[] = [
   { id: "tous", l: "Tous", f: (p) => p.statut !== "clos" },
-  { id: "today", l: "À traiter aujourd'hui", f: (p, now) => p.statut !== "clos" && ((!p.premiereReponse && (travelerClock(p, now).rem ?? -1) < 24) || p.consultations.some((c) => c.envoye && !c.proposition && !c.refus && 48 - hrs(c.envoye, now) < 24)) },
+  { id: "today", l: "À traiter aujourd'hui", f: (p, now) => p.statut !== "clos" && ((!p.premiereReponse && 48 - hrs(p.recu, now) < 24) || p.consultations.some((c) => c.envoye && !c.proposition && !c.refus && 48 - hrs(c.envoye, now) < 24)) },
   { id: "compl", l: "À compléter", f: (p) => p.statut === "a_completer" },
   { id: "agences", l: "Agences en retard", f: (p, now) => p.statut !== "clos" && p.consultations.some((c) => c.envoye && !c.proposition && !c.refus && ((!c.accuse && hrs(c.envoye, now) > 24) || hrs(c.envoye, now) > 48)) },
   { id: "sans", l: "Sans réponse voyageur", f: (p) => p.statut === "proposee" && p.relancesVoyageur.length > 0 },
@@ -113,7 +112,7 @@ export type Action =
   | "remind" | "proposal" | "remind-traveler" | "close" | null;
 export type NextAction = { t: string; s: string; act: Action; a?: boolean; agence?: string };
 
-export function nextAction(p: Projet, agences: Agence[], now: number): NextAction {
+export function nextAction(p: ProjetListe & Partial<Pick<Projet, "motif">>, agences: Agence[], now: number): NextAction {
   const pend = p.consultations.filter((c) => c.envoye && !c.proposition && !c.refus);
   const noAck = pend.find((c) => !c.accuse && hrs(c.envoye, now) > 24);
   const n = (id: string) => nomAgence(agences, id);
@@ -158,10 +157,10 @@ export function nextAction(p: Projet, agences: Agence[], now: number): NextActio
   }
 }
 
-export const defaultTab = (p: Projet) =>
+export const defaultTab = (p: Pick<Projet, "statut">) =>
   ["proposition", "proposee", "clos"].includes(p.statut) ? "props" : ["brief_pret", "envoye"].includes(p.statut) ? "agences" : "trame";
 
-export const statutLabel = (p: Projet) => (p.statut === "clos" ? (p.issue === "gagne" ? "Gagné" : "Perdu") : STATUT_LABEL[p.statut]);
+export const statutLabel = (p: Pick<Projet, "statut" | "issue">) => (p.statut === "clos" ? (p.issue === "gagne" ? "Gagné" : "Perdu") : STATUT_LABEL[p.statut]);
 
 // ---------------------------------------------------------------- textes
 export const prenom = (p: Projet) => p.nom.split(/[ &]/)[0] ?? p.nom;

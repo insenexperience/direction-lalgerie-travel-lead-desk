@@ -32,20 +32,30 @@ const stamp = '2026-10-31T10:00:00.000Z';
 const manual = (stage, dbStatus) => ({ lead_id: id, kind: 'manual_stage_advanced', created_at: stamp,
   payload: { k: 'sys', stage, db_status: dbStatus, channel: 'whatsapp', s: 'Avancement manuel · WhatsApp', b: 'Traité lors de notre échange WhatsApp.' } });
 
-function database({ status = 'agency_assignment', activities = [], lead = {}, role = 'lead_referent', user = { id: userId }, rpcError = null } = {}) {
+function database({ status = 'agency_assignment', activities = [], quotes = [], proposals = [], lead = {}, role = 'lead_referent', user = { id: userId }, rpcError = null } = {}) {
   const row = { id, status, updated_at: stamp, referent_id: userId, deleted_at: null, traveler_name: 'Voyageuse test', created_at: stamp, ...lead };
   const calls = [];
-  const tables = { leads: [row], activities, agencies: [], quotes: [], lead_circuit_proposals: [], profiles: [{ id: userId, role }] };
+  const tables = { leads: [row], activities, agencies: [], quotes, lead_circuit_proposals: proposals, profiles: [{ id: userId, role }] };
   const db = { auth: { getUser: async () => ({ data: { user } }) },
     from(table) {
       let rows = tables[table];
+      let columns;
       assert(rows, table);
       const q = {
-        select() { return q; }, eq(key, value) { rows = rows.filter(r => r[key] === value); return q; },
+        select(value) { columns = value; return q; }, eq(key, value) { rows = rows.filter(r => r[key] === value); return q; },
         is(key, value) { rows = rows.filter(r => (r[key] ?? null) === value); return q; },
         in(key, values) { rows = rows.filter(r => values.includes(r[key])); return q; },
         neq() { return q; }, not() { return q; }, order() { return q; }, or() { return q; },
-        range: async () => ({ data: rows, error: null }), maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+        range: async () => ({
+          data: columns?.includes('->') ? rows.map(row => Object.fromEntries(columns.split(',').map(column => {
+            const [alias, path] = column.trim().split(':');
+            if (!path) return [alias, row[alias]];
+            const [key, field] = path.split(/->>?/);
+            const value = row[key]?.[field] ?? null;
+            return [alias, value != null && path.includes('->>') ? String(value) : value];
+          }))) : rows,
+          error: null,
+        }), maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       }; return q;
     },
     rpc: async (name, args) => { calls.push({ name, args }); return { error: rpcError }; },
@@ -92,6 +102,28 @@ test('un ancien jalon ne se réactive pas quand un dossier réinitialisé revien
   const next = database({ activities: [old, first, reset, { ...manual('envoye', 'agency_assignment'), created_at: '2026-10-31T12:00:00.000Z' }] });
   const [advanced] = await load('src/lib/bo3/load.ts', next.mocks).chargerProjets({ supabase: next.db }, { id });
   assert.equal(advanced.statut, 'envoye');
+});
+
+test('la liste conserve les jalons et délais utiles sans charger les textes du dossier', async () => {
+  const actualContact = '2026-10-31T09:00:00.000Z';
+  const first = { lead_id: id, kind: 'email_sent_externally', created_at: stamp, payload: { occurred_at: actualContact, k: 'out', email_kind: 'qualification', s: 'Précisions', b: 'Corps privé de la réponse' } };
+  const audit = { lead_id: id, kind: 'assistant_edit_applied', created_at: stamp, payload: { k: 'sys', s: 'Modification Claude', b: 'Résumé interne' } };
+  const app = database({
+    activities: [first, manual('envoye', 'agency_assignment'), audit],
+    quotes: [{ id: 'devis', lead_id: id, kind: 'da_traveler', created_at: stamp, sent_at: stamp, items: { v: 3, agence_id: 'agence', lignes: ['Détail confidentiel'] } }],
+    proposals: [{ id: 'consultation', lead_id: id, agency_id: 'agence', brief_sent_at: stamp, agency_proposal_payload: { acknowledged_at: stamp, ecarts: 'Détail interne' } }],
+  });
+  const { chargerProjetsListe, chargerProjets } = load('src/lib/bo3/load.ts', app.mocks);
+  const [liste] = await chargerProjetsListe({ supabase: app.db });
+  const [fiche] = await chargerProjets({ supabase: app.db }, { id });
+  assert.equal(liste.statut, 'envoye');
+  assert.equal(liste.statut, fiche.statut);
+  assert.equal(liste.premiereReponse, actualContact);
+  assert.equal(liste.consultations[0].accuse, stamp);
+  assert.deepEqual(liste.devis, { source: 'agence', envoye: stamp });
+  assert(!Object.hasOwn(liste, 'messages'));
+  assert(!JSON.stringify(liste).includes('confidentiel'));
+  assert(fiche.messages.some(message => message.s === 'Modification Claude'));
 });
 
 const input = (extra = {}) => ({ stage: 'envoye', channel: 'whatsapp', note: '  Brief traité par WhatsApp.  ', expectedUpdatedAt: stamp, firstResponse: true, ...extra });

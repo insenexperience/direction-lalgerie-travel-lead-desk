@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeLeadQualification, type LeadQualificationInput } from "./lead-qualification-completeness";
+import { buildQualificationBudgetPatch, parseQualificationBudget } from "./qualification-budget";
 
 const complete: LeadQualificationInput = {
   travelers_adults: 2,
@@ -215,6 +216,40 @@ test("canonical facts outrank BO3 trame and explicitly unknown currency or unit 
     const unitUnknown = analyzeLeadQualification({ budget_min: 2000, budget_unit: "per_person", currency: "EUR", budget: "2 000 € par personne", intake_payload: { qualification_facts: { budget_min: 2000, currency: "EUR", budget_unit: blank } } });
     assert.ok(unitUnknown.missingRequired.includes("budget"));
   }
+});
+
+test("a manually confirmed maximum supersedes older budget text and does not invent EUR or a minimum", () => {
+  const input = parseQualificationBudget({
+    budget_min: "", budget_max: "300 000,50", currency: "DZD",
+    budget_unit: "total", budget_includes_flights: "no",
+  }, true);
+  assert.ok(input.ok);
+  const patch = buildQualificationBudgetPatch({
+    source_message: "Demande originale",
+    qualification_facts: { budget_amount: 1000, room_distribution: "2 doubles" },
+  }, input.value, { confirmedBy: "operator", confirmedAt: "2026-11-10T12:00:00Z" });
+  assert.equal(patch.budget_min, null);
+  assert.equal(patch.budget_max, null);
+  assert.equal(patch.intake_payload.qualification_facts.budget_max, 300000.50);
+  assert.equal(patch.intake_payload.qualification_facts.budget_confirmed_by, "operator");
+  assert.equal((patch.intake_payload.qualification_facts as Record<string, unknown>).room_distribution, "2 doubles");
+  assert.equal((patch.intake_payload as Record<string, unknown>).source_message, "Demande originale");
+  const analysis = analyzeLeadQualification({
+    ...patch, ai_qualification_payload: { trame_v3: operatorTrame },
+    traveler_responses: { qualification_facts: { budget_amount: 1500, currency: "EUR", budget_unit: "per_person" } },
+  });
+  const budget = analysis.checklist.find(item => item.id === "budget");
+  assert.equal(budget?.status, "complete");
+  assert.match(budget?.value ?? "", /Jusqu’à 300000.5 DZD total, hors vols/);
+  assert.ok(!analysis.questions.some(question => ["budget", "budget_scope"].includes(question.id)));
+});
+
+test("manual budget entry rejects an inverted range, invalid precision, or a missing basis", () => {
+  const input = { budget_min: "1500", budget_max: "2000", currency: "EUR", budget_unit: "per_person", budget_includes_flights: "" };
+  assert.equal(parseQualificationBudget(input, true).ok, true);
+  assert.equal(parseQualificationBudget({ ...input, budget_max: "1200" }, true).ok, false);
+  assert.equal(parseQualificationBudget({ ...input, budget_min: "1 000,123" }, true).ok, false);
+  assert.equal(parseQualificationBudget({ ...input, budget_unit: "" }, true).ok, false);
 });
 
 test("cleared canonical composition cannot be restored from BO3, legacy counts, solo text or public answers", () => {

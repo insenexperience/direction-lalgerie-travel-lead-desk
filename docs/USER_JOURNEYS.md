@@ -318,6 +318,12 @@ L’intake projette ces réponses explicites dans les colonnes typées et `quali
 
 Les routes de suivi et de traitement des notifications sont restaurées avec leur authentification serveur, indépendamment de la session opérateur. La migration outbox déjà présente en base est réintégrée aux sources sans réinstallation. La reprise des notifications historiques doit être décidée avant réactivation de leur traitement en production.
 
+## Budget et écritures de DA Sales
+
+Dans la fiche d’un dossier ouvert ou dans **Prise de contact et qualification**, le référent ou un administrateur peut enregistrer un montant, une fourchette ou un plafond, avec la devise, la base et l’inclusion des vols si elle est connue. La saisie prend en charge un dossier libre et vérifie la version du dossier. Le budget alimente la qualification et les modèles d’e-mail. Le texte en cours de rédaction est conservé.
+
+Dans **DA Sales**, Claude propose un budget, une note interne, une priorité ou des informations de qualification. Un opérateur valide l’aperçu dans un dossier ouvert déjà pris en charge. La base vérifie les droits et la version, puis écrit la modification et son entrée de journal dans la même transaction.
+
 ## Règle d’évolution (obligatoire)
 
 Toute PR qui modifie **pipeline**, **workflow voyageur**, **gates brief**, **référent**, **intake** ou **RLS** sur les leads doit **mettre à jour ce fichier** (diagrammes, tableau C1–C8, ou changelog) dans la **même PR**, sauf urgence avec PR de suivi sous 48 h et todo explicite.

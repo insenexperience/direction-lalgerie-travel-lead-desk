@@ -4,12 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { askClaude, claudeConfigured, extractClaudeQualification, testClaudeConnection } from "@/lib/assistant/claude";
 import { assistantLeadContext } from "@/lib/assistant/lead-context";
-import { isAssistantDraftKind, parseAssistantEdit, type AssistantDraft, type AssistantDraftKind, type AssistantEditPreview, type AssistantStatus, type AssistantTurn } from "@/lib/assistant/types";
+import { isAssistantDraftKind, parseAssistantEdit, type AssistantDraft, type AssistantDraftKind, type AssistantEdit, type AssistantEditPreview, type AssistantStatus, type AssistantTurn } from "@/lib/assistant/types";
 import { anonymizeAgencyText, type LeadEmailTemplateInput } from "@/lib/email/lead-email-template";
 import { isUuid } from "@/lib/is-uuid";
 import { getLeadEmailWorkspace, saveLeadEmailDraft } from "@/app/(dashboard)/leads/email-actions";
 import { parseQualificationImport, type QualificationPreview } from "@/lib/assistant/qualification";
-import { buildQualificationPatch, qualificationChanges } from "@/lib/assistant/qualification-patch";
+import { buildAssistantBudgetPatch, buildQualificationPatch, qualificationChanges } from "@/lib/assistant/qualification-patch";
 import { isDeskScope, isDeskTab, projectDeskLink, type DeskProjectTab, type DeskScope } from "@/lib/assistant/scope";
 import { isTokenExpired, TOKEN_TTL_DAYS } from "@/lib/traveler-requalification";
 
@@ -88,6 +88,16 @@ async function saveConfirmedPatch(auth: Pick<ActiveSession, "db">, leadId: strin
   return { ok: true as const };
 }
 
+async function saveConfirmedAssistantEdit(auth: ActiveSession, leadId: string, updatedAt: string, action: AssistantEdit["kind"] | "qualification", patch: Record<string, unknown>) {
+  const result = await auth.db.rpc("apply_desk_assistant_edit", {
+    p_lead_id: leadId, p_expected_updated_at: updatedAt, p_action: action, p_changes: patch,
+  });
+  if (result.error) return { ok: false as const, error: "Le dossier n’a pas pu être enregistré." };
+  if (!result.data) return stale;
+  for (const path of [`/leads/${leadId}`, "/leads", "/inbox", "/dashboard"]) revalidatePath(path);
+  return { ok: true as const };
+}
+
 function validTurns(turns: unknown): turns is AssistantTurn[] {
   return Array.isArray(turns) && turns.length > 0 && turns.length <= 9 && turns.length % 2 === 1 &&
     turns.every((turn, i) => turn && turn.role === (i % 2 === 0 ? "user" : "assistant") &&
@@ -114,13 +124,15 @@ export async function chatWithAssistant(leadId: string, turns: AssistantTurn[], 
       }, leadId, lead);
       if (project) parcours = projectPrompt(project);
     }
-    const { edit, ...answer } = await askClaude(safeTurns, { ...assistantLeadContext(lead), onglet: tab, parcours });
+    const context = assistantLeadContext(lead);
+    const { edit, ...answer } = await askClaude(safeTurns, { ...context, onglet: tab, parcours });
     if (edit && (!canEditLead(auth, data) || typeof data.updated_at !== "string")) {
       return { ok: true as const, answer, editPreview: null, editError: editDenied.error };
     }
+    const previousBudget = context.confirmed.find(({ id }) => id === "budget")?.value || data.budget || null;
     const editPreview: AssistantEditPreview | null = edit ? {
       leadId, updatedAt: data.updated_at, edit,
-      previous: edit.kind === "priority" ? data.priority ?? "normal" : null,
+      previous: edit.kind === "priority" ? data.priority ?? "normal" : edit.kind === "budget" ? previousBudget : null,
     } : null;
     return { ok: true as const, answer, editPreview };
   } catch {
@@ -232,15 +244,16 @@ export async function confirmAssistantEdit(preview: AssistantEditPreview) {
   if (!edit) return invalid;
   const auth = await activeSession();
   if (!auth.ok) return auth;
-  const { data, error } = await auth.db.from("leads").select("internal_notes,priority,updated_at,referent_id,closed_at,status")
+  const { data, error } = await auth.db.from("leads").select("internal_notes,priority,intake_payload,ai_qualification_payload,trip_summary,updated_at,referent_id,closed_at,status")
     .eq("id", preview.leadId).is("deleted_at", null).maybeSingle();
   if (error || !data || !canEditLead(auth, data)) return editDenied;
   if (data.updated_at !== preview.updatedAt) return stale;
   if (edit.kind === "priority" && (data.priority ?? "normal") !== preview.previous) return stale;
-  const patch = edit.kind === "note"
-    ? { internal_notes: [data.internal_notes?.trimEnd(), edit.value].filter(Boolean).join("\n\n") }
-    : { priority: edit.value };
-  return saveConfirmedPatch(auth, preview.leadId, preview.updatedAt, patch);
+  if (edit.kind === "note") return saveConfirmedAssistantEdit(auth, preview.leadId, preview.updatedAt, "note", { internal_notes: edit.value });
+  if (edit.kind === "priority") return saveConfirmedAssistantEdit(auth, preview.leadId, preview.updatedAt, "priority", { priority: edit.value });
+  return saveConfirmedAssistantEdit(auth, preview.leadId, preview.updatedAt, "budget", buildAssistantBudgetPatch(data, edit.value, {
+    confirmedBy: auth.userId, confirmedAt: new Date().toISOString(),
+  }));
 }
 
 export async function previewAssistantQualification(leadId: string, notes: string) {
@@ -271,7 +284,9 @@ export async function confirmAssistantQualification(preview: QualificationPrevie
     .eq("id", preview.leadId).is("deleted_at", null).maybeSingle();
   if (error || !data || !canEditLead(auth, data)) return editDenied;
   if (data.updated_at !== preview.updatedAt) return stale;
-  return saveConfirmedPatch(auth, preview.leadId, preview.updatedAt, buildQualificationPatch(data, qualification));
+  return saveConfirmedAssistantEdit(auth, preview.leadId, preview.updatedAt, "qualification", buildQualificationPatch(data, qualification, {
+    confirmedBy: auth.userId, confirmedAt: new Date().toISOString(),
+  }));
 }
 
 async function draftPreview(leadId: string, kind: AssistantDraftKind, agencyId: string | null) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Copy, Download, Mail, RefreshCw, Save, Send } from 'lucide-react';
 import { getLeadEmailWorkspace, saveLeadEmailDraft, sendLeadEmailDraft, markLeadEmailSentExternally, type LeadEmailMessage } from '@/app/(dashboard)/leads/email-actions';
@@ -8,27 +8,39 @@ import { claimLead } from '@/app/(dashboard)/leads/actions';
 import { anonymizeAgencyText, buildLeadEmailTemplate, isAgencyEmailKind, type LeadEmailKind, type LeadEmailLanguage } from '@/lib/email/lead-email-template';
 import type { SupabaseLeadRow } from '@/lib/supabase-lead-row';
 import { ASSISTANT_DRAFT_SAVED } from '@/lib/assistant/types';
+import { useDeskToast } from '@/components/ui/desk-toast';
 
 type Props = { lead: SupabaseLeadRow; kind: LeadEmailKind; agencyId?: string | null; proposalId?: string | null; onDirtyChange?: (dirty: boolean) => void };
 type Workspace = Extract<Awaited<ReturnType<typeof getLeadEmailWorkspace>>, { ok: true }>;
 const titles: Record<LeadEmailKind, string> = { welcome: 'Accusé de réception client', qualification: 'Prise de contact et qualification', agency_feasibility: 'Étude de faisabilité non chiffrée', agency_brief: 'Email de brief agence pour chiffrage' };
 const statusLabels: Record<LeadEmailMessage['status'], string> = { draft: 'Brouillon', sending: 'Transmission en cours — vérifier avant tout nouvel envoi', sent: 'Envoyé depuis Travel Lead', external: 'Envoi externe déclaré', failed: 'Échec de transmission' };
 
-export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyChange }: Props) {
+export function LeadEmailComposer(props: Props) {
+  return <Composer key={JSON.stringify([props.lead.id, props.kind, props.agencyId, props.proposalId])} {...props} />;
+}
+
+function Composer({ lead, kind, agencyId, proposalId, onDirtyChange }: Props) {
   const router = useRouter();
-  const initial = buildLeadEmailTemplate(lead, kind);
+  const toast = useDeskToast();
+  const [initial] = useState(() => buildLeadEmailTemplate(lead, kind));
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [subject, setSubject] = useState(initial.subject);
   const [bodyText, setBodyText] = useState(initial.bodyText);
   const [language, setLanguage] = useState<LeadEmailLanguage>(initial.language);
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirtyState] = useState(false);
+  const dirtyRef = useRef(false);
+  const mutation = useRef(0);
+  function setDirty(value: boolean) {
+    dirtyRef.current = value;
+    setDirtyState(value);
+  }
   const [loading, setLoading] = useState(true);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const template = buildLeadEmailTemplate(lead, kind, { language, bodyText });
+  const template = useMemo(() => buildLeadEmailTemplate(lead, kind, { language, bodyText }), [lead, kind, language, bodyText]);
   const canEdit = Boolean(workspace?.canEdit && workspace.storageReady && workspace.recipient && !workspace.recipientError);
   const agencyBlocked = kind === 'agency_brief' && !template.analysis.readyForAgencyBrief;
   const feasibilityBlocked = kind === 'agency_feasibility' && workspace?.feasibilityReady === false;
@@ -50,15 +62,18 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
 
   useEffect(() => {
     let cancelled = false;
+    const startedAt = mutation.current;
     getLeadEmailWorkspace(lead.id, kind, agencyId, proposalId).then(result => {
-      if (cancelled) return;
+      // A budget or another dossier change can refresh the page while this draft is being edited.
+      // Keep its text and original draft revision so a competing edit is still detected on save.
+      if (cancelled || dirtyRef.current || mutation.current !== startedAt) return;
       setLoading(false);
       if (!result.ok) { setError(result.error); return; }
       setWorkspace(result); setSubject(result.draft?.subject ?? result.template.subject);
       setBodyText(result.draft?.body_text ?? result.template.bodyText);
       setLanguage(result.draft?.language ?? result.template.language);
-      setDraftId(result.draft?.id ?? null); setDirty(false);
-    }).catch(() => { if (!cancelled) { setLoading(false); setError('Le brouillon n’a pas pu être chargé. Rechargez le dossier.'); } });
+      setDraftId(result.draft?.id ?? null);
+    }).catch(() => { if (!cancelled && !dirtyRef.current && mutation.current === startedAt) { setLoading(false); setError('Le brouillon n’a pas pu être chargé. Rechargez le dossier.'); } });
     return () => { cancelled = true; };
   }, [lead.id, lead.updated_at, kind, agencyId, proposalId, workspaceRevision]);
 
@@ -71,7 +86,7 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
 
   async function save() {
     const result = await saveLeadEmailDraft({ leadId: lead.id, kind, agencyId, proposalId: workspace?.proposalId ?? proposalId, draftId, expectedUpdatedAt: workspace?.draft?.updated_at, subject, bodyText, language });
-    if (!result.ok) { setError(result.error); return null; }
+    if (!result.ok) { setError(result.error); toast.error(result.error); return null; }
     setDraftId(result.draft.id); setDirty(false);
     setWorkspace(prev => prev ? { ...prev, draft: result.draft, history: [result.draft, ...prev.history.filter(row => row.id !== result.draft.id)] } : prev);
     return result.draft.id;
@@ -80,17 +95,29 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
   function act(action: 'save' | 'send' | 'external') {
     if (action === 'external' && !window.confirm('Confirmer que vous avez déjà envoyé ce message par votre propre voie ? Cette action enregistre l’envoi dans le dossier.')) return;
     setError(null); setNotice(null);
+    mutation.current += 1;
     startTransition(async () => {
-      const id = await save(); if (!id) return;
-      if (action === 'save') { setNotice('Brouillon enregistré dans le dossier.'); return; }
-      const result = action === 'send' ? await sendLeadEmailDraft(id) : await markLeadEmailSentExternally(id);
-      const refreshed = await getLeadEmailWorkspace(lead.id, kind, agencyId, proposalId).catch(() => null);
-      if (refreshed?.ok) {
-        setWorkspace(refreshed);
-        if (!refreshed.draft) setDraftId(null);
+      try {
+        const id = await save(); if (!id) return;
+        if (action === 'save') {
+          const message = 'Brouillon enregistré dans le dossier.';
+          setNotice(message); toast.success(message); return;
+        }
+        const result = action === 'send' ? await sendLeadEmailDraft(id) : await markLeadEmailSentExternally(id);
+        const refreshed = await getLeadEmailWorkspace(lead.id, kind, agencyId, proposalId).catch(() => null);
+        if (refreshed?.ok) {
+          setWorkspace(refreshed);
+          if (!refreshed.draft) setDraftId(null);
+        }
+        if (!result.ok) { setError(result.error); toast.error(result.error); return; }
+        const message = action === 'send' ? 'Email envoyé et enregistré dans le dossier.' : 'Envoi externe enregistré dans le dossier.';
+        setDraftId(null); setNotice(message); toast.success(message); router.refresh();
+      } catch {
+        const message = 'Le Desk n’a pas pu confirmer le résultat. Vérifiez l’historique avant de réessayer.';
+        setError(message); toast.error(message);
+      } finally {
+        mutation.current += 1;
       }
-      if (!result.ok) { setError(result.error); return; }
-      setDraftId(null); setNotice(action === 'send' ? 'Email envoyé et enregistré dans le dossier.' : 'Envoi externe enregistré dans le dossier.'); router.refresh();
     });
   }
 
@@ -119,7 +146,7 @@ export function LeadEmailComposer({ lead, kind, agencyId, proposalId, onDirtyCha
     <section className="overflow-hidden rounded-lg border border-border bg-panel" aria-label={titles[kind]}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
         <div><h3 className="flex items-center gap-2 font-display text-xl font-semibold text-steel"><Mail className="size-4" aria-hidden />{titles[kind]}</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{kind === 'agency_feasibility' ? 'Demandez un avis terrain et un premier parcours à partir du projet, même si des précisions restent à obtenir. Vous pouvez modifier l’objet et le message.' : 'Le modèle reprend les informations du dossier et demande les précisions manquantes. Vous pouvez modifier l’objet et le message.'}</p></div>
-        <span className="rounded-full bg-panel-muted px-3 py-1 text-xs text-muted-foreground">{loading ? 'Chargement…' : dirty ? 'Modifications à enregistrer' : draftId ? 'Brouillon enregistré' : 'Modèle à relire'}</span>
+        <span className="rounded-full bg-panel-muted px-3 py-1 text-xs text-muted-foreground" role="status">{loading ? 'Chargement…' : pending ? 'Traitement en cours…' : dirty ? 'Modifications à enregistrer' : draftId ? 'Brouillon enregistré' : 'Modèle à relire'}</span>
       </header>
       <div className="space-y-5 p-4 sm:p-5">
         {!isAgencyEmailKind(kind) && template.questions.length > 0 && <details className="rounded-md border border-amber-200 bg-amber-50/60 px-4 py-3"><summary className="cursor-pointer text-sm font-semibold text-amber-950">{template.questions.length} information{template.questions.length > 1 ? 's' : ''} à demander au client</summary><ul className="mt-3 space-y-2 text-sm leading-relaxed text-amber-950">{template.questions.map(question => <li key={question.id}>{question.label}</li>)}</ul></details>}

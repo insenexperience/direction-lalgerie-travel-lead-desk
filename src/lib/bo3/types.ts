@@ -146,4 +146,18 @@ export type Projet = {
   qualification: number[];
 };
 
+/** Données des listes, sans les contenus détaillés et l'historique de la fiche. */
+export type ProjetListe = Pick<Projet, "id" | "ref" | "nom" | "source" | "statut" | "recu" | "premiereReponse" | "agenceChoisie" | "texte" | "manque" | "relancesVoyageur" | "issue" | "closedAt"> & {
+  trame: {
+    titre: Trame["titre"];
+    cadre: Pick<Trame["cadre"], "mois" | "duree">;
+    groupe: Pick<Trame["groupe"], "nombre">;
+    jours: Pick<Trame["jours"][number], "lieux">[];
+  } | null;
+  consultations: (Pick<Consultation, "id" | "agence" | "envoye" | "accuse" | "refus" | "retenue"> & {
+    proposition: Pick<Proposition, "recu"> | null;
+  })[];
+  devis: Pick<DevisDA, "source" | "envoye"> | null;
+};
+
 export type BriefSection = { id: string; title: string; text: string };

@@ -8,7 +8,8 @@ import { contexteBo3, type Bo3Contexte } from "@/lib/bo3/acces";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { chargerAgences, chargerProjets, resoudreAgenceChoisie } from "@/lib/bo3/load";
 import { briefToMarkdown, buildBrief, fuitesBrief, manqueDe, portionFor } from "@/lib/bo3/projet";
-import { colonnesDepuisTrame } from "@/lib/bo3/trame";
+import { colonnesDepuisTrame, trameInterne } from "@/lib/bo3/trame";
+import { formatQualificationBudget, readConfirmedQualificationBudget } from "@/lib/qualification-budget";
 import type { BriefSection, Mention, Message, Projet, Trame } from "@/lib/bo3/types";
 
 export type Resultat = { ok: true; info?: string; url?: string } | { ok: false; erreur: string };
@@ -101,11 +102,19 @@ export async function demanderManque(id: string, texte: string) {
 /** Trame complétée (réponses du voyageur) ou construite (lead WhatsApp / saisi). */
 export async function enregistrerTrame(id: string, trame: Trame, origine: "reponses" | "qualification") {
   return executer(id, async (ctx) => {
-    const { data } = verifier(await ctx.supabase.from("leads").select("ai_qualification_payload").eq("id", id).maybeSingle());
-    const payload = { ...((data?.ai_qualification_payload as Record<string, unknown>) ?? {}), trame_v3: trame };
-    const { error } = await ctx.supabase.from("leads").update({ ai_qualification_payload: payload, ...colonnesDepuisTrame(trame) }).eq("id", id);
+    const { data } = verifier(await ctx.supabase.from("leads").select("ai_qualification_payload,intake_payload,updated_at").eq("id", id).maybeSingle());
+    if (!data) return refus("Projet introuvable, ou hors de vos dossiers.");
+    const previous = (data.ai_qualification_payload as Record<string, unknown>) ?? {};
+    const confirmedBudget = readConfirmedQualificationBudget(data.intake_payload);
+    const sourceTrame = confirmedBudget ? { ...trame, budget: trameInterne(previous.trame_v3)?.budget ?? null } : trame;
+    const columns = colonnesDepuisTrame(sourceTrame);
+    if (confirmedBudget) delete columns.budget;
+    const { data: saved, error } = await ctx.supabase.from("leads")
+      .update({ ai_qualification_payload: { ...previous, trame_v3: sourceTrame }, ...columns })
+      .eq("id", id).eq("updated_at", data.updated_at).select("id").maybeSingle();
     if (error) throw new Error(error.message);
-    const reste = manqueDe(trame);
+    if (!saved) return refus("Le dossier a été modifié entre-temps. Rechargez la fiche avant de réessayer.");
+    const reste = manqueDe(confirmedBudget ? { ...trame, budget: formatQualificationBudget(confirmedBudget) || null } : trame);
     if (origine === "reponses") await journal(ctx, id, "traveler_answers", { k: "in", s: "Réponses du voyageur", b: reste.length ? `Il manque encore : ${reste.join(", ")}.` : "Projet complet." });
     return { ok: true, info: reste.length ? `Trame enregistrée. Il manque encore : ${reste.join(", ")}.` : "Projet complet. Le brief peut partir." };
   });

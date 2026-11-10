@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import * as A from "@/app/(dashboard)/leads/projet-actions";
@@ -10,13 +11,14 @@ import {
 } from "@/lib/bo3/projet";
 import { MANQUES, SOURCES, STATUT_LABEL, STATUTS, type Agence, type BriefSection, type Consultation, type Mention, type Projet, type Trame } from "@/lib/bo3/types";
 import { dureeTrame, trameVide } from "@/lib/bo3/trame";
-import { TrameForm } from "./trame-form";
 import { TrameMap } from "./trame-map";
 import { etapesManuellesSuivantes } from "@/lib/bo3/manual-stage";
 import { ManualStageDialog } from "./manual-stage-dialog";
 import { ExternalExchangeDialog } from "./external-exchange-dialog";
 import { LeadDemandeProjetProfile, LeadDemandeProjetSummary } from "@/components/leads/lead-demande-projet-summary";
-import { LeadEmailComposer } from "@/components/leads/lead-email-composer";
+import { useDeskToast } from "@/components/ui/desk-toast";
+import { LeadBudgetEditor } from "@/components/leads/qualification/lead-budget-editor";
+import { formatQualificationBudget, readConfirmedQualificationBudget } from "@/lib/qualification-budget";
 import { DeskGmailMessages } from "@/components/assistant/desk-gmail-messages";
 import { ASSISTANT_OPEN_COMPOSER, type AssistantDraft } from "@/lib/assistant/types";
 import { parseQualificationImport, qualificationLabels } from "@/lib/assistant/qualification";
@@ -25,9 +27,16 @@ import { readDemandeProjet } from "@/lib/demande-projet-intake";
 import { prefillGmailProposal, type DeskInboundMail } from "@/lib/email/gmail-intake";
 import type { SupabaseLeadRow } from "@/lib/supabase-lead-row";
 import "@/styles/lead-workflow.css";
-import { Card, Completude, Deadline, Icon, Menu, Modal, useNow, useToast } from "./ui";
+import { Card, Completude, Deadline, Icon, Menu, Modal, useNow } from "./ui";
 
 type Res = A.Resultat;
+const LeadEmailComposer = dynamic(() => import("@/components/leads/lead-email-composer").then((m) => m.LeadEmailComposer), {
+  loading: () => <p className="desk-loading__inline" role="status">Chargement de l’éditeur d’e-mail…</p>,
+});
+const TrameForm = dynamic(() => import("./trame-form").then((m) => m.TrameForm), {
+  loading: () => <p className="desk-loading__inline" role="status">Ouverture de l’itinéraire…</p>,
+});
+const actionError = "Le Desk n’a pas pu confirmer le résultat. Vérifiez le dossier avant de réessayer.";
 const QUALIF: [string, string][] = [["Ambiance & type de voyage", "envies, rythme"], ["Groupe", "taille, profil"], ["Temporalité", "mois, durée, souplesse"], ["Hébergement & transport", "type, confort"], ["Incontournables", "lieux, expériences"], ["Budget", "fourchette par personne"]];
 const MOTIFS = ["Sans réponse", "Budget", "Dates", "Parti ailleurs", "Autre"];
 
@@ -39,7 +48,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
-  const toast = useToast();
+  const toast = useDeskToast();
   const [pending, start] = useTransition();
   const [modal, setModal] = useState<string | null>(null);
   const urlTab = params.get("tab");
@@ -93,21 +102,32 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
   const stepIdx = STATUTS.indexOf(p.statut);
   const demande = p.source === "demande-projet" ? readDemandeProjet(lead.intake_payload) : null;
   const canalAffiche = demande ? demande.contact.channel : canalNom;
+  const confirmedBudget = useMemo(() => readConfirmedQualificationBudget(lead.intake_payload), [lead.intake_payload]);
+  const canEnterBudget = p.statut !== "clos" && !lead.closed_at && !lead.deleted_at;
+  const budgetLabel = confirmedBudget ? formatQualificationBudget(confirmedBudget) : "";
 
   /** Exécute une action serveur, affiche son résultat, recharge la fiche. */
   const act = useCallback((fn: () => Promise<Res>, apres?: (r: Res) => void) => {
     start(async () => {
-      const r = await fn();
-      toast(r.ok ? r.info ?? "Enregistré." : r.erreur);
-      if (r.ok) { apres?.(r); router.refresh(); }
+      try {
+        const r = await fn();
+        if (!r.ok) { toast.error(r.erreur); return; }
+        toast.success(r.info ?? "Enregistré.");
+        apres?.(r);
+        router.refresh();
+      } catch { toast.error(actionError); }
     });
   }, [router, toast]);
 
   function prepareAgencyEmail(agencyId: string) {
     start(async () => {
-      const r = await A.preparerEmailAgence(p.id, agencyId, mode);
-      if (!r.ok) { toast(r.error); return; }
-      setForm({ agence: agencyId, propId: r.proposalId }); setModal("agency-email"); router.refresh();
+      try {
+        const r = await A.preparerEmailAgence(p.id, agencyId, mode);
+        if (!r.ok) { toast.error(r.error); return; }
+        setForm({ agence: agencyId, propId: r.proposalId });
+        setModal("agency-email");
+        router.refresh();
+      } catch { toast.error(actionError); }
     });
   }
 
@@ -138,7 +158,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
     switch (a) {
       case "first": setModal("first"); break;
       case "ask": setForm({ text: `Bonjour ${prenom(p)},\n\nVotre projet est bien arrivé. Pour le transmettre à la bonne agence, il me manque ${p.manque.length ? p.manque.join(", ") : "quelques précisions"}. Deux minutes suffisent : {lien}\n\nJe reste votre seul interlocuteur.\n\n${signature} — Direction l'Algérie` }); setModal("ask"); break;
-      case "complete": setModal("complete"); break;
+      case "complete": setModal(confirmedBudget && p.manque.length === 1 && p.manque[0] === "budget" ? "budget" : "complete"); break;
       case "qualif": setTab("trame"); break;
       case "brief": act(() => A.genererBrief(p.id), () => { setTab("agences"); setBriefOpen(true); }); break;
       case "scroll-brief": setTab("agences"); setBriefOpen(true); break;
@@ -152,7 +172,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
       case "lien": act(() => A.demanderManque(p.id, "Lien voyageur : {lien}"), (r) => { if (r.ok && r.url) copier(r.url); }); break;
       default: break;
     }
-  }, [p, signature, act, na.agence, pend, setTab]);
+  }, [p, signature, act, na.agence, pend, setTab, confirmedBudget]);
 
   // Action demandée depuis la file de travail (?action=…), une seule fois.
   const intentFaite = useRef(false);
@@ -176,15 +196,20 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
 
   return (
     <div className="page">
+      <div className="desk-action-progress" role="status">{pending && <span className="desk-loading__label"><span className="desk-loading__spinner" aria-hidden="true" /> Action en cours…</span>}</div>
       {/* En-tête */}
       <div className="hdr lead-desk-header">
         <div>
           <div className="meta"><span className="tag">{SOURCES[p.source]}</span><span className="mono">{p.ref}</span><span>reçu {fmtD(p.recu)}</span>{canalAffiche && <span>{canalAffiche}</span>}</div>
           <h1 className="t">{p.nom}</h1>
           <div className="sub">{p.trame ? `« ${p.trame.titre} »${p.trame.jours.length ? ` · ${p.trame.jours.length} jours` : p.trame.cadre.duree ? ` · ${p.trame.cadre.duree}` : ""}${p.trame.cadre.mois ? ` · ${p.trame.cadre.mois}` : ""}${p.trame.groupe.nombre ? ` · ${p.trame.groupe.nombre} pers.` : ""}` : p.texte || "Pas encore de trame"}</div>
+          {!p.trame && budgetLabel && <div className="mt">{budgetLabel}</div>}
         </div>
         <div className="row wrap" style={{ alignItems: "flex-end" }}>
           <div style={{ minWidth: 190 }}><div className="lbl" style={{ marginBottom: 4 }}>Première réponse</div><Deadline c={tc} /></div>
+          {canEnterBudget && <button type="button" className="btn s" onClick={() => setModal("budget")}>
+            <Icon n="pencil" s={12} /> {budgetLabel ? "Modifier le budget" : "Saisir le budget"}
+          </button>}
           <Menu items={[
             p.statut !== "clos" && { l: "Enregistrer un échange déjà effectué", ic: "check", f: () => setModal("exchange") },
             p.statut !== "clos" && { l: "Préparer un email au voyageur", ic: "mail", f: () => setModal(p.premiereReponse ? "ask" : "first") },
@@ -259,7 +284,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
                   <div><div className="lbl">Rythme</div><div className="v">{p.trame.cadre.rythme || "—"}</div></div>
                   <div><div className="lbl">Hébergement</div><div className="v">{p.trame.cadre.hebergement || "—"}</div></div>
                   <div><div className="lbl">Groupe</div><div className="v">{p.trame.groupe.type || p.trame.groupe.nombre ? <>{[p.trame.groupe.type, p.trame.groupe.nombre ? `${p.trame.groupe.nombre} pers.` : ""].filter(Boolean).join(" · ")}{p.trame.groupe.enfants ? ` · ${p.trame.groupe.enfants} enfants` : ""}</> : <span className="miss">manquant</span>}</div></div>
-                  <div><div className="lbl">Budget / pers. hors vol</div><div className="v">{p.trame.budget || <span className="miss">manquant</span>}</div></div>
+                  <div><div className="lbl">Budget du voyageur</div><div className="v">{p.trame.budget || <span className="miss">manquant</span>}</div></div>
                 </div>
                 <div className="row wrap" style={{ gap: 6 }}>
                   {p.trame.envies.grandes.map((e) => <span key={e} className="envie g">{e}</span>)}
@@ -380,7 +405,7 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
               <div className="row wrap" style={{ marginTop: 14, justifyContent: "flex-end" }}>
                 {/* Le texte copié est celui qui part vraiment : mêmes garde-fous que l'envoi (pas d'identité du voyageur). */}
                 {(sel ?? []).map((id) => (
-                  <button key={id} className="btn s" disabled={fuites.length > 0} title={fuites.length ? "Corrigez le brief d'abord" : undefined} onClick={() => copier(briefTexte(id)).then((ok) => toast(ok ? `Brief pour ${n(id)} copié. Collez-le dans votre e-mail ou WhatsApp.` : "Copie impossible : sélectionnez le texte dans l'aperçu."))}><Icon n="copy" s={12} /> Copier pour {n(id)}</button>
+                  <button key={id} className="btn s" disabled={fuites.length > 0} title={fuites.length ? "Corrigez le brief d'abord" : undefined} onClick={() => copier(briefTexte(id)).then((ok) => ok ? toast.success(`Brief pour ${n(id)} copié. Collez-le dans votre e-mail ou WhatsApp.`) : toast.error("Copie impossible : sélectionnez le texte dans l’aperçu."))}><Icon n="copy" s={12} /> Copier pour {n(id)}</button>
                 ))}
                 {(sel ?? []).map(id => <button key={`mail:${id}`} className="btn a" disabled={pending || fuites.length > 0} onClick={() => prepareAgencyEmail(id)}><Icon n="mail" s={12} /> Préparer l’email pour {n(id)}</button>)}
               </div>
@@ -423,7 +448,10 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
           {!props.length && !detectedOffers.length && <Card><div className="empty"><b>Aucune proposition pour l&apos;instant</b>{pend.length ? `Réponse attendue de ${pend.map((c) => n(c.agence)).join(" et ")}.` : "Envoyez d'abord le brief à une agence."}</div></Card>}
           {props.map((c) => {
             const pr = c.proposition!;
-            const max = Number(((p.trame?.budget ?? "").match(/(\d[\d\s]*)\s*€(?![^€]*\d[\d\s]*\s*€)/) ?? [])[1]?.replace(/\s/g, "") ?? 0);
+            const max = confirmedBudget
+              ? confirmedBudget.currency === "EUR" && confirmedBudget.unit === "per_person" && confirmedBudget.includesFlights === false
+                ? confirmedBudget.max ?? confirmedBudget.min ?? 0 : 0
+              : Number(((p.trame?.budget ?? "").match(/(\d[\d\s]*)\s*€(?![^€]*\d[\d\s]*\s*€)/) ?? [])[1]?.replace(/\s/g, "") ?? 0);
             const joursTrame = p.trame?.jours.length ?? 0;
             return (
               <div key={c.id} className={`propcard ${c.retenue ? "ret" : ""}`}>
@@ -459,19 +487,30 @@ export function FicheView({ p, lead, agences, inboundMail = [], now: depart, sig
       </>}
 
       {/* Fenêtres */}
+      {modal === "budget" && canEnterBudget && (
+        <Modal title="Budget du voyageur" onClose={() => setModal(null)}>
+          <div className="lead-mailing-module"><LeadBudgetEditor lead={lead} onSaved={() => setModal(null)} /></div>
+        </Modal>
+      )}
       {modal === "agency-choice" && <Modal title="Préparer un email de brief" onClose={() => setModal(null)}><p>Choisissez l’agence. Son délai commencera lorsque le message sera envoyé depuis le desk ou déclaré envoyé par vos soins.</p><div className="stack">{agences.map(a => <div className="agcard" key={a.id}><b>{a.n}</b><button className="btn a sm" disabled={pending} onClick={() => prepareAgencyEmail(a.id)}>Préparer l’email</button></div>)}</div></Modal>}
-      {modal === "exchange" && <ExternalExchangeDialog p={p} updatedAt={lead.updated_at} now={now} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
-      {(modal === "first" || modal === "ask" || modal === "agency-email") && <div className="lead-mailing-dialog"><Modal title={modal === "first" ? "Premier contact · email" : modal === "ask" ? "Poursuivre la qualification · email" : `Brief agence · ${n(form.agence)}`} onClose={() => setModal(null)}><div className="lead-mailing-module"><LeadEmailComposer key={`${modal}:${form.propId ?? "client"}`} lead={lead} kind={modal === "first" ? "welcome" : modal === "ask" ? "qualification" : "agency_brief"} agencyId={modal === "agency-email" ? form.agence : undefined} proposalId={modal === "agency-email" ? form.propId : undefined} /></div><div className="row wrap"><span className="mt">Pour un échange WhatsApp ou un appel déjà effectué :</span><button className="btn s sm" onClick={() => setModal("exchange")}>Enregistrer l’échange</button></div></Modal></div>}
+      {modal === "exchange" && <ExternalExchangeDialog p={p} updatedAt={lead.updated_at} now={now} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast.success(info); router.refresh(); }} />}
+      {(modal === "first" || modal === "ask" || modal === "agency-email") && <div className="lead-mailing-dialog"><Modal title={modal === "first" ? "Premier contact · email" : modal === "ask" ? "Poursuivre la qualification · email" : `Brief agence · ${n(form.agence)}`} onClose={() => setModal(null)}>
+          {modal === "ask" && canEnterBudget && <details className="lead-mailing-module mb-4 rounded-md border border-border bg-panel p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-steel">Renseigner le budget du voyageur</summary>
+            <div className="mt-4"><LeadBudgetEditor key={lead.updated_at} lead={lead} /></div>
+          </details>}
+          <div className="lead-mailing-module"><LeadEmailComposer key={`${modal}:${form.propId ?? "client"}`} lead={lead} kind={modal === "first" ? "welcome" : modal === "ask" ? "qualification" : "agency_brief"} agencyId={modal === "agency-email" ? form.agence : undefined} proposalId={modal === "agency-email" ? form.propId : undefined} /></div><div className="row wrap"><span className="mt">Pour un échange WhatsApp ou un appel déjà effectué :</span><button className="btn s sm" onClick={() => setModal("exchange")}>Enregistrer l’échange</button></div></Modal></div>}
       {modal === "agency-study" && <div className="lead-mailing-dialog">
         <Modal title={`Étude de faisabilité · ${n(form.agence)}`} onClose={() => setModal(null)}>
           <div className="lead-mailing-module"><LeadEmailComposer lead={lead} kind="agency_feasibility" agencyId={form.agence} /></div>
         </Modal>
       </div>}
-      {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={lead.updated_at} onRecordExchange={() => setModal("exchange")} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast(info); router.refresh(); }} />}
+      {modal === "manual-stage" && <ManualStageDialog p={p} updatedAt={lead.updated_at} onRecordExchange={() => setModal("exchange")} onClose={() => setModal(null)} onSaved={(info) => { setModal(null); toast.success(info); router.refresh(); }} />}
       {(modal === "complete" || modal === "qualif") && (
         <TrameForm
           initiale={p.trame ?? trameVide(p.texte ? p.texte.slice(0, 60) : undefined)}
           champs={modal === "complete" ? p.manque : "tout"}
+          budgetConfirme={!!confirmedBudget}
           titre={modal === "complete" ? "Réponses du voyageur" : p.trame ? "Modifier la trame" : "Construire la trame"}
           pending={pending}
           onClose={() => setModal(null)}

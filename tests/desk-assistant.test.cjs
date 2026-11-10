@@ -49,6 +49,15 @@ test("Claude output cannot request sending or inject destination identifiers", (
   assert.equal(parseAssistantAnswer('{"reply":"Je propose une suppression.","draftKind":"none","editKind":"delete","editValue":"all"}'), null);
 });
 
+test("Claude may propose a specific budget but cannot infer the basis or invert the range", () => {
+  const { parseAssistantAnswer } = load("lib/assistant/claude");
+  const proposal = { reply: "Je propose ce budget.", draftKind: "none", editKind: "budget",
+    editValue: { min: 1500, max: 1800, currency: "EUR", unit: "total", includesFlights: false } };
+  assert.deepEqual(parseAssistantAnswer(JSON.stringify(proposal))?.edit, { kind: "budget", value: proposal.editValue });
+  assert.equal(parseAssistantAnswer(JSON.stringify({ ...proposal, editValue: { ...proposal.editValue, unit: "" } })), null);
+  assert.equal(parseAssistantAnswer(JSON.stringify({ ...proposal, editValue: { ...proposal.editValue, max: 1200 } })), null);
+});
+
 const leadId = "00000000-0000-4000-8000-000000000001";
 const agencyId = "00000000-0000-4000-8000-000000000002";
 
@@ -56,7 +65,7 @@ function fakeDesk() {
   const state = {
     enabled: false, role: "lead_referent", leadVisible: true, configured: true, connectionTests: 0,
     recipient: "camille@example.test", qualified: false, calls: 0, saved: [],
-    edit: null, writes: [],
+    edit: null, writes: [], audit: [],
     lead: { id: leadId, referent_id: leadId, updated_at: "2026-11-08T12:00:00Z", internal_notes: "Note existante.", priority: "normal" },
   };
   const tables = {
@@ -66,6 +75,18 @@ function fakeDesk() {
   };
   const db = {
     auth: { getUser: async () => ({ data: { user: { id: leadId } } }) },
+    async rpc(name, args) {
+      assert.equal(name, "apply_desk_assistant_edit");
+      assert.equal(args.p_lead_id, leadId);
+      assert.equal(args.p_expected_updated_at, state.lead.updated_at);
+      const patch = args.p_action === "note"
+        ? { internal_notes: [state.lead.internal_notes, args.p_changes.internal_notes].filter(Boolean).join("\n\n") }
+        : args.p_changes;
+      state.writes.push(patch);
+      state.audit.push(args.p_action);
+      state.lead = { ...state.lead, ...patch, updated_at: "2026-11-08T12:01:00Z" };
+      return { data: true, error: null };
+    },
     from(table) {
       let patch;
       let expectedVersion;
@@ -130,6 +151,24 @@ test("an internal note is appended only after confirmation and replay cannot dup
   assert.equal(state.writes.length, 0);
   assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, true);
   assert.equal(state.lead.internal_notes, "Note existante.\n\nBudget à confirmer.");
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, false);
+  assert.equal(state.writes.length, 1);
+  assert.deepEqual(state.audit, ["note"]);
+});
+
+test("a budget proposed in chat changes only the reviewed dossier and records the actor's confirmation", async () => {
+  const { actions, state } = fakeDesk();
+  state.enabled = true;
+  state.lead.budget = "1 000 € pour le groupe";
+  state.edit = { kind: "budget", value: { min: 1500, max: 1800, currency: "EUR", unit: "total", includesFlights: false } };
+  const { editPreview } = await actions.chatWithAssistant(leadId, [{ role: "user", content: "Note 1 500–1 800 € pour le groupe, vols exclus." }]);
+  assert.equal(editPreview.previous, state.lead.budget);
+  assert.equal(state.writes.length, 0);
+  assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, true);
+  assert.equal(state.lead.budget_min, 1500);
+  assert.equal(state.lead.budget_max, 1800);
+  assert.equal(state.lead.intake_payload.qualification_facts.budget_includes_flights, false);
+  assert.deepEqual(state.audit, ["budget"]);
   assert.equal((await actions.confirmAssistantEdit(editPreview)).ok, false);
   assert.equal(state.writes.length, 1);
 });

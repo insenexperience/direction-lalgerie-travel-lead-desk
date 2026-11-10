@@ -2,19 +2,26 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { agencyClock, FILTERS, fmtD, hrs, nextAction, nomAgence, statutLabel, travelerClock, urgency } from "@/lib/bo3/projet";
-import { SOURCES, type Agence, type Projet } from "@/lib/bo3/types";
+import { SOURCES, type Agence, type ProjetListe } from "@/lib/bo3/types";
 import { AgencePressentie, Completude, Deadline, Icon, Ring, useNow } from "./ui";
 
 /** File de travail : triée par urgence réelle. Chaque file est une URL (?file=…). */
-export function FileView({ projets, agences, now: depart }: { projets: Projet[]; agences: Agence[]; now: number }) {
+export function FileView({ projets, agences, now: depart }: { projets: ProjetListe[]; agences: Agence[]; now: number }) {
   const now = useNow(depart);
   const router = useRouter();
   const params = useSearchParams();
   const f = FILTERS.some((x) => x.id === params.get("file")) ? params.get("file")! : "tous";
   const vue = params.get("vue") === "chrono" ? "chrono" : "liste";
-  const set = (k: string, v: string) => { const sp = new URLSearchParams(params.toString()); sp.set(k, v); router.replace(`/inbox?${sp.toString()}`, { scroll: false }); };
+  const set = (key: string, value: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set(key, value);
+    window.history.replaceState(null, "", url);
+  };
   const filtre = FILTERS.find((x) => x.id === f)!;
-  const rows = projets.filter((p) => filtre.f(p, now)).sort((a, b) => urgency(a, now) - urgency(b, now));
+  const rows = projets.filter((p) => filtre.f(p, now))
+    .map((p) => ({ p, ordre: urgency(p, now) }))
+    .sort((a, b) => a.ordre - b.ordre)
+    .map(({ p }) => p);
   const counts = Object.fromEntries(FILTERS.map((x) => [x.id, projets.filter((p) => x.f(p, now)).length]));
   const go = (id: string, act?: string) => router.push(`/leads/${id}${act ? `?action=${act}` : ""}`);
 
@@ -73,7 +80,7 @@ export function FileView({ projets, agences, now: depart }: { projets: Projet[];
 }
 
 /** Chaque projet ouvert sur un axe −48 h → +48 h autour de maintenant ; la ligne rouge est l'échéance. */
-function Timeline48({ projets, agences, now, go }: { projets: Projet[]; agences: Agence[]; now: number; go: (id: string) => void }) {
+function Timeline48({ projets, agences, now, go }: { projets: ProjetListe[]; agences: Agence[]; now: number; go: (id: string) => void }) {
   const x = (h: number) => `${((h + 48) / 96) * 100}%`;
   const rows = projets.filter((p) => p.statut !== "clos");
   return (

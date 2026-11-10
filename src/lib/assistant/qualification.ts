@@ -60,7 +60,7 @@ export function parseQualificationImport(input: unknown): QualificationImport | 
   else if (data.flexibility != null && data.flexibility !== "") return null;
   if (data.budgetStatus === "unknown") result.budgetStatus = "unknown";
   else if (data.budgetStatus === "confirmed") {
-    if (typeof data.budgetAmount !== "number" || !Number.isFinite(data.budgetAmount) || data.budgetAmount <= 0 || data.budgetAmount >= 1e8 ||
+    if (typeof data.budgetAmount !== "number" || data.budgetAmount <= 0 || data.budgetAmount > 99999999.99 || Number(data.budgetAmount.toFixed(2)) !== data.budgetAmount ||
         typeof data.budgetCurrency !== "string" || !/^[A-Z]{3}$/.test(data.budgetCurrency) ||
         (data.budgetUnit !== "per_person" && data.budgetUnit !== "total")) return null;
     Object.assign(result, { budgetStatus: "confirmed", budgetAmount: data.budgetAmount, budgetCurrency: data.budgetCurrency, budgetUnit: data.budgetUnit });

@@ -83,6 +83,8 @@ Le site vitrine peut rester sur la racine du domaine ; l’outil interne sur un 
 
 ## 5. Après chaque merge sur `main`
 
+Appliquer la migration **20261110120000_desk_assistant_edits.sql** après celle des réglages de l’assistant. Après le déploiement, tester le budget manuel et une proposition Claude confirmée sur un dossier de test pris en charge, puis vérifier le journal dans **Voyageur & messages**.
+
 Vercel redéploie automatiquement si l’intégration GitHub est active. Vérifier les **Deployments** et les logs de build en cas d’erreur.
 
 ---

@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Clock } from "@/lib/bo3/projet";
 import { suggestions } from "@/lib/bo3/projet";
-import type { Agence, Projet } from "@/lib/bo3/types";
+import type { Agence, ProjetListe } from "@/lib/bo3/types";
 
 // ---------------------------------------------------------------- icônes (tracés du prototype)
 const P: Record<string, string> = {
@@ -128,12 +128,12 @@ export function useNow(depart: number) {
 }
 
 // ---------------------------------------------------------------- petits indicateurs
-export function Completude({ p }: { p: Projet }) {
+export function Completude({ p }: { p: Pick<ProjetListe, "trame" | "manque"> }) {
   if (!p.trame) return <span className="dots">●○○○ <span className="mt">non qualifié</span></span>;
   const n = 4 - p.manque.length;
   return <span><span className="dots">{"●".repeat(n)}{"○".repeat(4 - n)}</span> <span className="mt">{p.manque.length ? p.manque.join(", ") : "complet"}</span></span>;
 }
-export function AgencePressentie({ p, agences }: { p: Projet; agences: Agence[] }) {
+export function AgencePressentie({ p, agences }: { p: Pick<ProjetListe, "trame" | "agenceChoisie" | "consultations">; agences: Agence[] }) {
   if (p.consultations.length) return <span>{p.consultations.map((c) => agences.find((a) => a.id === c.agence)?.n ?? "Agence").join(" + ")}</span>;
   const s = suggestions(p, agences)[0];
   if (!p.trame || !s || !s.jours) return <span className="mt">à déterminer</span>;

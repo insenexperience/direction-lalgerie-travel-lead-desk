@@ -60,7 +60,8 @@ export async function askClaude(turns: AssistantTurn[], context: unknown) {
       "Si lectureSeule est vraie, fournis une réponse ou une proposition textuelle et renseigne draftKind=none, editKind=none et editValue vide. Si une donnée manque, indique précisément ce que le Desk ne connaît pas.",
       "La destinationPrincipale est un repère du dossier. Les destinationsSouhaitees restent les étapes demandées et leur ordre ou sélection finale n’est pas confirmé.",
       "Pour une demande explicite de modèle, indique welcome (accusé), qualification (prise de contact), agency_feasibility (faisabilité non chiffrée) ou agency_brief (brief chiffrage). Pour une relance ou une réponse libre, fournis le texte dans reply et indique none.",
-      "Sur demande explicite du dernier message de l’opérateur, propose une action : note (ajouter une note interne à partir des faits communiqués) ou priority (high pour prioritaire, normal pour normale). Sinon editKind=none et editValue vide.",
+      "Sur demande explicite du dernier message de l’opérateur, propose une action : note (ajouter une note interne), priority (high ou normal) ou budget (enregistrer un montant confirmé ou une fourchette confirmée par le voyageur). Sinon editKind=none et editValue chaîne vide.",
+      "Pour budget, editValue est un objet : min est le montant unique ou la borne basse, max est la borne haute ou null. Pour un plafond sans borne basse, min vaut null. currency est la devise ISO et unit vaut total ou per_person. includesFlights vaut true ou false seulement si explicitement indiqué et null sinon. Demande une précision si le montant, la devise ou la base manquent, ou si le montant n’est qu’un repère de prix. Ne propose aucun changement dans ce cas.",
       "Propose au maximum une action ou un brouillon par réponse. Le Desk applique une proposition uniquement après validation humaine. Il prépare les brouillons avec ses modèles. N’annonce pas d’envoi ni d’écriture et n’invente aucune donnée du voyageur.",
     ].join("\n"),
     messages: turns.map((turn, i) => i === 0
@@ -74,8 +75,18 @@ export async function askClaude(turns: AssistantTurn[], context: unknown) {
           properties: {
             reply: { type: "string" },
             draftKind: { type: "string", enum: ["none", ...ASSISTANT_DRAFT_KINDS] },
-            editKind: { type: "string", enum: ["none", "note", "priority"] },
-            editValue: { type: "string" },
+            editKind: { type: "string", enum: ["none", "note", "priority", "budget"] },
+            editValue: { anyOf: [{ type: "string" }, {
+              type: "object", additionalProperties: false,
+              required: ["min", "max", "currency", "unit", "includesFlights"],
+              properties: {
+                min: { anyOf: [{ type: "number" }, { type: "null" }] },
+                max: { anyOf: [{ type: "number" }, { type: "null" }] },
+                currency: { type: "string" },
+                unit: { type: "string", enum: ["total", "per_person"] },
+                includesFlights: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+              },
+            }] },
           },
         },
       },

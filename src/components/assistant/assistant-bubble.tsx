@@ -13,6 +13,8 @@ import { DESK_PROJECT_TABS, DESK_PROJECT_TAB_EVENT, DESK_SURFACES, findDeskProje
 import type { DeskView } from "@/lib/assistant/desk-data";
 import { AssistantConnection, useAssistantConnection } from "./assistant-connection";
 import { qualificationLabels, type QualificationPreview } from "@/lib/assistant/qualification";
+import { formatQualificationBudget } from "@/lib/qualification-budget";
+import { useDeskToast } from "@/components/ui/desk-toast";
 import { readDeskGmail } from "@/app/(dashboard)/leads/gmail-actions";
 import { isGmailReadRequest, type DeskInboundMail } from "@/lib/email/gmail-intake";
 import { DeskGmailMessages } from "./desk-gmail-messages";
@@ -136,6 +138,7 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
   onOpenComposer: () => void; visibleProject: boolean;
 }) {
   const router = useRouter();
+  const toast = useDeskToast();
   const [readout, setReadout] = useState<{ view: DeskView; focus?: ReadoutFocus } | null>(null);
   const [actionPreview, setActionPreview] = useState<ActionPreview | null>(null);
   const [actionResult, setActionResult] = useState<{ message?: string; href: string; url?: string } | null>(null);
@@ -146,7 +149,6 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
   const [editPreview, setEditPreview] = useState<AssistantEditPreview | null>(null);
   const [qualificationPreview, setQualificationPreview] = useState<QualificationPreview | null>(null);
   const [importing, setImporting] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const latest = useRef<HTMLDivElement>(null);
@@ -157,12 +159,12 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
     const container = latest.current?.parentElement;
     if (!container) return;
     const target = readoutTop.current;
-    if (target && !preview && !editPreview && !qualificationPreview && !actionPreview && !actionResult && !notice) {
+    if (target && !preview && !editPreview && !qualificationPreview && !actionPreview && !actionResult) {
       container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - 18;
-    } else if (turns.length || preview || editPreview || qualificationPreview || mail || notice || actionPreview || actionResult) {
+    } else if (turns.length || preview || editPreview || qualificationPreview || mail || actionPreview || actionResult) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [turns, preview, editPreview, qualificationPreview, mail, notice, readout, actionPreview, actionResult]);
+  }, [turns, preview, editPreview, qualificationPreview, mail, error, readout, actionPreview, actionResult]);
 
   async function prepare(kind: AssistantDraftKind) {
     setEditPreview(null);
@@ -179,7 +181,6 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
 
   function run(action: () => Promise<void>) {
     setError(null);
-    setNotice(null);
     start(async () => {
       try { await action(); } catch { setError(failure); }
     });
@@ -376,28 +377,36 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
               setQualificationPreview(null);
               setMessage("");
               setImporting(false);
-              setNotice("Qualification enregistrée dans la trame et les champs du dossier.");
+              toast.success("Qualification enregistrée dans le dossier.");
               router.refresh();
-            })}>Enregistrer la qualification</button>
+            })}>{pending ? "Enregistrement…" : "Enregistrer la qualification"}</button>
             <button type="button" className="btn s" disabled={pending} onClick={() => setQualificationPreview(null)}>Annuler</button>
           </div>
         </section>
       )}
       {editPreview && (
         <section className="desk-assistant__proposal" aria-label="Modification à valider">
-          <b>{editPreview.edit.kind === "note" ? "Ajouter une note interne" : "Changer la priorité"}</b>
-          <div className="desk-assistant__draft-text">{editPreview.edit.kind === "note"
-            ? editPreview.edit.value
-            : `${priorityLabel(editPreview.previous)} → ${priorityLabel(editPreview.edit.value)}`}</div>
+          {editPreview.edit.kind === "budget" ? <>
+            <b>Enregistrer le budget voyageur</b>
+            <dl className="desk-assistant__facts">
+              <div><dt>Budget actuel</dt><dd>{editPreview.previous || "À préciser"}</dd></div>
+              <div><dt>Budget proposé</dt><dd>{formatQualificationBudget(editPreview.edit.value)}
+                {editPreview.edit.value.includesFlights === null ? " · Vols à préciser" : ""}</dd></div>
+            </dl>
+          </> : <>
+            <b>{editPreview.edit.kind === "note" ? "Ajouter une note interne" : "Changer la priorité"}</b>
+            <div className="desk-assistant__draft-text">{editPreview.edit.kind === "note"
+              ? editPreview.edit.value
+              : `${priorityLabel(editPreview.previous)} → ${priorityLabel(editPreview.edit.value)}`}</div>
+          </>}
           <div className="row wrap">
             <button type="button" className="btn p" disabled={pending} onClick={() => run(async () => {
               const result = await confirmAssistantEdit(editPreview);
               if (!result.ok) { setError(result.error); return; }
               setEditPreview(null);
-              setNotice(editPreview.edit.kind === "note" ? "Note interne ajoutée au dossier."
-                : `Priorité ${priorityLabel(editPreview.edit.value).toLowerCase()} enregistrée.`);
+              toast.success({ note: "Note interne ajoutée au dossier.", priority: "Priorité enregistrée.", budget: "Budget voyageur enregistré." }[editPreview.edit.kind]);
               router.refresh();
-            })}>Appliquer au dossier</button>
+            })}>{pending ? "Enregistrement…" : "Appliquer au dossier"}</button>
             <button type="button" className="btn s" disabled={pending} onClick={() => setEditPreview(null)}>Annuler</button>
           </div>
         </section>
@@ -419,7 +428,7 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
               const result = await confirmAssistantDraft(preview);
               if (!result.ok) { setError(result.error); return; }
               setPreview({ ...preview, draftId: result.draftId });
-              setNotice("Brouillon enregistré dans le dossier.");
+              toast.success("Brouillon enregistré dans le dossier.");
               window.dispatchEvent(new CustomEvent(ASSISTANT_DRAFT_SAVED, { detail: {
                 leadId: preview.leadId, kind: preview.kind, agencyId: preview.agencyId,
               } }));
@@ -428,7 +437,6 @@ function AssistantConversation({ lead, agencies, tab, connected, projects, turns
         </section>
       )}
       {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
       {pending && <p className="desk-assistant__pending" role="status">Consultation du Desk…</p>}
       <div ref={latest} />
       </div>

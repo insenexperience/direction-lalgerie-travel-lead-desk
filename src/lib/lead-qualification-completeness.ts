@@ -1,4 +1,5 @@
 import { readDemandeProjet } from "@/lib/demande-projet-intake";
+import { confirmedQualificationBudgetFacts, formatQualificationBudget, readConfirmedQualificationBudget } from "@/lib/qualification-budget";
 
 /**
  * Shared, deterministic qualification checks for the cockpit and mail composer.
@@ -236,7 +237,7 @@ export function analyzeLeadQualification(
       accommodation: answer(demande.wishes.comfort),
       ...(demande.timing.mode === "mois" && demande.timing.period ? { travel_period: demande.timing.period } : {}),
     } : {}),
-    ...intakeFacts, ...obj(responses.qualification_facts), ...operatorFacts,
+    ...intakeFacts, ...obj(responses.qualification_facts), ...operatorFacts, ...confirmedQualificationBudgetFacts(intake),
   };
   const trameGroup = obj(trame.raw.groupe);
   const trameCadre = obj(trame.raw.cadre);
@@ -345,8 +346,10 @@ export function analyzeLeadQualification(
   const durationKnown = Boolean(duration) || timingSelections.some((s) => ["weekend", "week", "two_weeks", "long"].includes(s)) || /(?:\d+\s*(?:[-–—→]|au|to)\s*\d+|\d+\s*(?:jours?|nuits?|days?|nights?|semaines?|weeks?)|\d{4}-\d{2}-\d{2}.*\d{4}-\d{2}-\d{2})/i.test(dateText) || (expedition && /(?:janvier|january).*(?:fevrier|february)/i.test(normal(dateText)));
   check("duration", durationKnown, true, duration, dateKnown);
 
-  const budgetText = first(trame.budget, lead.budget);
-  const amount = [facts.budget_amount, facts.budget_min, facts.budget_max, lead.budget_min, lead.budget_max, intake.budget_ideal, intake.budget_max, intake.budget_total].find((v) => Number(v) > 0);
+  const confirmedBudget = readConfirmedQualificationBudget(intake);
+  const budgetText = confirmedBudget ? formatQualificationBudget(confirmedBudget, language) : first(trame.budget, lead.budget);
+  const amount = confirmedBudget ? confirmedBudget.min ?? confirmedBudget.max
+    : [facts.budget_amount, facts.budget_min, facts.budget_max, lead.budget_min, lead.budget_max, intake.budget_ideal, intake.budget_max, intake.budget_total].find((v) => Number(v) > 0);
   const budgetUnit = has(facts, "budget_unit") ? text(facts.budget_unit) : text(lead.budget_unit) || (!manualImport ? Number(intake.budget_total) > 0 ? "total" : Number(intake.budget_ideal) > 0 || Number(intake.budget_max) > 0 ? "per_person" : "" : "");
   const budgetCurrency = has(facts, "currency") ? text(facts.currency) : manualImport ? text(manualQualification.currency) : first(lead.currency, intake.currency);
   const explicitUnknownBasis = has(facts, "budget_unit") && !budgetUnit || has(facts, "currency") && !budgetCurrency;
@@ -354,7 +357,7 @@ export function analyzeLeadQualification(
   // Broad chip classes do not establish a traveler's amount or its basis.
   const budgetKnown = textualBudgetKnown || Boolean(amount && budgetCurrency && ["per_person", "total"].includes(budgetUnit));
   const canonicalBudgetValue = amount && (has(facts, "budget_min") || has(facts, "budget_max") || has(facts, "budget_amount")) ? `${amount} ${budgetCurrency} ${budgetUnit}`.trim() : "";
-  check("budget", budgetKnown, true, canonicalBudgetValue || budgetText || (amount ? `${amount} ${budgetCurrency} ${budgetUnit}`.trim() : ""));
+  check("budget", budgetKnown, true, (confirmedBudget ? budgetText : canonicalBudgetValue || budgetText) || (amount ? `${amount} ${budgetCurrency} ${budgetUnit}`.trim() : ""));
   const budgetScopeKnown = has(facts, "budget_includes_flights") ? typeof facts.budget_includes_flights === "boolean" : /(?:hors vols?|vols? (?:exclus|inclus)|excluding flights|including flights|flights excluded|flights included)/i.test(budgetText);
   check("budget_scope", budgetScopeKnown, true, typeof facts.budget_includes_flights === "boolean" ? facts.budget_includes_flights ? "flights included" : "flights excluded" : "", budgetKnown && flightMode !== "none");
 

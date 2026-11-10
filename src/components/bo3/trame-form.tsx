@@ -29,8 +29,8 @@ const optionsAvecValeur = (options: string[], valeur: string) =>
  * Compléter (seulement les champs manquants) ou construire une trame complète.
  * Rien ne part vers le voyageur ni l'agence : c'est une saisie de l'opérateur.
  */
-export function TrameForm({ initiale, champs, titre, onClose, onSave, pending }: {
-  initiale: Trame; champs: Manque[] | "tout"; titre: string; onClose: () => void; onSave: (t: Trame) => void; pending: boolean;
+export function TrameForm({ initiale, champs, titre, onClose, onSave, pending, budgetConfirme }: {
+  initiale: Trame; champs: Manque[] | "tout"; titre: string; onClose: () => void; onSave: (t: Trame) => void; pending: boolean; budgetConfirme?: boolean;
 }) {
   const [t, setT] = useState<Trame>(initiale);
   const [etapes, setEtapesBrut] = useState<Etape[]>(() => etapesDe(initiale));
@@ -74,7 +74,7 @@ export function TrameForm({ initiale, champs, titre, onClose, onSave, pending }:
           <div className="field"><span className="lbl">Dont enfants</span><input className="inp" type="number" min={0} value={t.groupe.enfants ?? ""} onChange={(e) => setT({ ...t, groupe: { ...t.groupe, enfants: Number(e.target.value) || null } })} /></div>
         </div>
       )}
-      {voir("budget") && (
+      {voir("budget") && !budgetConfirme && (
         <div className="field">
           <span className="lbl">Budget par personne, hors vol</span>
           <select className="inp" value={budgetAutre ? "autre" : t.budget ?? ""} onChange={(e) => setT({ ...t, budget: e.target.value === "autre" ? "" : e.target.value || null })}>

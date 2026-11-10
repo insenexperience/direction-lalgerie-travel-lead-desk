@@ -1,5 +1,5 @@
 import "server-only";
-import { donneesBo3 } from "@/lib/bo3/donnees";
+import { donneesDossiersBo3 } from "@/lib/bo3/donnees";
 import { chargerAgences, chargerProjets } from "@/lib/bo3/load";
 import type { Bo3Contexte } from "@/lib/bo3/acces";
 import { fmtD, nextAction, statutLabel, urgency } from "@/lib/bo3/projet";
@@ -198,7 +198,7 @@ async function teamView(ctx: Bo3Contexte, projects: Projet[]): Promise<DeskView>
 }
 
 export async function readDeskData(scope: DeskScope, question: string) {
-  const data = await donneesBo3();
+  const data = await donneesDossiersBo3();
   if (!data?.ctx.userId || data.ctx.apercu || !["admin", "lead_referent"].includes(data.ctx.role ?? "")) return null;
   const { ctx, projets, agences, now } = data;
   const query = normalizeDeskQuery(question);

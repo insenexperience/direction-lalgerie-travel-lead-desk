@@ -1,45 +1,75 @@
 "use client";
 
-import Link from "next/link";
+import dynamic from "next/dynamic";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { LeadIntakeModal } from "@/components/leads/lead-intake-modal";
-import { AssistantBubble } from "@/components/assistant/assistant-bubble";
+import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { deskScopeForPath, type DeskProjectTab } from "@/lib/assistant/scope";
 import { AssistantConnectionProvider } from "@/components/assistant/assistant-connection";
+import { DeskToastProvider, useDeskToast } from "@/components/ui/desk-toast";
 import "@/styles/desk-assistant.css";
 import { createClient } from "@/lib/supabase/client";
 import { Icon, ToastProvider } from "./ui";
 
+const AssistantBubble = dynamic(() => import("@/components/assistant/assistant-bubble").then((m) => m.AssistantBubble), { ssr: false });
+const LeadIntakeModal = dynamic(() => import("@/components/leads/lead-intake-modal").then((m) => m.LeadIntakeModal), {
+  ssr: false,
+  loading: () => <div className="desk-opening" role="status">Ouverture du formulaire…</div>,
+});
+
 export type PaletteProjet = { id: string; nom: string; ref: string; statut: string; titre: string | null; tab: DeskProjectTab; closed: boolean };
 export type PaletteAgence = { id: string; n: string; zones: string };
 
-type Props = {
-  children: ReactNode;
-  counts: { file: number; projets: number; hot: number };
-  user: { nom: string; role: string | null; initiales: string };
+export type DeskNavigationData = {
+  counts: { file: number; projets: number; hot: number } | null;
   projets: PaletteProjet[];
   agences: PaletteAgence[];
+  unavailable?: boolean;
+};
+
+type Props = {
+  children: ReactNode;
+  navigation: Promise<DeskNavigationData>;
+  user: { nom: string; role: string | null; initiales: string };
   apercu: boolean;
 };
 
 /** Écrans refondus (v3). Les autres routes gardent leur mise en page d'avant, dans `.legacy`. */
 const V3 = [/^\/inbox$/, /^\/leads$/, /^\/leads\/[^/]+$/, /^\/dashboard$/, /^\/agencies$/, /^\/radar(\/[^/]+)?$/];
 
-const lire = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
-const ecrire = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* navigation privée */ } };
+const preferenceEvent = "bo3-preference";
+const temporaryPreferences = new Map<string, string>();
+const lire = (key: string) => {
+  try { return temporaryPreferences.get(key) ?? window.localStorage.getItem(key); }
+  catch { return null; }
+};
+const ecrire = (key: string, value: string) => {
+  try { window.localStorage.setItem(key, value); temporaryPreferences.delete(key); }
+  catch { temporaryPreferences.set(key, value); }
+  window.dispatchEvent(new Event(preferenceEvent));
+};
+function subscribePreferences(notify: () => void) {
+  window.addEventListener(preferenceEvent, notify);
+  window.addEventListener("storage", notify);
+  return () => {
+    window.removeEventListener(preferenceEvent, notify);
+    window.removeEventListener("storage", notify);
+  };
+}
+const light = () => "light" as const;
+const expanded = () => false;
+const lireTheme = () => lire("bo3_theme") === "dark" ? "dark" : "light";
+const lireCol = () => lire("bo3_col") === "1";
+const setTheme = (theme: "light" | "dark") => ecrire("bo3_theme", theme);
+const setCol = (col: boolean) => ecrire("bo3_col", col ? "1" : "0");
 
-export function Bo3Shell({ children, counts, user, projets, agences, apercu }: Props) {
+export function Bo3Shell({ children, navigation, user, apercu }: Props) {
   const pathname = usePathname();
   const router = useRouter();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [col, setCol] = useState(false);
+  const theme = useSyncExternalStore(subscribePreferences, lireTheme, light);
+  const col = useSyncExternalStore(subscribePreferences, lireCol, expanded);
   const [cmd, setCmd] = useState(false);
   const [nouveau, setNouveau] = useState(false);
-
-  useEffect(() => { setTheme(lire("bo3_theme") === "dark" ? "dark" : "light"); setCol(lire("bo3_col") === "1"); }, []);
-  useEffect(() => { ecrire("bo3_theme", theme); }, [theme]);
-  useEffect(() => { ecrire("bo3_col", col ? "1" : "0"); }, [col]);
 
   const go = useCallback((href: string) => router.push(href), [router]);
 
@@ -49,7 +79,7 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
     const h = (e: KeyboardEvent) => {
       const tag = ((e.target as HTMLElement).tagName || "").toLowerCase();
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmd((c) => !c); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); setCol((c) => !c); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); setCol(!lireCol()); return; }
       if (["input", "textarea", "select"].includes(tag) || (e.target as HTMLElement).isContentEditable) return;
       if (e.key === "Escape") { setCmd(false); return; }
       const k = e.key.toLowerCase();
@@ -57,19 +87,19 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
       if (g) { g = false; const dest = { f: "/inbox", p: "/leads", b: "/dashboard", a: "/agencies", r: "/radar" }[k]; if (dest) go(dest); }
     };
     window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    return () => { window.removeEventListener("keydown", h); clearTimeout(gt); };
   }, [go]);
 
   const v3 = V3.some((r) => r.test(pathname));
   const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname.startsWith("/radar") ? "/radar" : pathname;
   const leadKey = /^\/leads\/([^/]+)(?:\/workflow)?$/.exec(pathname)?.[1];
-  const assistantLead = leadKey ? projets.find(({ id, ref }) => id === leadKey || ref === leadKey) : undefined;
 
   return (
     <ToastProvider>
       <div className="bo3" data-theme={theme}>
+        <DeskToastProvider>
         <div className={`app ${col ? "col" : ""}`}>
-          <Sidebar actif={actif} counts={counts} user={user} col={col} setCol={setCol} />
+          <Sidebar actif={actif} navigation={navigation} user={user} col={col} setCol={setCol} />
           <div style={{ minWidth: 0 }}>
             <Topbar
               retour={pathname.startsWith("/leads/") ? () => go("/inbox") : null}
@@ -81,11 +111,11 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
             />
             <AssistantConnectionProvider>
               <div className="desk-main">{v3 ? children : <main className="legacy">{children}</main>}</div>
-              {!apercu && <AssistantBubble lead={assistantLead} projects={projets} agencies={agences} surface={deskScopeForPath(pathname)} onNewProject={() => setNouveau(true)} />}
+              {!apercu && <Suspense><DeskAssistant navigation={navigation} leadKey={leadKey} pathname={pathname} onNewProject={() => setNouveau(true)} /></Suspense>}
             </AssistantConnectionProvider>
           </div>
         </div>
-        <CommandPalette open={cmd} onClose={() => setCmd(false)} projets={projets} agences={agences} go={go}
+        {cmd && <CommandPalette onClose={() => setCmd(false)} navigation={navigation} go={go}
           actions={[
             { l: "File de travail", ic: "inbox", k: "G F", f: () => go("/inbox") },
             { l: "Projets", ic: "list", k: "G P", f: () => go("/leads") },
@@ -96,20 +126,50 @@ export function Bo3Shell({ children, counts, user, projets, agences, apercu }: P
             { l: col ? "Déplier la barre latérale" : "Replier la barre latérale", ic: "panel", k: "⌘B", f: () => setCol(!col) },
             { l: theme === "dark" ? "Passer en mode clair" : "Passer en mode sombre", ic: theme === "dark" ? "sun" : "moon", f: () => setTheme(theme === "dark" ? "light" : "dark") },
           ]}
-        />
-        <LeadIntakeModal open={nouveau} onClose={() => setNouveau(false)} onCreated={() => { setNouveau(false); router.refresh(); }} />
+        />}
+        {nouveau && <DeskNewProjectModal onClose={() => setNouveau(false)} />}
+        </DeskToastProvider>
       </div>
     </ToastProvider>
   );
 }
 
-function Sidebar({ actif, counts, user, col, setCol }: { actif: string; counts: Props["counts"]; user: Props["user"]; col: boolean; setCol: (v: boolean) => void }) {
+function DeskNewProjectModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
-  const It = ({ href, ic, l, b, hot, k }: { href: string; ic: string; l: string; b?: number; hot?: boolean; k?: string }) => (
-    <Link href={href} className={`sb__it ${actif === href ? "on" : ""}`} title={l} aria-current={actif === href ? "page" : undefined}>
-      <Icon n={ic} /><span>{l}</span>{b ? <b className={hot ? "hot" : ""}>{b}</b> : null}{k && <kbd>{k}</kbd>}
+  const toast = useDeskToast();
+  return <LeadIntakeModal open onClose={onClose} onCreated={() => {
+    onClose(); toast.success("Projet créé."); router.refresh();
+  }} />;
+}
+
+function DeskAssistant({ navigation, leadKey, pathname, onNewProject }: { navigation: Props["navigation"]; leadKey?: string; pathname: string; onNewProject: () => void }) {
+  const { projets, agences } = use(navigation);
+  const lead = leadKey ? projets.find(({ id, ref }) => id === leadKey || ref === leadKey) : undefined;
+  return <AssistantBubble lead={lead} projects={projets} agencies={agences} surface={deskScopeForPath(pathname)} onNewProject={onNewProject} />;
+}
+
+function NavBadge({ navigation, field }: { navigation: Props["navigation"]; field: "file" | "projets" }) {
+  const { counts } = use(navigation);
+  const value = counts?.[field];
+  return value ? <b className={field === "file" && counts?.hot ? "hot" : ""}>{value}</b> : null;
+}
+
+function LinkFeedback() {
+  const { pending } = useLinkStatus();
+  return <span className="desk-link-feedback" data-pending={pending} role="status"><span className="sr-only">{pending ? "Chargement…" : null}</span></span>;
+}
+
+function SidebarItem({ actif, href, ic, label, badge, shortcut }: { actif: string; href: string; ic: string; label: string; badge?: ReactNode; shortcut?: string }) {
+  return (
+    <Link href={href} className={`sb__it ${actif === href ? "on" : ""}`} title={label} aria-current={actif === href ? "page" : undefined}>
+      <Icon n={ic} /><span>{label}</span>{badge}{shortcut && <kbd>{shortcut}</kbd>}
+      <LinkFeedback />
     </Link>
   );
+}
+
+function Sidebar({ actif, navigation, user, col, setCol }: { actif: string; navigation: Props["navigation"]; user: Props["user"]; col: boolean; setCol: (v: boolean) => void }) {
+  const router = useRouter();
   const deconnexion = async () => { await createClient().auth.signOut(); router.push("/login"); router.refresh(); };
   return (
     <aside className="sb">
@@ -125,17 +185,17 @@ function Sidebar({ actif, counts, user, col, setCol }: { actif: string; counts: 
         </div>
       </div>
       <div className="sb__grp">Travail</div>
-      <It href="/inbox" ic="inbox" l="File de travail" b={counts.file} hot={counts.hot > 0} k="G F" />
-      <It href="/leads" ic="list" l="Projets" b={counts.projets} k="G P" />
-      <It href="/dashboard" ic="chart" l="Pilotage" k="G B" />
+      <SidebarItem actif={actif} href="/inbox" ic="inbox" label="File de travail" shortcut="G F" badge={<Suspense><NavBadge navigation={navigation} field="file" /></Suspense>} />
+      <SidebarItem actif={actif} href="/leads" ic="list" label="Projets" shortcut="G P" badge={<Suspense><NavBadge navigation={navigation} field="projets" /></Suspense>} />
+      <SidebarItem actif={actif} href="/dashboard" ic="chart" label="Pilotage" shortcut="G B" />
       <div className="sb__grp">Veille</div>
-      <It href="/radar" ic="radar" l="Radar" k="G R" />
+      <SidebarItem actif={actif} href="/radar" ic="radar" label="Radar" shortcut="G R" />
       <div className="sb__grp">Ressources</div>
-      <It href="/agencies" ic="building" l="Agences" k="G A" />
-      <It href="/contacts" ic="users" l="Contacts" />
-      <It href="/quotes" ic="file" l="Devis" />
-      <It href="/users" ic="users" l="Équipe" />
-      <It href="/settings" ic="settings" l="Réglages" />
+      <SidebarItem actif={actif} href="/agencies" ic="building" label="Agences" shortcut="G A" />
+      <SidebarItem actif={actif} href="/contacts" ic="users" label="Contacts" />
+      <SidebarItem actif={actif} href="/quotes" ic="file" label="Devis" />
+      <SidebarItem actif={actif} href="/users" ic="users" label="Équipe" />
+      <SidebarItem actif={actif} href="/settings" ic="settings" label="Réglages" />
       <div className="sb__foot">
         <span className="av">{user.initiales}</span>
         <div><div style={{ fontWeight: 600 }}>{user.nom}</div><div style={{ fontSize: 11, color: "var(--muted)" }}>{user.role === "admin" ? "Opérateur · admin" : "Opérateur"}</div></div>
@@ -167,11 +227,26 @@ function Topbar({ retour, onCmd, theme, setTheme, onNouveau, apercu }: { retour:
 }
 
 type Action = { l: string; ic: string; k?: string; f: () => void };
-function CommandPalette({ open, onClose, projets, agences, go, actions }: { open: boolean; onClose: () => void; projets: PaletteProjet[]; agences: PaletteAgence[]; go: (h: string) => void; actions: Action[] }) {
+type CommandProps = { onClose: () => void; navigation: Props["navigation"]; go: (h: string) => void; actions: Action[] };
+
+function CommandPalette(props: CommandProps) {
+  return (
+    <div className="cmd" onClick={props.onClose}>
+      <div className="cmd__box" role="dialog" aria-label="Palette de commandes" onClick={(e) => e.stopPropagation()}>
+        <Suspense fallback={<p role="status" className="desk-loading__inline">Chargement des projets et agences…</p>}>
+          <CommandPaletteContent {...props} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+function CommandPaletteContent({ onClose, navigation, go, actions }: CommandProps) {
+  const { projets, agences, unavailable } = use(navigation);
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (open) { setQ(""); setI(0); setTimeout(() => ref.current?.focus(), 30); } }, [open]);
+  useEffect(() => { ref.current?.focus(); }, []);
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const items = useMemo(() => {
     const m = (s: string) => !q || norm(s).includes(norm(q));
@@ -181,7 +256,6 @@ function CommandPalette({ open, onClose, projets, agences, go, actions }: { open
       ...agences.filter((a) => m(a.n)).map((a) => ({ g: "Agences", l: a.n, s: a.zones, ic: "building", k: undefined, f: () => go(`/agencies/${a.id}`) })),
     ];
   }, [q, actions, projets, agences, go]);
-  if (!open) return null;
   const sel = Math.min(i, items.length - 1);
   const key = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setI(Math.min(items.length - 1, sel + 1)); }
@@ -191,9 +265,9 @@ function CommandPalette({ open, onClose, projets, agences, go, actions }: { open
   };
   let lastG: string | null = null;
   return (
-    <div className="cmd" onClick={onClose}>
-      <div className="cmd__box" role="dialog" aria-label="Palette de commandes" onClick={(e) => e.stopPropagation()}>
+    <>
         <div className="cmd__in"><Icon n="search" s={16} /><input ref={ref} value={q} onChange={(e) => { setQ(e.target.value); setI(0); }} onKeyDown={key} placeholder="Rechercher un projet, une agence, une action…" aria-label="Rechercher" /><kbd>esc</kbd></div>
+        {unavailable && <p role="status" className="desk-loading__inline">Recherche des projets et agences indisponible. Les raccourcis restent accessibles.</p>}
         <div className="cmd__list">
           {items.length ? items.map((it, k) => {
             const hd = it.g !== lastG;
@@ -209,7 +283,6 @@ function CommandPalette({ open, onClose, projets, agences, go, actions }: { open
           }) : <div className="empty">Aucun résultat</div>}
         </div>
         <div className="cmd__ft"><span><kbd>↑</kbd> <kbd>↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir</span><span><kbd>G</kbd> puis <kbd>F</kbd> file · <kbd>P</kbd> projets · <kbd>B</kbd> pilotage · <kbd>R</kbd> radar</span></div>
-      </div>
-    </div>
+    </>
   );
 }

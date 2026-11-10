@@ -66,7 +66,7 @@ export function AssistantConnection({ refresh = false }: { refresh?: boolean }) 
       <div><b>Claude</b>{status ? <> · {statusLabels[status.state]}</> : pending ? " · Chargement…" : null}</div>
       {status?.state === "unconfigured" && admin && <p>Ajoutez <code>ANTHROPIC_API_KEY</code> aux secrets du serveur pour connecter Claude.</p>}
       {status?.state === "unavailable" && admin && <p>Vérifiez que la migration des réglages de l’assistant est appliquée.</p>}
-      {status?.state === "connected" && <p>Claude utilise les éléments utiles du dossier ouvert pour aider à la qualification et à la préparation des brouillons.</p>}
+      {status?.state === "connected" && <p>Claude peut proposer un budget, une note ou un changement de priorité dans le dossier ouvert. Chaque modification est enregistrée après votre validation.</p>}
       {status && !admin && status.state !== "connected" && <p>Un administrateur peut connecter l’assistant.</p>}
       {admin && status && (status.enabled || status.state === "disabled") && (
         <div><button type="button" className="btn s" disabled={pending} onClick={() => toggle(!status.enabled)}>

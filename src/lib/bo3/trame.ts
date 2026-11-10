@@ -77,7 +77,7 @@ export function trameDepuisSite(v: unknown): Trame | null {
 }
 
 /** Une demande peut avoir une durée souhaitée sans journées déjà composées. */
-export function dureeTrame(trame: Trame): string {
+export function dureeTrame(trame: { cadre: Pick<Trame["cadre"], "duree">; jours: { length: number } }): string {
   const jours = trame.jours.length;
   return jours ? `${jours} jour${jours > 1 ? "s" : ""}` : trame.cadre.duree || "Durée à préciser";
 }

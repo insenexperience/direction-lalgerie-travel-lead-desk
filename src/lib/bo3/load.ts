@@ -4,8 +4,9 @@ import type { Bo3Contexte } from "./acces";
 import type { Zone } from "./geo";
 import { briefFromMarkdown, manqueDe } from "./projet";
 import { trameDepuisSite, trameInterne } from "./trame";
+import { formatQualificationBudget, readConfirmedQualificationBudget } from "@/lib/qualification-budget";
 import { etapeAvecAvancementManuel } from "./manual-stage";
-import type { Agence, Canal, Consultation, DevisDA, Mention, Message, Projet, Source, Statut, Trame } from "./types";
+import type { Agence, Canal, Consultation, DevisDA, Mention, Message, Projet, ProjetListe, Source, Statut, Trame } from "./types";
 
 type Row = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v));
@@ -66,6 +67,9 @@ export async function chargerAgences(ctx: Bo3Contexte): Promise<Agence[]> {
 const LEAD_COLS =
   "id, updated_at, reference, traveler_name, email, phone, contact_id, status, source, page_origin, intake_channel, channel, preferred_channel, intake_payload, ai_qualification_payload, trip_summary, project_description, internal_notes, created_at, closed_at, welcome_email_sent_at, generated_brief, brief_generated_at, brief_edited_at, retained_agency_id, qualification_blocks, deleted_at";
 
+const LIST_LEAD_COLS =
+  "id, reference, traveler_name, email, status, source, page_origin, intake_channel, channel, intake_payload, trame_v3:ai_qualification_payload->trame_v3, trip_summary, project_description, created_at, closed_at, welcome_email_sent_at, retained_agency_id";
+
 function sourceDe(r: Row): Source {
   const trame = o(o(r.intake_payload).trame);
   if (trame.type === "demande-projet-voyage" && trame.version === 1) return "demande-projet";
@@ -105,14 +109,10 @@ function devisDe(q: Row): DevisDA {
 }
 
 /** Évènements du journal qui sont des messages (payload.k) ou des jalons du dossier. */
-const ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_answers", "traveler_reminder", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "manual_stage_advanced", "lead_reset", "external_exchange", "email_sent", "email_sent_externally", "traveler_link_created"];
+const LIST_ACT_KINDS = ["first_response", "traveler_link_sent", "traveler_reminder", "email_sent", "email_sent_externally", "manual_stage_advanced", "lead_reset"];
+const ACT_KINDS = [...LIST_ACT_KINDS, "traveler_answers", "ack_sent", "brief_sent", "agency_proposal", "quote_converted", "quote_sent", "won", "lost", "whatsapp_in", "message", "external_exchange", "traveler_link_created", "assistant_edit_applied", "qualification_budget_saved"];
 
-export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {}): Promise<Projet[]> {
-  const rows = await tout((de, a) => {
-    let q = ctx.supabase.from("leads").select(LEAD_COLS).is("deleted_at", null).order("created_at", { ascending: false }).order("id");
-    if (opts.id) q = q.eq("id", opts.id);
-    return q.range(de, a);
-  });
+async function construireProjets(ctx: Bo3Contexte, rows: Row[], liste = false): Promise<Projet[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => s(r.id));
 
@@ -121,34 +121,60 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
   const [props, quotes, acts] = await Promise.all([
     lire((lot, de, a) => ctx.supabase
       .from("lead_circuit_proposals")
-      .select("id, lead_id, agency_id, status, brief_sent_at, proposal_received_at, proposal_declined_at, agency_proposal_price, agency_proposal_duration_days, agency_proposal_summary, agency_proposal_payload, converted_quote_id, created_at")
+      .select(liste
+        ? "id, lead_id, agency_id, status, brief_sent_at, proposal_received_at, proposal_declined_at, acknowledged_at:agency_proposal_payload->>acknowledged_at"
+        : "id, lead_id, agency_id, status, brief_sent_at, proposal_received_at, proposal_declined_at, agency_proposal_price, agency_proposal_duration_days, agency_proposal_summary, agency_proposal_payload, converted_quote_id")
       .in("lead_id", lot)
       .not("brief_sent_at", "is", null)
       .order("brief_sent_at").order("id")
       .range(de, a)),
-    lire((lot, de, a) => ctx.supabase.from("quotes").select("id, lead_id, kind, summary, items, created_at, sent_at, sent_via").in("lead_id", lot).eq("kind", "da_traveler").order("created_at").order("id").range(de, a)),
-    lire((lot, de, a) => ctx.supabase.from("activities").select("lead_id, kind, detail, payload, created_at").in("lead_id", lot).in("kind", ACT_KINDS).order("created_at").order("id").range(de, a)),
+    lire((lot, de, a) => ctx.supabase.from("quotes").select(liste
+      ? "id, lead_id, created_at, sent_at, version:items->v, agency_id:items->>agence_id"
+      : "id, lead_id, summary, items, created_at, sent_at, sent_via")
+      .in("lead_id", lot).eq("kind", "da_traveler").order("created_at").order("id").range(de, a)),
+    lire((lot, de, a) => ctx.supabase.from("activities").select(liste
+      ? "lead_id, kind, created_at, email_kind:payload->>email_kind, occurred_at:payload->>occurred_at, stage:payload->>stage, db_status:payload->>db_status"
+      : "lead_id, kind, detail, payload, created_at")
+      .in("lead_id", lot).in("kind", liste ? LIST_ACT_KINDS : ACT_KINDS).order("created_at").order("id").range(de, a)),
   ]);
 
-  const parLead = <T extends Row>(liste: T[] | null) => {
-    const m = new Map<string, T[]>();
-    for (const r of liste ?? []) { const k = s(r.lead_id); m.set(k, [...(m.get(k) ?? []), r]); }
+  const parLead = (lignes: Row[]) => {
+    const m = new Map<string, Row[]>();
+    for (const r of lignes) {
+      const id = s(r.lead_id);
+      const groupe = m.get(id);
+      if (groupe) groupe.push(r);
+      else m.set(id, [r]);
+    }
     return m;
   };
-  // Lues en plusieurs paquets : on remet chaque liste dans l'ordre du temps.
-  const chrono = (k: string) => (x: Row, y: Row) => Date.parse(s(x[k])) - Date.parse(s(y[k]));
-  const P = parLead(props.sort(chrono("brief_sent_at"))), Q = parLead(quotes.sort(chrono("created_at"))), A = parLead(acts.sort(chrono("created_at")));
+  // Chaque lead n'est présent que dans un seul paquet. L'ordre SQL est déjà chronologique pour son groupe.
+  const P = parLead(props);
+  const Q = parLead(quotes);
+  const A = parLead(acts);
 
-  return rows.map((r) => {
+  return rows.map((row) => {
+    const r: Row = liste ? { ...row, ai_qualification_payload: { trame_v3: row.trame_v3 } } : row;
     const id = s(r.id);
     const intake = o(r.intake_payload);
-    const trame = trameInterne(o(r.ai_qualification_payload).trame_v3) ?? trameDepuisSite(intake.trame);
-    const manque = manqueDe(trame);
-    const acts = A.get(id) ?? [];
+    const sourceTrame = trameInterne(o(r.ai_qualification_payload).trame_v3) ?? trameDepuisSite(intake.trame);
+    const confirmedBudget = readConfirmedQualificationBudget(intake);
+    const trame = sourceTrame && confirmedBudget
+      ? { ...sourceTrame, budget: formatQualificationBudget(confirmedBudget) || null }
+      : sourceTrame;
+    const manque = manqueDe(sourceTrame);
+    if (confirmedBudget) {
+      const budgetIndex = manque.indexOf("budget");
+      const budgetKnown = confirmedBudget.currency && confirmedBudget.unit && (confirmedBudget.min ?? confirmedBudget.max) !== null;
+      if (budgetKnown && budgetIndex >= 0) manque.splice(budgetIndex, 1);
+      if (!budgetKnown && budgetIndex < 0) manque.push("budget");
+    }
+    const activites = A.get(id) ?? [];
+    const acts = liste ? activites.map<Row>((a) => ({ ...a, payload: { email_kind: a.email_kind, occurred_at: a.occurred_at, stage: a.stage, db_status: a.db_status } })) : activites;
     const cycleActs = acts.slice(acts.findLastIndex((a) => a.kind === "lead_reset") + 1);
     const premiere = cycleActs.find((a) => ["first_response", "traveler_link_sent"].includes(s(a.kind)) || (["email_sent", "email_sent_externally"].includes(s(a.kind)) && ["welcome", "qualification"].includes(s(o(a.payload).email_kind))));
     const consultations: Consultation[] = (P.get(id) ?? []).map((c) => {
-      const pl = o(c.agency_proposal_payload);
+      const pl = liste ? { acknowledged_at: c.acknowledged_at } : o(c.agency_proposal_payload);
       const recu = c.proposal_received_at ? s(c.proposal_received_at) : null;
       return {
         id: s(c.id),
@@ -164,11 +190,14 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
       };
     });
     const quotesLead = Q.get(id) ?? [];
-    const devis = quotesLead.length ? devisDe(quotesLead[quotesLead.length - 1]) : null;
+    const dernierDevis = quotesLead.at(-1);
+    const devis = dernierDevis ? devisDe(liste
+      ? { ...dernierDevis, items: { v: dernierDevis.version, agence_id: dernierDevis.agency_id } }
+      : dernierDevis) : null;
     const messages: Message[] = acts
       .filter((a) => o(a.payload).k)
       .map((a) => ({ t: s(a.created_at), k: s(o(a.payload).k) as Message["k"], s: s(o(a.payload).s) || s(a.detail), b: s(o(a.payload).b) }));
-    if (!messages.length) messages.push({ t: s(r.created_at), k: "sys", s: "Projet reçu", b: sourceDe(r) === "whatsapp" ? "Premier message WhatsApp." : "Arrivé par le site." });
+    if (!liste && !messages.length) messages.push({ t: s(r.created_at), k: "sys", s: "Projet reçu", b: sourceDe(r) === "whatsapp" ? "Premier message WhatsApp." : "Arrivé par le site." });
     const dbStatus = s(r.status);
     const perdu = acts.filter((a) => s(a.kind) === "lost").pop();
     const blocs = o(r.qualification_blocks);
@@ -208,8 +237,41 @@ export async function chargerProjets(ctx: Bo3Contexte, opts: { id?: string } = {
   });
 }
 
+export async function chargerProjets(ctx: Bo3Contexte, { id }: { id?: string } = {}): Promise<Projet[]> {
+  const rows = await tout((de, a) => {
+    const q = ctx.supabase.from("leads").select(LEAD_COLS).is("deleted_at", null);
+    return (id ? q.eq("id", id) : q.order("created_at", { ascending: false }).order("id")).range(de, a);
+  });
+  return construireProjets(ctx, rows);
+}
+
+export async function chargerProjetDepuisLigne(ctx: Bo3Contexte, row: Row): Promise<Projet> {
+  const [projet] = await construireProjets(ctx, [row]);
+  return projet;
+}
+
+export async function chargerProjetsListe(ctx: Bo3Contexte): Promise<ProjetListe[]> {
+  const rows = await tout((de, a) => ctx.supabase.from("leads").select(LIST_LEAD_COLS).is("deleted_at", null)
+    .order("created_at", { ascending: false }).order("id").range(de, a));
+  const projets = await construireProjets(ctx, rows, true);
+  return projets.map((p) => ({
+    id: p.id, ref: p.ref, nom: p.nom, source: p.source, statut: p.statut, recu: p.recu, premiereReponse: p.premiereReponse,
+    agenceChoisie: p.agenceChoisie, texte: p.texte, manque: p.manque, relancesVoyageur: p.relancesVoyageur, issue: p.issue, closedAt: p.closedAt,
+    trame: p.trame ? {
+      titre: p.trame.titre,
+      cadre: { mois: p.trame.cadre.mois, duree: p.trame.cadre.duree },
+      groupe: { nombre: p.trame.groupe.nombre },
+      jours: p.trame.jours.map(({ lieux }) => ({ lieux: lieux.slice(0, 1) })),
+    } : null,
+    consultations: p.consultations.map(({ id, agence, envoye, accuse, refus, retenue, proposition }) => ({
+      id, agence, envoye, accuse, refus, retenue, proposition: proposition ? { recu: proposition.recu } : null,
+    })),
+    devis: p.devis ? { source: p.devis.source, envoye: p.devis.envoye } : null,
+  }));
+}
+
 /** Les slugs d'agence du site (« riwaya-travel ») deviennent les identifiants de la base. */
-export function resoudreAgenceChoisie(projets: Projet[], agences: Agence[]): Projet[] {
+export function resoudreAgenceChoisie<T extends Pick<Projet, "agenceChoisie">>(projets: T[], agences: Agence[]): T[] {
   return projets.map((p) => {
     if (!p.agenceChoisie) return p;
     const a = agences.find((x) => x.id === p.agenceChoisie || x.slug === p.agenceChoisie || x.slug.startsWith(p.agenceChoisie ?? "") || (p.agenceChoisie ?? "").startsWith(x.slug));

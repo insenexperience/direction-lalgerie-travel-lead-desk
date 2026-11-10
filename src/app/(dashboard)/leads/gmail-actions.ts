@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { isUuid } from "@/lib/is-uuid";
-import type { DeskInboundMail } from "@/lib/email/gmail-intake";
+import { loadDeskGmail } from "@/lib/email/desk-gmail-read";
 
 export async function readDeskGmail(leadId: string) {
   if (typeof leadId !== "string" || !isUuid(leadId)) return { ok: false as const };
@@ -14,8 +14,5 @@ export async function readDeskGmail(leadId: string) {
     db.from("profiles").select("role").eq("id", user.id).maybeSingle(),
   ]);
   if (!lead || (profile?.role !== "admin" && lead.referent_id !== user.id)) return { ok: false as const };
-  const { data, error } = await db.from("desk_gmail_messages")
-    .select("gmail_id,gmail_thread_id,sender,subject,received_at,kind,excerpt,attachments")
-    .eq("lead_id", leadId).order("received_at", { ascending: false }).limit(20).returns<DeskInboundMail[]>();
-  return error ? { ok: false as const } : { ok: true as const, messages: data ?? [] };
+  return loadDeskGmail(db, leadId);
 }

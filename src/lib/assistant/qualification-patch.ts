@@ -1,5 +1,7 @@
 import { colonnesDepuisTrame, trameDepuisSite, trameInterne, trameVide } from "@/lib/bo3/trame";
 import { parseQualificationImport, qualificationLabels, type QualificationChange, type QualificationImport } from "@/lib/assistant/qualification";
+import type { AssistantBudget } from "@/lib/assistant/types";
+import { buildQualificationBudgetPatch } from "@/lib/qualification-budget";
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -14,7 +16,21 @@ function leadTrame(lead: QualificationLead) {
   return trameInterne(object(lead.ai_qualification_payload).trame_v3) ?? trameDepuisSite(object(lead.intake_payload).trame);
 }
 
-export function buildQualificationPatch(lead: QualificationLead, value: QualificationImport) {
+type BudgetConfirmation = NonNullable<Parameters<typeof buildQualificationBudgetPatch>[2]>;
+
+export function buildAssistantBudgetPatch(lead: QualificationLead, value: AssistantBudget | null, confirmation?: BudgetConfirmation) {
+  const budget = buildQualificationBudgetPatch(lead.intake_payload, value ?? {
+    min: null, max: null, currency: null, unit: null, includesFlights: null,
+  }, confirmation);
+  const ai = object(lead.ai_qualification_payload);
+  const trame = object(ai.trame_v3);
+  return {
+    ...budget,
+    ...(Array.isArray(trame.jours) ? { ai_qualification_payload: { ...ai, trame_v3: { ...trame, budget: budget.budget || null } } } : {}),
+  };
+}
+
+export function buildQualificationPatch(lead: QualificationLead, value: QualificationImport, confirmation?: BudgetConfirmation) {
   const intake = object(lead.intake_payload);
   const ai = object(lead.ai_qualification_payload);
   const trame = leadTrame(lead) ?? trameVide(lead.trip_summary || undefined);
@@ -58,15 +74,6 @@ export function buildQualificationPatch(lead: QualificationLead, value: Qualific
   }
   if (value.constraints) facts.constraints = value.constraints;
   if (value.budgetReference) facts.budget_reference = value.budgetReference;
-  if (value.budgetStatus === "unknown") {
-    trame.budget = null;
-    Object.assign(facts, { budget_amount: null, budget_min: null, budget_max: null, currency: null, budget_unit: null, budget_includes_flights: null });
-    Object.assign(columns, { budget: "", budget_min: null, budget_max: null, budget_unit: null });
-  } else if (value.budgetStatus === "confirmed") {
-    trame.budget = qualificationLabels(value).find(({ label }) => label === "Budget")?.value ?? null;
-    Object.assign(facts, { budget_amount: value.budgetAmount, budget_min: null, budget_max: null, currency: value.budgetCurrency, budget_unit: value.budgetUnit });
-    Object.assign(columns, { budget_min: value.budgetCurrency === "EUR" ? value.budgetAmount : null, budget_max: null, budget_unit: value.budgetUnit });
-  }
   const previous = object(intake.qualification_facts);
   const previousImport: QualificationImport = parseQualificationImport(intake.da_sales_qualification) ?? {};
   const currentImport = { ...previousImport, ...value };
@@ -87,13 +94,23 @@ export function buildQualificationPatch(lead: QualificationLead, value: Qualific
   const legacy = colonnesDepuisTrame(trame);
   if ((value.period || value.flexibility) && legacy.trip_dates) columns.trip_dates = legacy.trip_dates;
   if ((total !== undefined || compositionChanged) && legacy.travelers) columns.travelers = legacy.travelers;
-  if (value.budgetStatus === "confirmed" && legacy.budget) columns.budget = legacy.budget;
-  return {
+  const patch = {
     ...columns,
     intake_payload: { ...intake, da_sales_qualification: currentImport, qualification_facts: {
       ...previous, ...facts, da_sales_confirmed_keys: [...new Set([...priorKeys, ...Object.keys(facts)])],
     } },
     ai_qualification_payload: { ...ai, trame_v3: trame },
+  };
+  const includesFlights = typeof previous.budget_includes_flights === "boolean" ? previous.budget_includes_flights : null;
+  const confirmedBudget = value.budgetStatus === "confirmed" && value.budgetAmount && value.budgetCurrency && value.budgetUnit
+    ? { min: value.budgetAmount, max: null, currency: value.budgetCurrency, unit: value.budgetUnit, includesFlights }
+    : null;
+  if (value.budgetStatus !== "unknown" && !confirmedBudget) return patch;
+  const budgetPatch = buildAssistantBudgetPatch({ ...lead, ...patch }, confirmedBudget, confirmation);
+  return {
+    ...patch,
+    ...budgetPatch,
+    intake_payload: { ...budgetPatch.intake_payload, da_sales_qualification: currentImport },
   };
 }
 
