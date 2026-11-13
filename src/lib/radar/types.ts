@@ -1,3 +1,4 @@
+import type { AssistantEditPreview } from "@/lib/assistant/types";
 import type { BaseKey } from "./bases";
 
 /** Valeur d'une propriété telle que le module la manipule (texte en Markdown léger, dates AAAA-MM-JJ). */
@@ -28,4 +29,6 @@ export type ResultatAction = { ok: true; id?: string } | { ok: false; erreur: st
 export type Proposition =
   | { id: string; kind: "update"; base: BaseKey; ficheId: string; titre: string; changes: Record<string, Valeur>; lignes: { champ: string; avant: string; apres: string }[]; raison?: string }
   | { id: string; kind: "create"; base: BaseKey; titre: string; changes: Record<string, Valeur>; lignes: { champ: string; avant: string; apres: string }[]; raison?: string }
-  | { id: string; kind: "comment"; base: BaseKey; ficheId: string; titre: string; texte: string };
+  | { id: string; kind: "comment"; base: BaseKey; ficheId: string; titre: string; texte: string }
+  /** Écriture dans un dossier du Desk (DA Sales) : note interne ajoutée ou priorité, appliquée par confirmAssistantEdit. */
+  | { id: string; kind: "dossier"; ref: string; titre: string; apercu: AssistantEditPreview; lignes: { champ: string; avant: string; apres: string }[]; raison?: string };

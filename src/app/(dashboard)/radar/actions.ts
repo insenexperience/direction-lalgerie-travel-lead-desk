@@ -78,7 +78,7 @@ export async function lireDetail(id: string): Promise<{ ok: true; detail: Detail
 
 /** Applique une proposition de l'agent que la personne vient d'accepter. Tout est revalidé ici. */
 export async function appliquerProposition(p: Proposition): Promise<ResultatAction> {
-  if (!p || !estBase(p.base)) return refuse("Proposition invalide.");
+  if (!p || p.kind === "dossier" || !estBase(p.base)) return refuse("Proposition invalide.");
   const base: BaseKey = p.base;
   if (p.kind === "update") {
     const { changes, erreurs } = normaliserChangements(base, p.changes);

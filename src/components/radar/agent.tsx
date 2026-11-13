@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { appliquerProposition } from "@/app/(dashboard)/radar/actions";
+import { confirmAssistantEdit } from "@/app/(dashboard)/settings/assistant-actions";
 import { Icon, useToast } from "@/components/bo3/ui";
 import { BASES } from "@/lib/radar/bases";
 import { aujourdhui } from "@/lib/radar/format";
@@ -36,7 +37,7 @@ const nid = () => Math.random().toString(36).slice(2, 10);
 function enTours(items: Item[]): { role: "user" | "assistant"; content: string }[] {
   return items.map((it) => {
     if (it.k === "user") return { role: "user" as const, content: it.texte };
-    const bilans = it.props.map(({ p, etat }) => `(Proposition « ${p.titre} » ${p.kind === "comment" ? "de commentaire" : p.kind === "create" ? "de création" : "de modification"} : ${etat === "ok" ? "acceptée et écrite dans Notion" : etat === "refus" ? "refusée par la personne" : etat === "erreur" ? "acceptée mais refusée par Notion" : "pas encore validée"})`);
+    const bilans = it.props.map(({ p, etat }) => `(Proposition « ${p.titre} » ${p.kind === "comment" ? "de commentaire" : p.kind === "create" ? "de création" : p.kind === "dossier" ? "d'écriture dans le dossier" : "de modification"} : ${etat === "ok" ? (p.kind === "dossier" ? "acceptée et écrite dans le Desk" : "acceptée et écrite dans Notion") : etat === "refus" ? "refusée par la personne" : etat === "erreur" ? "acceptée mais refusée à l'écriture" : "pas encore validée"})`);
     return { role: "assistant" as const, content: [it.texte, ...bilans].filter(Boolean).join("\n") || "(réponse vide)" };
   }).filter((t) => t.content.trim());
 }
@@ -124,6 +125,13 @@ export function AgentRadar() {
     if (!pr) return;
     if (!accepter) { changerEtat("refus"); return; }
     demarrer(async () => {
+      if (pr.p.kind === "dossier") {
+        const d = await confirmAssistantEdit(pr.p.apercu).catch(() => ({ ok: false as const, error: "Le Desk n'a pas pu enregistrer." }));
+        if (!d.ok) { changerEtat("erreur", "error" in d ? String(d.error) : "Écriture refusée."); toast("Le Desk a refusé l'écriture"); return; }
+        changerEtat("ok");
+        toast("Dossier mis à jour dans le Desk");
+        return;
+      }
       const r = await appliquerProposition(pr.p);
       if (!r.ok) { changerEtat("erreur", r.erreur); toast("Notion a refusé la proposition"); return; }
       changerEtat("ok");
@@ -220,6 +228,33 @@ export function AgentRadar() {
 
 function CarteProposition({ pp, onOpen, onDecide }: { pp: Prop; onOpen: (id: string) => void; onDecide: (accepter: boolean) => void }) {
   const { p, etat, msg } = pp;
+  if (p.kind === "dossier") {
+    return (
+      <div className={`rdag__prop e-${etat}`}>
+        <div className="rdag__prop-hd">
+          <span className="lbl">Écrire dans le dossier · DA Sales</span>
+          {etat === "ok" && <span className="ok"><Icon n="check" s={11} /> Écrit dans le Desk</span>}
+          {etat === "refus" && <span className="tag mute">Ignorée</span>}
+        </div>
+        <a className="rdag__prop-t" href={`/leads/${p.apercu.leadId}`}>{p.titre}</a>
+        <table className="rdag__diff">
+          <tbody>
+            {p.lignes.map((l, i) => (
+              <tr key={i}><th>{l.champ}</th><td>{l.avant && <><s>{l.avant}</s> <Icon n="arrowR" s={10} /> </>}<b>{l.apres}</b></td></tr>
+            ))}
+          </tbody>
+        </table>
+        {p.raison && <div className="mt">{p.raison}</div>}
+        {etat === "erreur" && <div className="excl">{msg}</div>}
+        {(etat === "attente" || etat === "erreur") && (
+          <div className="rdag__prop-b">
+            <button type="button" className="btn s xs" onClick={() => onDecide(false)}>Ignorer</button>
+            <button type="button" className="btn p xs" onClick={() => onDecide(true)}><Icon n="check" s={11} /> {etat === "erreur" ? "Réessayer" : "Appliquer"}</button>
+          </div>
+        )}
+      </div>
+    );
+  }
   const b = BASES[p.base];
   const titre = p.kind === "create" ? `Créer ${b.unite} · ${b.label}` : p.kind === "comment" ? "Commenter la fiche" : "Modifier la fiche";
   return (

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getOpenAIClient, openaiModel } from "@/lib/ai/agent";
 import { contexteBo3 } from "@/lib/bo3/acces";
-import { boucleAgent, messageSysteme, type Evenement, type Tour } from "@/lib/radar/agent";
+import { claudePrioritaire, modeleClaude } from "@/lib/ai/claude";
+import { boucleAgent, boucleAgentClaude, messageSysteme, type Evenement, type Tour } from "@/lib/radar/agent";
 import { chargerContexteAgent, chargerRadar } from "@/lib/radar/donnees";
 import { resumeDesk } from "@/lib/radar/desk";
 import { estIdNotion, sansTirets } from "@/lib/radar/notion-map";
@@ -15,6 +16,8 @@ export const maxDuration = 60;
  * Agent DA du module Radar. Réponse en flux NDJSON : une ligne JSON par événement
  * ({ t: "texte" | "outil" | "proposition" | "erreur" | "fin" }).
  * Réservé aux opérateurs connectés ; l'agent ne fait que lire et proposer.
+ * Claude si ANTHROPIC_API_KEY est posée (modèle RADAR_CLAUDE_MODEL, sinon DESK_CLAUDE_MODEL),
+ * OpenAI sinon (RADAR_AGENT_MODEL, sinon OPENAI_MODEL). DESK_AI_PROVIDER=openai force OpenAI.
  */
 export async function POST(request: Request) {
   const origine = request.headers.get("origin");
@@ -26,8 +29,9 @@ export async function POST(request: Request) {
   if (!ctx || !ctx.userId || (ctx.role !== "admin" && ctx.role !== "lead_referent")) {
     return NextResponse.json({ erreur: "Session expirée : reconnecte-toi." }, { status: 401 });
   }
-  const client = getOpenAIClient();
-  if (!client) return NextResponse.json({ erreur: "OPENAI_API_KEY n'est pas configurée sur ce déploiement." }, { status: 503 });
+  const claude = claudePrioritaire();
+  const client = claude ? null : getOpenAIClient();
+  if (!claude && !client) return NextResponse.json({ erreur: "Aucune clé d'IA n'est configurée sur ce déploiement (ANTHROPIC_API_KEY ou OPENAI_API_KEY)." }, { status: 503 });
 
   let corps: { tours?: unknown; vue?: unknown; ficheId?: unknown };
   try {
@@ -60,7 +64,10 @@ export async function POST(request: Request) {
     async start(c) {
       const envoyer = (e: Evenement) => c.enqueue(enc.encode(JSON.stringify(e) + "\n"));
       try {
-        for await (const e of boucleAgent({ client, modele: process.env.RADAR_AGENT_MODEL?.trim() || openaiModel(), systeme, tours, bases: radar.bases, signal: request.signal })) envoyer(e);
+        const boucle = claude
+          ? boucleAgentClaude({ modele: modeleClaude(process.env.RADAR_CLAUDE_MODEL), systeme, tours, bases: radar.bases, signal: request.signal })
+          : boucleAgent({ client: client!, modele: process.env.RADAR_AGENT_MODEL?.trim() || openaiModel(), systeme, tours, bases: radar.bases, signal: request.signal });
+        for await (const e of boucle) envoyer(e);
       } catch (e) {
         if (!request.signal.aborted) {
           console.error("[api/radar/agent]", e instanceof Error ? e.message : e);
