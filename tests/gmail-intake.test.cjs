@@ -53,6 +53,38 @@ test("a partial history batch never advances past the messages it processed", ()
   assert.throws(() => gmailHistoryBatch({ historyId, nextPageToken: "unexpected-empty-page" }));
 });
 
+test("live search reads the shared mailbox only after verifying its identity", async (t) => {
+  const { searchDeskGmail } = load("gmail-sync");
+  const keys = ["DESK_GMAIL_CLIENT_ID", "DESK_GMAIL_CLIENT_SECRET", "DESK_GMAIL_REFRESH_TOKEN"];
+  const values = keys.map(key => process.env[key]);
+  keys.forEach(key => { process.env[key] = "fixture"; });
+  t.after(() => keys.forEach((key, index) => {
+    if (values[index] === undefined) delete process.env[key];
+    else process.env[key] = values[index];
+  }));
+  let address = "wrong@example.test";
+  const urls = [];
+  t.mock.method(globalThis, "fetch", async (input, init) => {
+    const url = new URL(input);
+    urls.push(url);
+    if (url.hostname === "oauth2.googleapis.com") return Response.json({ access_token: "fixture-token" });
+    assert.equal(init.headers.Authorization, "Bearer fixture-token");
+    assert.equal(init.method, undefined);
+    if (url.pathname.endsWith("/profile")) return Response.json({ emailAddress: address });
+    if (url.pathname.endsWith("/messages")) return Response.json({ messages: [{ id: "abc" }, { id: "not-an-id" }], nextPageToken: "page-2" });
+    assert.ok(url.pathname.endsWith("/messages/abc"));
+    assert.equal(url.searchParams.get("format"), "full");
+    return Response.json({ threadId: "f1", snippet: "Offre de circuit" });
+  });
+  await assert.rejects(searchDeskGmail("Djanet", 7), /Unexpected Gmail account/);
+  assert.equal(urls.length, 2);
+  address = "contact@directionlalgerie.com";
+  const result = await searchDeskGmail("Djanet", 7);
+  assert.deepEqual(result, { messages: [{ threadId: "f1", snippet: "Offre de circuit" }], more: true });
+  assert.equal(urls[4].searchParams.get("q"), "newer_than:7d -in:sent -in:drafts Djanet");
+  assert.equal(urls[4].searchParams.get("includeSpamTrash"), "false");
+});
+
 test("the mail shortcut opens a reading action without diverting compose requests", () => {
   const { isGmailReadRequest } = load("gmail-intake");
   assert.equal(isGmailReadRequest("Lis les derniers e-mails de ce dossier"), true);

@@ -224,6 +224,7 @@ flowchart TB
 | 2026-04-20 | Workspace qualification unifié : `LeadQualificationWorkspace` + agent Claude Haiku + 3 server actions. Migration `destination_main`, `travel_desire_narrative`, `qualification_notes`. |
 | 2026-04-21 | Back Office v2 : fix sidebar sticky (layout), sparklines + top agencies réels dans Pilotage business, module Gestion agences v1 (CRUD, contacts, logos, détail 5 sections). |
 | 2026-09-27 | Back office v3 : file de travail `/inbox`, fiche projet `/leads/[id]` pilotée par la trame, 7 étapes affichées, horloges 48 h voyageur et agence, brief anonyme, proposition Direction l'Algérie (PDF v3), lien voyageur raccourci `/q/<token>?champs=`. `/metrics` → `/dashboard`, `/leads/[id]/workflow` → `/leads/[id]`, ancienne liste des agences sous `/agencies/gestion`. Suppression du déclencheur en double `leads_sync_contact`, qui empêchait tout passage en gagné ou perdu. |
+| 2026-11-13 | Agent DA disponible sur chaque écran du Desk. Le contexte suit le dossier et l’onglet actifs. L’opérateur valide les modifications proposées. La génération du brief depuis l’agent suit la même transition que depuis la fiche. |
 
 ---
 

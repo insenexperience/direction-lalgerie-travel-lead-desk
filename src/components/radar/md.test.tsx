@@ -12,7 +12,7 @@ describe("Md", () => {
     assert.match(h, /<h3>Titre<\/h3>/);
     assert.match(h, /<ul><li>un<\/li><li class="n1">deux<\/li><\/ul>/);
     assert.match(h, /<ol><li>trois<\/li><\/ol>/);
-    assert.match(h, /<th>a<\/th><th>b<\/th><\/tr><tr><td>1<\/td>/);
+    assert.match(h, /<thead><tr><th scope="col">a<\/th><th scope="col">b<\/th><\/tr><\/thead><tbody><tr><td>1<\/td>/);
     assert.match(h, /<pre><code>x &lt; y<\/code><\/pre>/);
   });
 
@@ -21,6 +21,14 @@ describe("Md", () => {
     assert.match(h, /<a href="https:\/\/directionlalgerie.com" target="_blank" rel="noopener noreferrer">ok<\/a>/);
     assert.doesNotMatch(h, /href="javascript/);
     assert.doesNotMatch(h, /<script>/);
+  });
+
+  it("active les liens Desk de l’agent sans autoriser les chemins externes ou détournés", () => {
+    const h = renderToStaticMarkup(<Md liensDesk texte={"| Dossier | État |\n| --- | --- |\n| [DA-123](/leads/123?tab=voyageur) | Offre \\| à vérifier |\n\n[sortie](//example.com) [traversée](/leads/../login) [encodé](/radar/%2f%2fevil.example)"} />);
+    assert.match(h, /href="\/leads\/123\?tab=voyageur"/);
+    assert.match(h, /Offre \| à vérifier/);
+    assert.equal(h.match(/href=/g)?.length, 1);
+    assert.doesNotMatch(rendu("[Dossier](/leads/123)"), /href=/);
   });
 
   it("gère gras, italique, code et adresses nues", () => {

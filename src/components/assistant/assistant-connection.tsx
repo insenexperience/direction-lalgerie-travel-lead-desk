@@ -66,11 +66,11 @@ export function AssistantConnection({ refresh = false }: { refresh?: boolean }) 
       <div><b>Claude</b>{status ? <> · {statusLabels[status.state]}</> : pending ? " · Chargement…" : null}</div>
       {status?.state === "unconfigured" && admin && <p>Ajoutez <code>ANTHROPIC_API_KEY</code> aux secrets du serveur pour connecter Claude.</p>}
       {status?.state === "unavailable" && admin && <p>Vérifiez que la migration des réglages de l’assistant est appliquée.</p>}
-      {status?.state === "connected" && <p>Claude peut proposer un budget, une note ou un changement de priorité dans le dossier ouvert. Chaque modification est enregistrée après votre validation.</p>}
+      {status?.state === "connected" && <p>Agent DA peut préparer des modifications de dossier, des brouillons et des imports de qualification. Vous validez chaque écriture avant son enregistrement.</p>}
       {status && !admin && status.state !== "connected" && <p>Un administrateur peut connecter l’assistant.</p>}
       {admin && status && (status.enabled || status.state === "disabled") && (
         <div><button type="button" className="btn s" disabled={pending} onClick={() => toggle(!status.enabled)}>
-          {pending ? "Vérification…" : status.enabled ? "Désactiver Claude" : "Tester et activer Claude"}
+          {pending ? "Vérification…" : status.enabled ? "Désactiver les actions DA Sales" : "Tester et activer les actions DA Sales"}
         </button></div>
       )}
       {error && <p role="alert">{error}</p>}

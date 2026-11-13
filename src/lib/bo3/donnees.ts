@@ -18,9 +18,9 @@ export const donneesBo3 = cache(async () => {
 });
 
 /** DA Sales lit les dossiers complets pour les rapprochements et les résumés détaillés. */
-export async function donneesDossiersBo3() {
+export const donneesDossiersBo3 = cache(async () => {
   const ctx = await contexteBo3();
   if (!ctx?.userId || ctx.apercu || !["admin", "lead_referent"].includes(ctx.role ?? "")) return null;
   const [agences, projets] = await Promise.all([chargerAgences(ctx), chargerProjets(ctx)]);
   return { ctx, agences, projets: resoudreAgenceChoisie(projets, agences), now: maintenantBo3() };
-}
+});

@@ -18,4 +18,6 @@
 
 Le Desk mémorise le dernier lot traité et déduplique par ID de message Gmail. En cas d’échec, le prochain passage rejoue le lot. Si Google signale que le point de reprise est trop ancien, **Réglages** affiche l’erreur. Comparer la date du dernier succès avec Gmail, traiter la période manquante, puis faire réinitialiser le point de reprise par un administrateur de base. Le passage suivant démarrera au dernier état Gmail disponible. [Documentation Gmail sur l’historique et la reprise](https://developers.google.com/workspace/gmail/api/guides/sync).
 
+Agent DA lit les e-mails rapprochés des dossiers accessibles à l’opérateur. Un administrateur peut aussi demander une recherche des e-mails entrants directement dans la boîte partagée, y compris les fils sans référence de dossier. Cette recherche utilise le même accès Gmail en lecture seule, renvoie jusqu’à huit extraits et fournit des liens vers les fils d’origine.
+
 Pour suspendre la lecture, mettre `DESK_GMAIL_ENABLED=false` en production et redéployer. Pour retirer l’accès à la boîte, révoquer le consentement Google. Les messages importés restent consultables dans leurs dossiers jusqu’à suppression des copies dans la base.

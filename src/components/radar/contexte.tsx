@@ -32,6 +32,22 @@ type Ctx = {
 };
 
 const RadarCtx = createContext<Ctx | null>(null);
+type RadarAgentContext = Pick<Ctx, "vue" | "ouverte" | "trouver" | "noter" | "ajouter" | "ouvrir">;
+const AgentRadarCtx = createContext<RadarAgentContext | null>(null);
+const PublierRadar = createContext<((radar: RadarAgentContext | null) => void) | null>(null);
+
+export function RadarAgentProvider({ children }: { children: ReactNode }) {
+  const [radar, publier] = useState<RadarAgentContext | null>(null);
+  return (
+    <PublierRadar.Provider value={publier}>
+      <AgentRadarCtx.Provider value={radar}>{children}</AgentRadarCtx.Provider>
+    </PublierRadar.Provider>
+  );
+}
+
+export function useRadarAgentContext() {
+  return useContext(AgentRadarCtx);
+}
 
 export function useRadar(): Ctx {
   const c = useContext(RadarCtx);
@@ -43,6 +59,7 @@ const VIDE = Object.fromEntries(ORDRE.map((k) => [k, [] as Fiche[]])) as Record<
 
 export function RadarProvider({ donnees, children }: { donnees: DonneesRadar; children: ReactNode }) {
   const router = useRouter();
+  const publier = useContext(PublierRadar);
   const [locales, setLocales] = useState<Record<string, Locale>>({});
   const [ouverte, setOuverte] = useState<string | null>(null);
   const [vue, setVue] = useState("Accueil du radar");
@@ -85,6 +102,11 @@ export function RadarProvider({ donnees, children }: { donnees: DonneesRadar; ch
     ouverte, ouvrir: setOuverte, fermer: () => setOuverte(null),
     vue, setVue, recharger,
   }), [donnees, bases, noms, trouver, noter, ouverte, vue, recharger]);
+
+  useEffect(() => {
+    if (donnees.ok) publier?.({ vue, ouverte, trouver, noter, ajouter: noter, ouvrir: setOuverte });
+  }, [donnees.ok, publier, vue, ouverte, trouver, noter]);
+  useEffect(() => () => publier?.(null), [donnees.ok, publier]);
 
   return <RadarCtx.Provider value={valeur}>{children}</RadarCtx.Provider>;
 }
