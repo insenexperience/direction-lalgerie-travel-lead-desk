@@ -1,15 +1,12 @@
 import "server-only";
-import type { Bo3Contexte } from "@/lib/bo3/acces";
 import { LIEUX, ZONES, type Zone } from "@/lib/bo3/geo";
-import { chargerAgences, chargerProjets } from "@/lib/bo3/load";
-import { SOURCES, STATUTS, STATUT_LABEL } from "@/lib/bo3/types";
+import { SOURCES, STATUTS, STATUT_LABEL, type Agence, type Projet } from "@/lib/bo3/types";
 
 /**
  * Résumé du desk pour l'agent : uniquement des chiffres agrégés et la liste des agences partenaires.
  * Aucun nom, e-mail, téléphone ni message de voyageur ne sort d'ici.
  */
-export async function resumeDesk(ctx: Bo3Contexte): Promise<string> {
-  const [projets, agences] = await Promise.all([chargerProjets(ctx), chargerAgences(ctx)]);
+export function resumeDesk(projets: Projet[], agences: Agence[]): string {
   const ouverts = projets.filter((p) => p.statut !== "clos");
   const parStatut = STATUTS.map((s) => `${STATUT_LABEL[s]} ${projets.filter((p) => p.statut === s).length}`).join(", ");
   const parSource = (Object.keys(SOURCES) as (keyof typeof SOURCES)[]).map((s) => `${SOURCES[s]} ${projets.filter((p) => p.source === s).length}`).join(", ");

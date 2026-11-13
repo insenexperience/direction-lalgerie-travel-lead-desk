@@ -223,7 +223,13 @@ export async function confirmAssistantDeskAction(preview: { leadId: string; kind
   if (!project) return denied;
   if (kind === "brief") {
     const { briefToMarkdown, buildBrief } = await import("@/lib/bo3/projet");
-    const saved = await save({ generated_brief: briefToMarkdown(buildBrief(project)), brief_generated_at: now, brief_edited_at: now });
+    const changeEtape = ["new", "qualification", "refinement"].includes(project.dbStatus);
+    const saved = await save({
+      generated_brief: briefToMarkdown(buildBrief(project)),
+      brief_generated_at: now,
+      brief_edited_at: now,
+      ...(changeEtape ? { status: "agency_assignment" } : {}),
+    });
     return saved.ok ? { ok: true as const, message: "Brief préparé depuis la trame. Il est prêt à relire.", href: projectDeskLink(leadId, "agences") } : saved;
   }
   const token = existingLink ?? crypto.randomUUID();

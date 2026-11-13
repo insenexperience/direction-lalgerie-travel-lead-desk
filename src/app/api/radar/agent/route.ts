@@ -1,37 +1,56 @@
 import { NextResponse } from "next/server";
 import { getOpenAIClient, openaiModel } from "@/lib/ai/agent";
 import { contexteBo3 } from "@/lib/bo3/acces";
-import { boucleAgent, messageSysteme, type Evenement, type Tour } from "@/lib/radar/agent";
+import { claudePrioritaire, modeleClaude } from "@/lib/ai/claude";
+import { boucleAgent, boucleAgentClaude, messageSysteme, type Evenement, type Tour } from "@/lib/radar/agent";
 import { chargerContexteAgent, chargerRadar } from "@/lib/radar/donnees";
 import { resumeDesk } from "@/lib/radar/desk";
 import { estIdNotion, sansTirets } from "@/lib/radar/notion-map";
-import { ORDRE } from "@/lib/radar/bases";
+import { BASES, ORDRE, estBase, type BaseKey } from "@/lib/radar/bases";
+import { DESK_PROJECT_TABS, DESK_SURFACES, isDeskScope, projectDeskLink } from "@/lib/assistant/scope";
+import { cleanDeskText } from "@/lib/assistant/desk-data";
+import { donneesDossiersBo3 } from "@/lib/bo3/donnees";
+import { deskGmailConfiguration } from "@/lib/email/gmail-sync";
+import type { Fiche } from "@/lib/radar/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Agent DA du module Radar. Réponse en flux NDJSON : une ligne JSON par événement
+ * Agent DA du Desk. Réponse en flux NDJSON : une ligne JSON par événement
  * ({ t: "texte" | "outil" | "proposition" | "erreur" | "fin" }).
  * Réservé aux opérateurs connectés ; l'agent ne fait que lire et proposer.
+ * Claude si ANTHROPIC_API_KEY est posée (modèle RADAR_CLAUDE_MODEL, sinon DESK_CLAUDE_MODEL),
+ * OpenAI sinon (RADAR_AGENT_MODEL, sinon OPENAI_MODEL). DESK_AI_PROVIDER=openai force OpenAI.
  */
 export async function POST(request: Request) {
   const origine = request.headers.get("origin");
-  if (origine && new URL(origine).host !== new URL(request.url).host) {
-    return NextResponse.json({ erreur: "Origine refusée." }, { status: 403 });
+  if (origine) {
+    const host = request.headers.get("host") ?? new URL(request.url).host;
+    try {
+      const url = new URL(origine);
+      // Next peut normaliser l'hôte derrière son serveur local ou un proxy.
+      // Le navigateur calcule Sec-Fetch-Site à partir de l'origine visible.
+      const memeOrigine = request.headers.get("sec-fetch-site") === "same-origin";
+      if (!["http:", "https:"].includes(url.protocol) || (!memeOrigine && url.host !== host)) throw new Error("Origine différente");
+    } catch {
+      return NextResponse.json({ erreur: "Origine refusée." }, { status: 403 });
+    }
   }
 
   const ctx = await contexteBo3();
-  if (!ctx || !ctx.userId || (ctx.role !== "admin" && ctx.role !== "lead_referent")) {
+  if (!ctx || !ctx.userId || ctx.apercu || (ctx.role !== "admin" && ctx.role !== "lead_referent")) {
     return NextResponse.json({ erreur: "Session expirée : reconnecte-toi." }, { status: 401 });
   }
-  const client = getOpenAIClient();
-  if (!client) return NextResponse.json({ erreur: "OPENAI_API_KEY n'est pas configurée sur ce déploiement." }, { status: 503 });
+  const claude = claudePrioritaire();
+  const client = claude ? null : getOpenAIClient();
+  if (!claude && !client) return NextResponse.json({ erreur: "Aucune clé d'IA n'est configurée sur ce déploiement (ANTHROPIC_API_KEY ou OPENAI_API_KEY)." }, { status: 503 });
 
-  let corps: { tours?: unknown; vue?: unknown; ficheId?: unknown };
+  let corps: { tours?: unknown; scope?: unknown; ficheId?: unknown };
   try {
     corps = await request.json();
+    if (!corps || typeof corps !== "object") throw new Error("Requête invalide");
   } catch {
     return NextResponse.json({ erreur: "Requête illisible." }, { status: 400 });
   }
@@ -43,24 +62,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ erreur: "Message vide." }, { status: 400 });
   }
 
-  const radar = await chargerRadar();
-  if (!radar.ok) return NextResponse.json({ erreur: radar.message }, { status: 503 });
-  const [contexte, desk] = await Promise.all([
+  const scope = isDeskScope(corps.scope) ? corps.scope : undefined;
+  const leadId = scope?.screen === "project" ? scope.leadId : undefined;
+  const [radar, contexte, donneesDesk] = await Promise.all([
+    chargerRadar(),
     chargerContexteAgent(),
-    resumeDesk(ctx).catch(() => "Résumé du desk indisponible pour le moment."),
+    donneesDossiersBo3().catch(() => null),
   ]);
 
-  const vue = typeof corps.vue === "string" ? corps.vue.slice(0, 200) : "Radar";
-  const id = estIdNotion(corps.ficheId) ? sansTirets(corps.ficheId) : "";
-  const fiche = id ? ORDRE.flatMap((k) => radar.bases[k]).find((r) => r.id === id) ?? null : null;
-  const systeme = messageSysteme({ contexte, bases: radar.bases, charge: radar.charge, desk, vue, fiche });
+  const bases = radar.ok ? radar.bases : Object.fromEntries(ORDRE.map(k => [k, [] as Fiche[]])) as Record<BaseKey, Fiche[]>;
+  const dossier = donneesDesk?.projets.find(p => p.id === leadId);
+  const actif = scope?.screen === "project" && !dossier ? undefined : scope;
+  const id = (!actif || actif.screen === "radar") && estIdNotion(corps.ficheId) ? sansTirets(corps.ficheId) : "";
+  const fiche = id ? ORDRE.flatMap(k => bases[k]).find(r => r.id === id) ?? null : null;
+  const vue = actif?.screen === "project" && dossier
+    ? `Dossier ${dossier.ref} · ${DESK_PROJECT_TABS[actif.tab].label} · ${projectDeskLink(dossier.id, actif.tab)}`
+    : actif?.screen === "radar" && actif.item && estBase(actif.item) ? `Radar · ${BASES[actif.item].label}`
+      : actif && actif.screen !== "project" ? DESK_SURFACES[actif.screen].label : "Desk";
+  const desk = donneesDesk ? resumeDesk(donneesDesk.projets, donneesDesk.agences) : "Résumé du Desk indisponible.";
+  const boitePartagee = ctx.role === "admin" && deskGmailConfiguration() === "configured";
+  const systeme = messageSysteme({ contexte, bases, charge: radar.ok ? radar.charge : "", desk, vue, fiche, boitePartagee });
+  const toursMasques = tours.map(tour => ({ ...tour, content: cleanDeskText(tour.content, donneesDesk?.projets ?? []) }));
+  const options = { systeme, tours: toursMasques, bases, contexteDesk: actif, boitePartagee, signal: request.signal };
 
   const enc = new TextEncoder();
   const flux = new ReadableStream<Uint8Array>({
     async start(c) {
       const envoyer = (e: Evenement) => c.enqueue(enc.encode(JSON.stringify(e) + "\n"));
       try {
-        for await (const e of boucleAgent({ client, modele: process.env.RADAR_AGENT_MODEL?.trim() || openaiModel(), systeme, tours, bases: radar.bases, signal: request.signal })) envoyer(e);
+        const boucle = claude
+          ? boucleAgentClaude({ ...options, modele: modeleClaude(process.env.RADAR_CLAUDE_MODEL) })
+          : boucleAgent({ ...options, client: client!, modele: process.env.RADAR_AGENT_MODEL?.trim() || openaiModel() });
+        for await (const e of boucle) envoyer(e);
       } catch (e) {
         if (!request.signal.aborted) {
           console.error("[api/radar/agent]", e instanceof Error ? e.message : e);

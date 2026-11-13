@@ -308,7 +308,8 @@ export async function readDeskData(scope: DeskScope, question: string) {
 }
 
 export function cleanDeskText(value: string, projects: Projet[]) {
+  const sansJeton = value.replace(/(?:https?:\/\/[^\s<>()]+)?\/q\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:\?[^\s<>()]*)?/gi, "[lien voyageur masqué]");
   return projects.reduce((text, p) => anonymizeAgencyText(text, {
     traveler_name: p.nom, email: p.email ?? undefined, phone: p.tel ?? undefined,
-  }), value);
+  }), anonymizeAgencyText(sansJeton, {}));
 }

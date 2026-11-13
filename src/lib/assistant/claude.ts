@@ -1,4 +1,5 @@
 import "server-only";
+import { appelClaude, claudeDisponible } from "@/lib/ai/claude";
 import { ASSISTANT_DRAFT_KINDS, isAssistantDraftKind, parseAssistantEdit, type AssistantDraftKind, type AssistantEdit, type AssistantTurn } from "@/lib/assistant/types";
 import { parseQualificationImport, QUALIFICATION_TEXT_FIELDS } from "@/lib/assistant/qualification";
 
@@ -20,30 +21,11 @@ export function parseAssistantAnswer(raw: string): AssistantAnswer | null {
 }
 
 export function claudeConfigured() {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  return claudeDisponible();
 }
 
 async function requestClaude(payload: Record<string, unknown>): Promise<unknown> {
-  const key = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!key) throw new Error("Claude n’est pas configuré.");
-  const workspace = process.env.ANTHROPIC_WORKSPACE_ID?.trim();
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": key,
-      "anthropic-version": "2026-10-21",
-      "content-type": "application/json",
-      ...(workspace ? { "anthropic-workspace-id": workspace } : {}),
-    },
-    body: JSON.stringify({ model: process.env.DESK_CLAUDE_MODEL?.trim() || "claude-sonnet-5-5", ...payload }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) {
-    console.warn("[DA Sales] Claude HTTP", response.status, response.headers.get("request-id"));
-    throw new Error("Claude est indisponible.");
-  }
-  return response.json();
+  return appelClaude(payload, { timeoutMs: 12_000, journal: "DA Sales" });
 }
 
 export async function testClaudeConnection() {

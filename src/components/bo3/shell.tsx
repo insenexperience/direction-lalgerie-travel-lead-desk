@@ -2,16 +2,19 @@
 
 import dynamic from "next/dynamic";
 import Link, { useLinkStatus } from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { deskScopeForPath, type DeskProjectTab } from "@/lib/assistant/scope";
+import { deskScopeForPath, isDeskTab, type DeskProjectTab, type DeskScope } from "@/lib/assistant/scope";
 import { AssistantConnectionProvider } from "@/components/assistant/assistant-connection";
+import { AgentRadar } from "@/components/radar/agent";
+import { RadarAgentProvider } from "@/components/radar/contexte";
 import { DeskToastProvider, useDeskToast } from "@/components/ui/desk-toast";
 import "@/styles/desk-assistant.css";
+import "@/styles/radar.css";
 import { createClient } from "@/lib/supabase/client";
 import { Icon, ToastProvider } from "./ui";
 
-const AssistantBubble = dynamic(() => import("@/components/assistant/assistant-bubble").then((m) => m.AssistantBubble), { ssr: false });
+const AssistantProjectActions = dynamic(() => import("@/components/assistant/assistant-bubble").then((m) => m.AssistantProjectActions));
 const LeadIntakeModal = dynamic(() => import("@/components/leads/lead-intake-modal").then((m) => m.LeadIntakeModal), {
   ssr: false,
   loading: () => <div className="desk-opening" role="status">Ouverture du formulaire…</div>,
@@ -93,6 +96,7 @@ export function Bo3Shell({ children, navigation, user, apercu }: Props) {
   const v3 = V3.some((r) => r.test(pathname));
   const actif = pathname.startsWith("/leads/") ? "/inbox" : pathname.startsWith("/radar") ? "/radar" : pathname;
   const leadKey = /^\/leads\/([^/]+)(?:\/workflow)?$/.exec(pathname)?.[1];
+  const peutUtiliserAgent = !apercu && (user.role === "admin" || user.role === "lead_referent");
 
   return (
     <ToastProvider>
@@ -110,8 +114,10 @@ export function Bo3Shell({ children, navigation, user, apercu }: Props) {
               apercu={apercu}
             />
             <AssistantConnectionProvider>
-              <div className="desk-main">{v3 ? children : <main className="legacy">{children}</main>}</div>
-              {!apercu && <Suspense><DeskAssistant navigation={navigation} leadKey={leadKey} pathname={pathname} onNewProject={() => setNouveau(true)} /></Suspense>}
+              <RadarAgentProvider>
+                <div className="desk-main">{v3 ? children : <main className="legacy">{children}</main>}</div>
+                {peutUtiliserAgent && <Suspense><DeskAgent navigation={navigation} leadKey={leadKey} pathname={pathname} onNewProject={() => setNouveau(true)} /></Suspense>}
+              </RadarAgentProvider>
             </AssistantConnectionProvider>
           </div>
         </div>
@@ -142,10 +148,19 @@ function DeskNewProjectModal({ onClose }: { onClose: () => void }) {
   }} />;
 }
 
-function DeskAssistant({ navigation, leadKey, pathname, onNewProject }: { navigation: Props["navigation"]; leadKey?: string; pathname: string; onNewProject: () => void }) {
-  const { projets, agences } = use(navigation);
-  const lead = leadKey ? projets.find(({ id, ref }) => id === leadKey || ref === leadKey) : undefined;
-  return <AssistantBubble lead={lead} projects={projets} agencies={agences} surface={deskScopeForPath(pathname)} onNewProject={onNewProject} />;
+function DeskAgent({ navigation, leadKey, pathname, onNewProject }: { navigation: Props["navigation"]; leadKey?: string; pathname: string; onNewProject: () => void }) {
+  const navigationDossier = leadKey ? use(navigation) : null;
+  const urlTab = useSearchParams().get("tab");
+  const lead = navigationDossier?.projets.find(({ id, ref }) => id === leadKey || ref === leadKey);
+  const tab = isDeskTab(urlTab) ? urlTab : lead?.tab ?? "trame";
+  const scope: DeskScope = lead ? { screen: "project", leadId: lead.id, tab } : deskScopeForPath(pathname);
+  return <AgentRadar
+    scope={scope}
+    referenceDossier={lead?.ref}
+    dossierFerme={lead?.closed}
+    onNewProject={onNewProject}
+    projectActions={lead && navigationDossier && <AssistantProjectActions key={lead.id} lead={lead} agencies={navigationDossier.agences} tab={tab} visibleProject={!pathname.endsWith("/workflow")} />}
+  />;
 }
 
 function NavBadge({ navigation, field }: { navigation: Props["navigation"]; field: "file" | "projets" }) {

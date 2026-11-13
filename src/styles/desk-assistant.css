@@ -36,8 +36,6 @@
   box-shadow: -8px 0 32px rgba(15, 28, 36, .06);
   animation: desk-assistant-open .22s var(--ease) both;
 }
-.bo3:has(.rdag) .desk-assistant__trigger { inset-inline-end: max(88px, env(safe-area-inset-right)); }
-.bo3:has(.desk-assistant__panel:not([hidden])) .rdag { visibility: hidden; }
 @keyframes desk-assistant-open {
   from { opacity: .55; transform: translateX(12px); }
   to { opacity: 1; transform: translateX(0); }

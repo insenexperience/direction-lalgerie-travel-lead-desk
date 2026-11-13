@@ -11,6 +11,7 @@ type GmailPart = {
 export type GmailMessage = {
   threadId?: string;
   internalDate?: string;
+  snippet?: string;
   labelIds?: string[];
   payload?: GmailPart;
 };

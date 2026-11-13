@@ -37,6 +37,43 @@ async function token(signal: AbortSignal) {
   return accessToken;
 }
 
+async function connectDeskGmail(signal: AbortSignal) {
+  const accessToken = await token(signal);
+  async function get<T>(path: string): Promise<T> {
+    const response = await fetch(API + path, {
+      headers: { Authorization: "Bearer " + accessToken }, cache: "no-store", signal,
+    });
+    if (!response.ok) throw new GmailError(response.status);
+    return response.json() as Promise<T>;
+  }
+  const profile = await get<{ emailAddress: string; historyId: string }>("/profile");
+  if (profile.emailAddress?.toLowerCase() !== DESK_MAILBOX) throw new Error("Unexpected Gmail account");
+  return { get, profile };
+}
+
+/** Recherche en lecture seule dans la boîte partagée. L'appelant vérifie les droits. */
+export async function searchDeskGmail(terms: string, days: number, requestSignal?: AbortSignal) {
+  const timeout = AbortSignal.timeout(10_000);
+  const signal = requestSignal ? AbortSignal.any([requestSignal, timeout]) : timeout;
+  const { get } = await connectDeskGmail(signal);
+  const query = new URLSearchParams({
+    q: ["newer_than:" + days + "d", "-in:sent", "-in:drafts", terms].filter(Boolean).join(" "),
+    maxResults: "8",
+    includeSpamTrash: "false",
+  });
+  const result = await get<{ messages?: { id: string }[]; nextPageToken?: string }>("/messages?" + query);
+  const ids = (result.messages ?? []).slice(0, 8).map(({ id }) => id).filter(id => /^[a-f0-9]+$/i.test(id));
+  const messages = await Promise.all(ids.map(async id => {
+    try {
+      return await get<GmailMessage>("/messages/" + id + "?format=full");
+    } catch (error) {
+      if (error instanceof GmailError && error.status === 404) return null;
+      throw error;
+    }
+  }));
+  return { messages: messages.filter(message => message !== null), more: Boolean(result.nextPageToken) };
+}
+
 type History = {
   historyId: string;
   nextPageToken?: string;
@@ -59,16 +96,7 @@ export async function syncDeskGmail(db: SupabaseClient) {
   const cursor = state?.history_id as string | undefined;
   let expired = false;
   try {
-    const accessToken = await token(signal);
-    async function get<T>(path: string): Promise<T> {
-      const response = await fetch(API + path, {
-        headers: { Authorization: "Bearer " + accessToken }, cache: "no-store", signal,
-      });
-      if (!response.ok) throw new GmailError(response.status);
-      return response.json() as Promise<T>;
-    }
-    const profile = await get<{ emailAddress: string; historyId: string }>("/profile");
-    if (profile.emailAddress?.toLowerCase() !== DESK_MAILBOX) throw new Error("Unexpected Gmail account");
+    const { get, profile } = await connectDeskGmail(signal);
 
     if (!cursor) {
       const { error: initializeError } = await db.from("desk_gmail_sync")
