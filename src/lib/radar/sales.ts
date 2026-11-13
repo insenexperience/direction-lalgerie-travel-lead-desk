@@ -1,6 +1,5 @@
 import "server-only";
 import { readDeskData, cleanDeskText } from "@/lib/assistant/desk-data";
-import { DESK_SURFACES, type DeskSurface } from "@/lib/assistant/scope";
 import { parseAssistantEdit, type AssistantEditPreview } from "@/lib/assistant/types";
 import { donneesDossiersBo3 } from "@/lib/bo3/donnees";
 import type { Proposition } from "./types";
@@ -12,22 +11,54 @@ import type { Proposition } from "./types";
  * (note interne ou priorité) que l'opérateur valide ; confirmAssistantEdit revalide tout.
  */
 
-const ECRANS = Object.keys(DESK_SURFACES).filter((k) => !["contacts", "team", "settings"].includes(k)) as DeskSurface[];
-export const ECRANS_DESK = ECRANS;
+export const ECRANS_DESK = ["file", "projects", "pilot", "radar", "agencies", "quotes"] as const;
+const LIMITE_DESK = 24_000;
 
 export async function consulterDesk(question: string, ecran: unknown): Promise<string> {
-  const screen: DeskSurface = ECRANS.includes(ecran as DeskSurface) ? (ecran as DeskSurface) : "projects";
+  const screen = ECRANS_DESK.find((item) => item === ecran) ?? "projects";
   const lu = await readDeskData({ screen }, question.slice(0, 1600));
   if (!lu) return "Erreur : Desk indisponible pour cette session (droits ou chargement).";
   const { view, projets, model } = lu;
+  const nettoyer = (texte: string) => cleanDeskText(texte, projets);
   const sortie = {
-    titre: view.heading,
-    constat: view.summary,
-    dossiers: view.items.map(({ reference, title, detail, tag }) => ({ reference, titre: title, detail, etape: tag })),
-    dossier: model,
-    emails: view.inbound?.slice(0, 8).map((m) => ({ recu: m.received_at, type: m.kind, objet: m.subject, extrait: m.excerpt.slice(0, 1200), pieces: m.attachments })),
+    titre: nettoyer(view.heading).slice(0, 500),
+    constat: nettoyer(view.summary).slice(0, 1200),
+    dossiers: view.items.map(({ reference, title, detail, tag }) => ({
+      reference: reference === undefined ? undefined : nettoyer(reference),
+      titre: nettoyer(title),
+      detail: detail === undefined ? undefined : nettoyer(detail),
+      etape: tag === undefined ? undefined : nettoyer(tag),
+    })),
+    dossier: model && (JSON.parse(JSON.stringify(model, (_cle, valeur: unknown) =>
+      typeof valeur === "string" ? nettoyer(valeur) : valeur)) as Record<string, unknown>),
+    emails: view.inbound?.slice(0, 8).map((m) => ({
+      recu: m.received_at,
+      type: m.kind,
+      objet: nettoyer(m.subject),
+      extrait: nettoyer(m.excerpt).slice(0, 1200),
+      pieces: m.attachments.map(nettoyer),
+    })),
   };
-  return cleanDeskText(JSON.stringify(sortie), projets).slice(0, 24_000);
+  const json = JSON.stringify(sortie);
+  if (json.length <= LIMITE_DESK) return json;
+
+  const tronque = { ...sortie, tronque: true };
+  let extrait = JSON.stringify(tronque);
+  // Retire des entrées entières pour conserver un résultat JSON valide.
+  for (const lignes of [tronque.emails, tronque.dossiers]) {
+    while (extrait.length > LIMITE_DESK && lignes?.length) {
+      lignes.pop();
+      extrait = JSON.stringify(tronque);
+    }
+  }
+  if (tronque.dossier) {
+    for (const cle of Object.keys(tronque.dossier).reverse()) {
+      if (extrait.length <= LIMITE_DESK) break;
+      delete tronque.dossier[cle];
+      extrait = JSON.stringify(tronque);
+    }
+  }
+  return extrait;
 }
 
 type Prep = { ok: true; p: Proposition } | { ok: false; erreur: string };
@@ -47,15 +78,16 @@ export async function preparerActionDossier(reference: unknown, action: unknown,
   if (lead.closed_at || lead.status === "won" || lead.status === "lost" || !lead.referent_id || (!admin && lead.referent_id !== data.ctx.userId)) {
     return { ok: false, erreur: "seul le référent du dossier ou un administrateur peut le modifier, et le dossier doit être ouvert et attribué." };
   }
-  const previous = edit.kind === "priority" ? (lead.priority ?? "normal") : null;
-  const apercu: AssistantEditPreview = { leadId: projet.id, updatedAt: lead.updated_at, edit, previous };
-  const texte = edit.kind === "note" ? cleanDeskText(edit.value, data.projets) : edit.value;
+  const nettoyee = edit.kind === "note" ? parseAssistantEdit("note", cleanDeskText(edit.value, data.projets)) : edit;
+  if (!nettoyee || nettoyee.kind === "budget") return { ok: false, erreur: "La note anonymisée dépasse 2 000 caractères." };
+  const previous = nettoyee.kind === "priority" ? (lead.priority ?? "normal") : null;
+  const apercu: AssistantEditPreview = { leadId: projet.id, updatedAt: lead.updated_at, edit: nettoyee, previous };
   const p: Proposition = {
     id: seq(), kind: "dossier", ref: projet.ref, titre: `Dossier ${projet.ref}`, apercu,
-    lignes: [edit.kind === "note"
-      ? { champ: "Note interne (ajoutée)", avant: "", apres: texte }
-      : { champ: "Priorité", avant: previous === "high" ? "haute" : "normale", apres: edit.value === "high" ? "haute" : "normale" }],
-    raison: raison ? String(raison).slice(0, 600) : undefined,
+    lignes: [nettoyee.kind === "note"
+      ? { champ: "Note interne à ajouter", avant: "", apres: nettoyee.value }
+      : { champ: "Priorité", avant: previous === "high" ? "haute" : "normale", apres: nettoyee.value === "high" ? "haute" : "normale" }],
+    raison: typeof raison === "string" ? cleanDeskText(raison, data.projets).trim().slice(0, 600) || undefined : undefined,
   };
   return { ok: true, p };
 }

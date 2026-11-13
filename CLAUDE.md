@@ -52,7 +52,7 @@ RLS policies restrict row access by `auth.uid()`. The service role client bypass
 ```
 Intake (web form or WhatsApp) → new
   ↓ Referent assigned
-Qualification (AI via OpenAI) → qualification
+Qualification (AI via Claude) → qualification
   ↓ AI scores agencies
 Agency Assignment → agency_assignment
   ↓ Agencies invited (consultations table)
@@ -69,11 +69,11 @@ won / lost / negotiation
 
 **WhatsApp**: `POST /api/whatsapp/webhook/route.ts` (GET for challenge verification, POST for messages) → `lib/leads-whatsapp-inbound.ts` → find/create lead → trigger AI qualification.
 
-**AI**: `src/lib/ai/claude.ts` is the shared Claude client (Messages API via fetch, `ANTHROPIC_API_KEY`, `DESK_CLAUDE_MODEL`). `src/lib/ai/agent.ts` `completeJson` uses Claude first and falls back to OpenAI (`DESK_AI_PROVIDER=openai` forces OpenAI). Prompts in `src/lib/ai/prompts/`. Server-only; never expose keys to the client. If no key is set, AI features degrade gracefully.
+**AI**: `src/lib/ai/claude.ts` is the shared Claude client (Messages API via fetch, `ANTHROPIC_API_KEY`, `DESK_CLAUDE_MODEL`). `src/lib/ai/agent.ts` `completeJson` uses Claude first and falls back to OpenAI. Set `DESK_AI_PROVIDER=openai` to force OpenAI for business AI and the Radar. DA Sales uses Claude. Prompts in `src/lib/ai/prompts/`. Server-only; never expose keys to the client. If no key is set, AI features degrade gracefully.
 
 **PDF**: `GET /api/leads/[leadId]/quotes/[quoteId]/pdf/route.tsx` → `@react-pdf/renderer` → buffer → optional storage in `quote_pdfs` bucket. When `quotes.items` is the v3 object (`{ v: 3, … }`), the PDF is the "Proposition de voyage" of Direction l'Algérie with the partnership mention; otherwise the legacy table. PDF packages are listed in `next.config.ts` as `serverExternalPackages`.
 
-**Radar module** (`/radar`, since 2026-10-31): internal tool for the five Notion databases of the "Radar Direction l'Algérie" (signals, actors, events, partnerships, content ideas). Read and written directly in Notion server-side (`src/lib/radar/notion-api.ts`, `NOTION_TOKEN`), cached 60 s with `unstable_cache` and purged by `updateTag` in the server actions (`src/app/(dashboard)/radar/actions.ts`). Screens in `src/components/radar/`, styles in `src/styles/radar.css` (hand-written, scoped `.bo3 .rd-*` / `.rdag`). The **agent DA** (`POST /api/radar/agent`, NDJSON stream, Claude with tools via `boucleAgentClaude`, OpenAI `boucleAgent` as fallback) reads the radar, an aggregated desk summary, the private Notion page "Contexte de l'agent DA" and, through `src/lib/radar/sales.ts`, the Desk (DA Sales) with the operator's rights: `consulter_desk` reuses `readDeskData` and anonymizes traveler names, e-mails and phones; `proposer_action_dossier` proposes an internal note or a priority change. It only *proposes* writes: radar ones are applied by `appliquerProposition`, dossier ones by `confirmAssistantEdit` (referent or admin, DA Sales must be enabled in Settings). The repo is public: project context lives in Notion, never in the code. Unit tests: `npx tsx --test src/lib/radar/radar.test.ts src/components/radar/md.test.tsx`.
+**Radar module** (`/radar`, since 2026-10-31): internal tool for the five Notion databases of the "Radar Direction l'Algérie" (signals, actors, events, partnerships, content ideas). Read and written directly in Notion server-side (`src/lib/radar/notion-api.ts`, `NOTION_TOKEN`), cached 60 s with `unstable_cache` and purged by `updateTag` in the server actions (`src/app/(dashboard)/radar/actions.ts`). Screens in `src/components/radar/`, styles in `src/styles/radar.css` (hand-written, scoped `.bo3 .rd-*` / `.rdag`). The **agent DA** (`POST /api/radar/agent`, NDJSON stream, Claude with tools via `boucleAgentClaude`, OpenAI `boucleAgent` when selected or when the Claude key is absent) reads the radar, an aggregated desk summary, the private Notion page "Contexte de l'agent DA" and, through `src/lib/radar/sales.ts`, the Desk (DA Sales) with the operator's rights: `consulter_desk` reuses `readDeskData` and anonymizes traveler names, e-mails and phones; `proposer_action_dossier` proposes an internal note or a priority change. It only *proposes* writes: radar ones are applied by `appliquerProposition`, dossier ones by `confirmAssistantEdit` (referent or admin, DA Sales must be enabled in Settings). The repo is public: project context lives in Notion, never in the code. Unit tests: `npx tsx --test src/lib/radar/radar.test.ts src/components/radar/md.test.tsx`.
 
 **Traveler requalification page**: public, client-facing page `GET /q/[token]` (hosted on `app.directionlalgerie.com` alongside the desk) where the traveler completes qualification instead of replying to a long email. Operator generates a per-lead token from the cockpit (`generateTravelerLink` in `leads/actions.ts`); the page + `POST /api/q/[token]` use the **service role** (public, no session — `middleware.ts` skips `updateSession` on `/q/*`). Responses land on `leads.traveler_responses` (JSONB) and show read-only in the cockpit dossier. With `?champs=dates,groupe,budget,lieux` (v3), the page shows a short form limited to what the trame lacks, posted to `POST /api/q/[token]/champs`, which fills `ai_qualification_payload.trame_v3`. Validation/typing in `src/lib/traveler-requalification.ts`; option ids reuse `qualification-blocks-config.ts`. Env: `NEXT_PUBLIC_TRAVELER_BASE_URL`. Docs: `docs/SPEC_PAGE_VOYAGEUR_REQUALIFICATION.md`.
 
@@ -135,11 +135,12 @@ TRAVELER_ACK_ENABLED=0         # 1 = automatic acknowledgment e-mail to the trav
 BO3_APERCU_LOCAL=              # 1 = preview without login, development only
 NOTION_TOKEN=                  # Notion internal integration shared with the Radar page (radar module + agent)
 NOTION_RADAR_CONTEXTE_PAGE_ID= # optional: Notion page holding the agent context (default: "Contexte de l'agent DA")
-RADAR_AGENT_MODEL=             # optional: OpenAI model for the radar agent, fallback only (default OPENAI_MODEL)
+RADAR_AGENT_MODEL=             # optional: model for the Radar agent when it uses OpenAI (default OPENAI_MODEL)
 ANTHROPIC_API_KEY=             # Claude: radar agent, DA Sales, completeJson (priority over OpenAI)
+ANTHROPIC_WORKSPACE_ID=        # optional Anthropic workspace
 DESK_CLAUDE_MODEL=             # default claude-sonnet-5-5
 RADAR_CLAUDE_MODEL=            # optional: Claude model for the radar agent
-DESK_AI_PROVIDER=              # optional: "openai" forces OpenAI everywhere
+DESK_AI_PROVIDER=              # optional: "openai" forces OpenAI for business AI and the Radar
 ```
 
 See `.env.example` for full list.

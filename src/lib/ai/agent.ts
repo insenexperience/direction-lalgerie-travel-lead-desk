@@ -29,7 +29,6 @@ export async function completeJson(
     try {
       const r = await appelClaude({
         max_tokens: 4000,
-        temperature: 0.3,
         system: system + "\n\nRéponds uniquement par l'objet JSON demandé, sans texte autour.",
         messages: [{ role: "user", content: user }],
       }, { timeoutMs: 50_000, journal: "IA Desk" });

@@ -60,7 +60,28 @@ export function texteClaude(r: ReponseClaude): string {
   return (r.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
 }
 
-export type EvenementFlux = { type: string; index?: number; content_block?: { type: string; id?: string; name?: string; text?: string }; delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: string } };
+export type EvenementFlux = {
+  type: string;
+  index?: number;
+  content_block?: {
+    type: string;
+    id?: string;
+    name?: string;
+    text?: string;
+    input?: unknown;
+    thinking?: string;
+    signature?: string;
+    data?: string;
+  };
+  delta?: {
+    type?: string;
+    text?: string;
+    partial_json?: string;
+    stop_reason?: string;
+    thinking?: string;
+    signature?: string;
+  };
+};
 
 /** Appel diffusé (SSE). Renvoie les événements bruts de l'API, dans l'ordre. */
 export async function* fluxClaude(payload: Record<string, unknown>, signal?: AbortSignal): AsyncGenerator<EvenementFlux> {
@@ -77,19 +98,27 @@ export async function* fluxClaude(payload: Record<string, unknown>, signal?: Abo
   }
   const lecteur = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let reste = "";
-  for (;;) {
-    const { value, done } = await lecteur.read();
-    if (done) break;
-    reste += value;
-    const blocs = reste.split(/\r?\n\r?\n/);
-    reste = blocs.pop() ?? "";
-    for (const bloc of blocs) {
-      const donnees = bloc.split(/\r?\n/).filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("");
-      if (!donnees) continue;
-      let ev: EvenementFlux;
-      try { ev = JSON.parse(donnees); } catch { continue; }
-      if (ev.type === "error") throw new Error("Claude a interrompu la réponse.");
-      yield ev;
+  try {
+    for (;;) {
+      const { value, done } = await lecteur.read();
+      if (done) break;
+      reste += value;
+      const blocs = reste.split(/\r?\n\r?\n/);
+      reste = blocs.pop() ?? "";
+      for (const bloc of blocs) {
+        const lignes = bloc.split(/\r?\n/);
+        if (lignes.some((ligne) => /^event: ?error$/.test(ligne))) {
+          throw new Error("Claude a interrompu la réponse.");
+        }
+        const donnees = lignes.filter((ligne) => ligne.startsWith("data:")).map((ligne) => ligne.replace(/^data: ?/, "")).join("\n");
+        if (!donnees) continue;
+        const ev = JSON.parse(donnees) as EvenementFlux;
+        if (ev.type === "error") throw new Error("Claude a interrompu la réponse.");
+        yield ev;
+      }
     }
+  } finally {
+    await lecteur.cancel().catch(() => undefined);
+    lecteur.releaseLock();
   }
 }
